@@ -5,7 +5,7 @@ from database import get_db
 from models.models import Player, Tournament, TournamentParticipant, Group
 from schemas import PlayerCreate, PlayerOut
 from routers.auth import verify_token
-from routers.tournaments import assign_group_name, _group_counts
+from routers.tournaments import assign_group_and_subgroup, _group_counts
 
 router = APIRouter()
 
@@ -28,7 +28,6 @@ def create_player(
     authorization: Optional[str] = Header(None),
 ):
     require_admin(authorization)
-
     db_player = Player(**player.model_dump())
     db.add(db_player)
     db.flush()
@@ -42,18 +41,17 @@ def create_player(
         ).first()
         if existing:
             continue
-
         counts = _group_counts(tournament.tournament_id, db)
-        group_name = assign_group_name(db_player.age, db_player.gender, counts)
+        group_name, sub_group = assign_group_and_subgroup(db_player.age, db_player.gender, counts)
         group = db.query(Group).filter(
             Group.tournament_id == tournament.tournament_id,
             Group.name == group_name,
         ).first()
-
         participant = TournamentParticipant(
             tournament_id=tournament.tournament_id,
             player_id=db_player.player_id,
             group_id=group.group_id if group else None,
+            sub_group=sub_group,
         )
         db.add(participant)
 
@@ -72,6 +70,10 @@ def delete_player(
     player = db.query(Player).filter(Player.player_id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
+    # Explicitly delete dependent rows first to avoid FK nullification by SQLAlchemy
+    db.query(TournamentParticipant).filter(
+        TournamentParticipant.player_id == player_id
+    ).delete(synchronize_session=False)
     db.delete(player)
     db.commit()
     return {"ok": True}
