@@ -12,6 +12,25 @@ function bucket(s) {
   if (s === "done" || s === "completed") return "done";
   return "upcoming";
 }
+// Player category tag
+function playerCategoryTag(player, groupName) {
+  if (!player) return null;
+  const sg = player.sub_group;
+  if (groupName === "Group D" && sg) {
+    return (
+      <span style={{
+        fontSize: 9, fontWeight: 700, marginLeft: 4,
+        background: sg === "women" ? "#fde8f0" : "#e8f0fd",
+        color: sg === "women" ? "#c0392b" : "#2d5a27",
+        padding: "1px 4px", borderRadius: 3,
+      }}>
+        {sg === "boys" ? "U18" : "W"}
+      </span>
+    );
+  }
+  return null;
+}
+
 function getServe(s1, s2) {
   const total = s1 + s2, isDeuce = s1 >= 10 && s2 >= 10;
   if (isDeuce) return total % 2 === 0 ? 1 : 2;
@@ -19,10 +38,10 @@ function getServe(s1, s2) {
 }
 
 const GROUP_LABELS = {
-  "Group A": "Boys U18 & Women",
-  "Group B": "Men 18–29",
-  "Group C": "Men 18–29",
-  "Group D": "Men 30+",
+  "Group A": "Men Under 30",
+  "Group B": "Men Under 30",
+  "Group C": "Men 30+",
+  "Group D": "Boys U18 & Women",
 };
 
 function activeSet(m) { return (m.sets ?? []).find(s => s.winner_position === null); }
@@ -71,7 +90,8 @@ export default function PublicPortal() {
   const totalPlayers     = groups.reduce((s, g) => s + g.players.length, 0);
   const activeTournament = tournaments.find(t => t.tournament_id === activeTId);
   const groupMatches     = matches.filter(m => m.stage === "group");
-  const koMatches        = matches.filter(m => m.stage !== "group");
+  const byeMatches       = matches.filter(m => m.stage === "bye");
+  const koMatches        = matches.filter(m => m.stage !== "group" && m.stage !== "bye");
 
   const defaultTab = liveMatches.length > 0 ? "live" : "schedule";
   const tab = validTabs.includes(hashTab) ? hashTab : defaultTab;
@@ -203,15 +223,33 @@ export default function PublicPortal() {
                 )}
                 {/* Group stage below KO */}
                 {groups.map(g => {
-                  const gm = groupMatches.filter(m => m.group_id === g.group_id);
-                  if (gm.length === 0) return null;
-                  const live     = gm.filter(m => bucket(m.status) === "live");
-                  const upcoming = gm.filter(m => bucket(m.status) === "upcoming").sort((a,b) => a.match_id - b.match_id);
-                  const done     = gm.filter(m => bucket(m.status) === "done").sort((a,b) => b.match_id - a.match_id);
+                  const gm    = groupMatches.filter(m => m.group_id === g.group_id);
+                  const gbyes = byeMatches.filter(m => m.group_id === g.group_id);
+                  if (gm.length === 0 && gbyes.length === 0) return null;
+
+                  // Group by round
+                  const roundNums = [...new Set([...gm, ...gbyes].map(m => m.round ?? 1))].sort((a,b)=>a-b);
+
                   return (
                     <div key={g.group_id} style={{ marginBottom: 28 }}>
                       <GroupHeader group={g} matches={gm} />
-                      <Section matches={[...live, ...upcoming, ...done]} />
+                      {roundNums.map(round => {
+                        const rm    = gm.filter(m => (m.round ?? 1) === round);
+                        const rbyes = gbyes.filter(m => (m.round ?? 1) === round);
+                        const live     = rm.filter(m => bucket(m.status) === "live");
+                        const upcoming = rm.filter(m => bucket(m.status) === "upcoming").sort((a,b) => a.match_id - b.match_id);
+                        const done     = rm.filter(m => bucket(m.status) === "done").sort((a,b) => b.match_id - a.match_id);
+                        return (
+                          <div key={round} style={{ marginBottom: 12 }}>
+                            <div style={{
+                              fontSize: 11, fontWeight: 800, color: "#7a6a50",
+                              letterSpacing: 2, textTransform: "uppercase",
+                              marginBottom: 6, paddingLeft: 2,
+                            }}>Round {round}</div>
+                            <Section label={g.group_name} matches={[...live, ...upcoming, ...done, ...rbyes]} />
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })}
@@ -264,26 +302,79 @@ export default function PublicPortal() {
         )}
       </div>
 
-      <footer style={{ background: "#2d5a27", borderTop: "2px solid #1e3d1a", padding: "12px 16px" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex",
-                      justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <a href={`https://instagram.com/${INSTAGRAM_HANDLE}`} target="_blank" rel="noopener noreferrer"
-            style={{ display: "flex", alignItems: "center", gap: 7, textDecoration: "none",
-                     background: "linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)",
-                     padding: "6px 14px", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 13 }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                 strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
-              <circle cx="12" cy="12" r="4"/>
-              <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/>
-            </svg>
-            @{INSTAGRAM_HANDLE}
-          </a>
-          <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>
-            Refreshes every 5s{lastUpdated && ` · ${lastUpdated.toLocaleTimeString()}`}
-          </span>
+     <footer style={{ borderTop: "3px solid #d4a017" }}>
+
+  <div style={{ background: "#2d5a27", display: "flex", alignItems: "stretch", overflow: "hidden", flexWrap: "wrap" }}>
+
+    {/* Photo */}
+    <div style={{ width: "clamp(72px, 10vw, 100px)", flexShrink: 0, background: "rgba(0,0,0,0.15)", overflow: "hidden", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <img src="/sponsortt.png" alt="C.F. Joyson"
+        style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }}
+        onError={e => e.target.style.display = "none"} />
+    </div>
+
+    {/* Identity */}
+    <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "14px 18px", gap: 14, minWidth: 180 }}>
+      <div style={{ width: 5, background: "#d4a017", borderRadius: 3, flexShrink: 0, alignSelf: "stretch" }} />
+      <div>
+        <div className="sponsor-eyebrow">Title Sponsor</div>
+        <div className="sponsor-name-footer">C.F. Joyson</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+          {["Life Insurance", "Health Insurance", "General Insurance"].map(s => (
+            <span key={s} style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.6)", background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)", padding: "2px 9px", borderRadius: 20 }}>{s}</span>
+          ))}
         </div>
-      </footer>
+      </div>
+    </div>
+
+    {/* Stats */}
+    <div className="sponsor-stats-footer">
+      {[["700+", "Happy Clients"], ["450+", "Claims Settled"], ["15+", "Yrs Experience"]].map(([num, label], i) => (
+        <div key={num} className="sponsor-stat-item">
+          <div style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 900, color: "#d4a017", lineHeight: 1 }} className="sponsor-stat-num">{num}</div>
+          <div style={{ fontWeight: 700, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "1.5px", marginTop: 2 }} className="sponsor-stat-label">{label}</div>
+        </div>
+      ))}
+    </div>
+  </div>
+
+  {/* Ticker */}
+  <div style={{ background: "#e8dfc8", borderTop: "1.5px solid #cfc0a0", overflow: "hidden", position: "relative", padding: "9px 0" }}>
+    <div style={{ position: "absolute", top: 0, bottom: 0, left: 0, width: 40, zIndex: 2, pointerEvents: "none", background: "linear-gradient(to right, #e8dfc8, transparent)" }} />
+    <div style={{ position: "absolute", top: 0, bottom: 0, right: 0, width: 40, zIndex: 2, pointerEvents: "none", background: "linear-gradient(to left, #e8dfc8, transparent)" }} />
+    <div style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", animation: "sponsorTicker 20s linear infinite" }}>
+      {[0, 1].map(copy => (
+        <span key={copy} style={{ display: "inline-flex", alignItems: "center" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "0 28px", fontSize: 12, fontWeight: 600, color: "#7a6a50" }}>📞 <strong style={{ color: "#2d5a27" }}>9323983926</strong> / 93244 48154</span>
+          <span style={{ color: "#d4a017", fontSize: 10 }}>✦</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "0 28px", fontSize: 12, fontWeight: 600, color: "#7a6a50" }}>✉️ <strong style={{ color: "#2d5a27" }}>cfjoyson@gmail.com</strong></span>
+          <span style={{ color: "#d4a017", fontSize: 10 }}>✦</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "0 28px", fontSize: 12, fontWeight: 600, color: "#7a6a50" }}>🛡️ Life · Health · General Insurance</span>
+          <span style={{ color: "#d4a017", fontSize: 10 }}>✦</span>
+        </span>
+      ))}
+    </div>
+  </div>
+
+  <style>{`
+    @keyframes sponsorTicker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    .sponsor-eyebrow { font-family: 'Barlow Condensed', sans-serif; font-size: 11px; font-weight: 800; letter-spacing: 4px; text-transform: uppercase; color: #d4a017; opacity: 0.85; margin-bottom: 2px; }
+    .sponsor-name-footer { font-family: 'Barlow Condensed', sans-serif; font-size: 42px; font-weight: 900; color: #fff; letter-spacing: 1px; line-height: 1; }
+    .sponsor-stats-footer { display: flex; align-items: center; flex-shrink: 0; padding-right: 8px; }
+    .sponsor-stat-item { text-align: center; padding: 10px 18px; border-left: 1px solid rgba(255,255,255,0.12); }
+    .sponsor-stat-num { font-size: 32px; }
+    .sponsor-stat-label { font-size: 9px; }
+    @media (max-width: 600px) {
+      .sponsor-name-footer { font-size: 26px; }
+      .sponsor-eyebrow { font-size: 9px; letter-spacing: 3px; }
+      .sponsor-stats-footer { width: 100%; padding: 0; border-top: 1px solid rgba(255,255,255,0.1); justify-content: stretch; }
+      .sponsor-stat-item { flex: 1; padding: 8px 4px; border-left: none; border-right: 1px solid rgba(255,255,255,0.12); }
+      .sponsor-stat-item:last-child { border-right: none; }
+      .sponsor-stat-num { font-size: 22px; }
+      .sponsor-stat-label { font-size: 8px; letter-spacing: 1px; }
+    }
+  `}</style>
+</footer>
     </div>
   );
 }
@@ -513,12 +604,36 @@ function Section({ label = "", matches }) {
   return (
     <section style={{ marginBottom: 8 }}>
       {label && <div className="section-label">{label}</div>}
-      {matches.map((m, i) => <MatchRow key={m.match_id ?? i} m={m} />)}
+      {matches.map((m, i) => <MatchRow key={m.match_id ?? i} m={m} groupName={label} />)}
     </section>
   );
 }
 
-function MatchRow({ m }) {
+function MatchRow({ m, groupName }) {
+  // Special rendering for bye
+  if (m.stage === "bye") {
+    const bp = m.participants?.[0];
+    return (
+      <div style={{
+        background: "#fff", borderRadius: 10,
+        border: "1.5px solid #e8d08a",
+        padding: "10px 16px", marginBottom: 8,
+        display: "flex", alignItems: "center", gap: 10,
+      }}>
+        <span style={{
+          fontSize: 10, fontWeight: 800, color: "#d4a017",
+          background: "#fdf6e0", padding: "2px 7px", borderRadius: 4,
+          letterSpacing: 1, textTransform: "uppercase",
+        }}>BYE</span>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>
+          {bp?.player?.name ?? "—"}
+          {playerCategoryTag(bp?.player, groupName)}
+        </span>
+        <span style={{ fontSize: 12, color: "#2d5a27", fontWeight: 700 }}>✓ advances</span>
+      </div>
+    );
+  }
+
   const p1 = getP1(m); const p2 = getP2(m);
   const isDone     = bucket(m.status) === "done";
   const isLive     = bucket(m.status) === "live";

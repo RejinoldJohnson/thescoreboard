@@ -5,7 +5,6 @@ from database import get_db
 from models.models import Player, Tournament, TournamentParticipant, Group
 from schemas import PlayerCreate, PlayerOut
 from routers.auth import verify_token
-from routers.tournaments import assign_group_and_subgroup, _group_counts
 
 router = APIRouter()
 
@@ -32,7 +31,7 @@ def create_player(
     db.add(db_player)
     db.flush()
 
-    # Auto-enrol into all active tournaments
+    # Enrol into all active tournaments as UNASSIGNED (no group)
     active_tournaments = db.query(Tournament).filter(Tournament.is_active == True).all()
     for tournament in active_tournaments:
         existing = db.query(TournamentParticipant).filter_by(
@@ -41,19 +40,12 @@ def create_player(
         ).first()
         if existing:
             continue
-        counts = _group_counts(tournament.tournament_id, db)
-        group_name, sub_group = assign_group_and_subgroup(db_player.age, db_player.gender, counts)
-        group = db.query(Group).filter(
-            Group.tournament_id == tournament.tournament_id,
-            Group.name == group_name,
-        ).first()
-        participant = TournamentParticipant(
+        db.add(TournamentParticipant(
             tournament_id=tournament.tournament_id,
             player_id=db_player.player_id,
-            group_id=group.group_id if group else None,
-            sub_group=sub_group,
-        )
-        db.add(participant)
+            group_id=None,      # unassigned — admin drags to a group
+            sub_group=None,
+        ))
 
     db.commit()
     db.refresh(db_player)
@@ -70,7 +62,6 @@ def delete_player(
     player = db.query(Player).filter(Player.player_id == player_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    # Explicitly delete dependent rows first to avoid FK nullification by SQLAlchemy
     db.query(TournamentParticipant).filter(
         TournamentParticipant.player_id == player_id
     ).delete(synchronize_session=False)

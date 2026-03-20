@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   getPlayers, createPlayer, deletePlayer,
   getTournaments, createTournament,
   getParticipants,
-  getMatches, updateMatch, deleteMatch, generateFixtures, rematchMatch, triggerKnockout,
-  setPlayerSeed,
+  getMatches, updateMatch, deleteMatch, rematchMatch,
+  assignPlayerGroup, createManualMatch, createBye,
   logout,
 } from "../api/client";
 
@@ -14,11 +14,42 @@ function getP1(match) { return match.participants?.find(p => p.position === 1); 
 function getP2(match) { return match.participants?.find(p => p.position === 2); }
 
 const GROUP_LABELS = {
-  "Group A": "Boys U18 & Women (all ages)",
-  "Group B": "Men 18–29",
-  "Group C": "Men 18–29",
-  "Group D": "Men 30+",
+  "Group A": "Men Under 30",
+  "Group B": "Men Under 30",
+  "Group C": "Men 30+",
+  "Group D": "Boys U18 & Women",
 };
+
+// Player category tag — shown next to names in Group D (U18 Boy / Woman)
+// and in Group A/B as "U30" context
+function playerTag(player, groupName) {
+  if (!player) return null;
+  const sg = player.sub_group;
+  if (groupName === "Group D" && sg) {
+    return (
+      <span style={{
+        fontSize: 10, fontWeight: 700, marginLeft: 5,
+        background: sg === "women" ? "#fde8f0" : "#e8f0fd",
+        color: sg === "women" ? "#c0392b" : "#2d5a27",
+        padding: "1px 5px", borderRadius: 3,
+      }}>
+        {sg === "boys" ? "U18 Boy" : "Woman"}
+      </span>
+    );
+  }
+  if ((groupName === "Group A" || groupName === "Group B") && player.age) {
+    return (
+      <span style={{
+        fontSize: 10, fontWeight: 700, marginLeft: 5,
+        background: "#f0f4ff", color: "#3a5cc7",
+        padding: "1px 5px", borderRadius: 3,
+      }}>
+        U30
+      </span>
+    );
+  }
+  return null;
+}
 
 // Determine winner of a single set
 function setWinner(s1, s2) {
@@ -55,7 +86,7 @@ export default function AdminPortal({ onLogout }) {
   const [tForm, setTForm]             = useState({ name: "", sport_type: "Table Tennis", format: "Group + Knockout", is_active: true });
 
   const [players, setPlayers]         = useState([]);
-  const [pForm, setPForm]             = useState({ name: "", age: "", gender: "Male", seed: "" });
+  const [pForm, setPForm]             = useState({ name: "", age: "", gender: "Male" });
 
   const [groups, setGroups]           = useState([]);
   const [matches, setMatches]         = useState([]);
@@ -112,15 +143,12 @@ export default function AdminPortal({ onLogout }) {
     if (!pForm.name.trim()) return flash("Player name is required.", "err");
     if (!activeTId) return flash("Create a tournament first.", "err");
     try {
-      const newPlayer = await createPlayer({
+      await createPlayer({
         name: pForm.name.trim(),
         age: parseInt(pForm.age) || null,
         gender: pForm.gender || null,
       });
-      if (pForm.seed && newPlayer?.player_id) {
-        await setPlayerSeed(activeTId, newPlayer.player_id, parseInt(pForm.seed));
-      }
-      setPForm({ name: "", age: "", gender: "Male", seed: "" });
+      setPForm({ name: "", age: "", gender: "Male" });
       await Promise.all([loadPlayers(), loadTournamentData()]);
       flash("Player added and assigned to their group!");
     } catch (e) { flash("Error: " + e.message, "err"); }
@@ -135,30 +163,41 @@ export default function AdminPortal({ onLogout }) {
     } catch (e) { flash("Error: " + e.message, "err"); }
   };
 
-  const handleSetSeed = async (playerId, seed) => {
-    try {
-      await setPlayerSeed(activeTId, playerId, seed);
-      loadTournamentData();
-      flash(`Seed ${seed ? `set to ${seed}` : "cleared"}.`);
-    } catch (e) { flash("Error: " + e.message, "err"); }
-  };
+
 
   // ── Fixtures ──────────────────────────────────────────────────
-  const handleGenerateFixtures = async () => {
-    if (!activeTId) return;
+  const handleAssignGroup = async (playerId, groupId) => {
     try {
-      const r = await generateFixtures(activeTId);
-      loadTournamentData();
-      flash(r.matches_created > 0 ? `Generated ${r.matches_created} new matches!` : "All players already have matches.");
+      await assignPlayerGroup(activeTId, playerId, groupId);
+      await loadTournamentData();
     } catch (e) { flash("Error: " + e.message, "err"); }
   };
 
-  const handleTriggerKO = async () => {
-    if (!activeTId) return;
+  const handleCreateMatch = async (p1Id, p2Id, groupId, tableNum, unassignedIds, round, stage) => {
     try {
-      const r = await triggerKnockout(activeTId);
-      loadTournamentData();
-      flash(r.ko_matches_created > 0 ? `Knockout bracket created! ${r.ko_matches_created} matches.` : "KO already exists or not enough qualifiers.");
+      for (const pid of (unassignedIds || [])) {
+        await assignPlayerGroup(activeTId, pid, groupId);
+      }
+      await createManualMatch({
+        tournament_id: activeTId,
+        player1_id: p1Id,
+        player2_id: p2Id,
+        group_id: groupId ?? null,
+        round: round || 1,
+        stage: stage || "group",
+        table_number: tableNum,
+        status: "scheduled",
+      });
+      await loadTournamentData();
+      flash("Match created!");
+    } catch (e) { flash("Error: " + e.message, "err"); }
+  };
+
+  const handleGiveBye = async (playerId, groupId, round) => {
+    try {
+      await createBye(activeTId, playerId, groupId, round);
+      await loadTournamentData();
+      flash("Bye given — player advances automatically.");
     } catch (e) { flash("Error: " + e.message, "err"); }
   };
 
@@ -174,8 +213,10 @@ export default function AdminPortal({ onLogout }) {
   };
 
   // Sets-based update: sends { set_update: { set_number, score_p1, score_p2 } }
+  // Does NOT reload tournament data — scores are already in local state (optimistic UI).
+  // Data is only reloaded when a set is confirmed or match is finished.
   const handleSetUpdate = async (matchId, setUpdate) => {
-    try { await updateMatch(matchId, { set_update: setUpdate }); loadTournamentData(); }
+    try { await updateMatch(matchId, { set_update: setUpdate }); }
     catch (e) { flash("Error saving set: " + e.message, "err"); }
   };
 
@@ -312,8 +353,6 @@ export default function AdminPortal({ onLogout }) {
                   <option value="Male">Male</option>
                   <option value="Female">Female</option>
                 </select>
-                <input className="input" style={{ width: 80 }} placeholder="Seed" type="number" min={1}
-                  value={pForm.seed} onChange={e => setPForm(f => ({ ...f, seed: e.target.value }))} />
                 <button className="btn-primary" onClick={handleAddPlayer}>Add Player</button>
               </div>
             </div>
@@ -332,10 +371,14 @@ export default function AdminPortal({ onLogout }) {
                         <td><strong>{p.name}</strong></td>
                         <td>{p.age ?? "—"}</td>
                         <td>{p.gender ?? "—"}</td>
-                        <td>{groupEntry
-                          ? <span style={{ background: "#eaf2e8", color: "#2d5a27", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 700 }}>{groupEntry.group_name}</span>
-                          : <span style={{ color: "#7a6a50", fontSize: 12 }}>—</span>
-                        }</td>
+                        <td>
+                          {groupEntry ? (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                              <span style={{ background: "#eaf2e8", color: "#2d5a27", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 700 }}>{groupEntry.group_name}</span>
+                              <span style={{ fontSize: 11, color: "#7a6a50" }}>{GROUP_LABELS[groupEntry.group_name]}</span>
+                            </span>
+                          ) : <span style={{ color: "#7a6a50", fontSize: 12 }}>Unassigned</span>}
+                        </td>
                         <td>
                           <button onClick={() => handleDeletePlayer(p.player_id)} style={{
                             background: "transparent", color: "#c0392b", border: "1px solid #c0392b",
@@ -354,65 +397,11 @@ export default function AdminPortal({ onLogout }) {
         {currentTab === "groups" && (
           <div>
             {!activeTId ? <div className="empty">Create a tournament first.</div> : (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-                  <p style={{ margin: 0, color: "#7a6a50", fontSize: 14 }}>Set seeds for strong players, then generate fixtures.</p>
-                  <button className="btn-primary" onClick={handleGenerateFixtures}>⚡ Generate Fixtures</button>
-                </div>
-                {groups.length === 0 ? <div className="empty">No players added yet.</div>
-                  : groups.map(g => (
-                    <div key={g.group_id} className="card" style={{ marginBottom: 16 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
-                        <div>
-                          <span className="card-title" style={{ display: "inline" }}>{g.group_name}</span>
-                          <span style={{ marginLeft: 10, fontSize: 12, color: "#7a6a50" }}>{GROUP_LABELS[g.group_name] || ""}</span>
-                        </div>
-                        <span style={{ fontSize: 12, color: "#7a6a50" }}>{g.players.length} players</span>
-                      </div>
-                      {g.players.length === 0 ? <p style={{ color: "#7a6a50", fontSize: 13, margin: 0 }}>No players in this group.</p> : (
-                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                          <thead>
-                            <tr style={{ background: "#f5f0e8" }}>
-                              {["Player", "Age", "Gender", "Seed", ""].map((h, i) => (
-                                <th key={i} style={{ padding: "7px 10px", fontSize: 12, textAlign: "left", color: "#7a6a50", fontWeight: 700 }}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {g.players.map((p, i) => (
-                              <tr key={p.player_id} style={{ background: i % 2 === 0 ? "#fff" : "#f5f0e8" }}>
-                                <td style={{ padding: "8px 10px", fontWeight: 600 }}>
-                                  {p.name}
-                                  {p.sub_group && (
-                                    <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700,
-                                      background: p.sub_group === "women" ? "#fde8f0" : "#e8f0fd",
-                                      color: p.sub_group === "women" ? "#c0392b" : "#2d5a27",
-                                      padding: "1px 5px", borderRadius: 3 }}>
-                                      {p.sub_group === "boys" ? "U18 Boy" : "Woman"}
-                                    </span>
-                                  )}
-                                </td>
-                                <td style={{ padding: "8px 10px", color: "#7a6a50" }}>{p.age ?? "—"}</td>
-                                <td style={{ padding: "8px 10px", color: "#7a6a50" }}>{p.gender ?? "—"}</td>
-                                <td style={{ padding: "8px 10px" }}>
-                                  <SeedInput playerId={p.player_id} currentSeed={p.seed} onSet={handleSetSeed} />
-                                </td>
-                                <td style={{ padding: "8px 10px" }}>
-                                  {p.seed && (
-                                    <span style={{ background: "#fdf6e0", color: "#d4a017", border: "1px solid #d4a017", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700 }}>
-                                      🌱 Seed {p.seed}
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  ))
-                }
-              </>
+              <GroupAssigner
+                groups={groups}
+                players={players}
+                onAssign={handleAssignGroup}
+              />
             )}
           </div>
         )}
@@ -423,23 +412,20 @@ export default function AdminPortal({ onLogout }) {
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
                   <span style={{ color: "#7a6a50", fontSize: 14 }}>{matches.length} matches total</span>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button className="btn-primary" onClick={handleGenerateFixtures}>⚡ Generate Fixtures</button>
-                    <button className="btn-primary" onClick={handleTriggerKO}
-                      style={{ background: "#d4a017" }}>🏆 Trigger KO</button>
-                  </div>
                 </div>
-                {matches.length === 0
-                  ? <div className="empty">No matches yet — go to Groups tab and click Generate Fixtures.</div>
-                  : <GroupedMatches
-                      groups={groups}
-                      matches={matches}
-                      onStart={async (matchId) => { await handlePatchMatch(matchId, { status: "live" }); setActiveMatchId(matchId); }}
-                      onOpenScorer={(matchId) => setActiveMatchId(matchId)}
-                      onDelete={handleDeleteMatch}
-                      onRematch={handleRematch}
-                    />
-                }
+                <FixtureBuilder
+                  groups={groups}
+                  players={players}
+                  matches={matches}
+                  tournamentId={activeTId}
+                  onCreateMatch={handleCreateMatch}
+                  onStart={async (matchId) => { await handlePatchMatch(matchId, { status: "live" }); setActiveMatchId(matchId); }}
+                  onOpenScorer={(matchId) => setActiveMatchId(matchId)}
+                  onDelete={handleDeleteMatch}
+                  onRematch={handleRematch}
+                  onPatch={handlePatchMatch}
+                  onGiveBye={handleGiveBye}
+                />
               </>
             )}
           </div>
@@ -482,6 +468,7 @@ export default function AdminPortal({ onLogout }) {
                 onSetUpdate={(setUpdate) => handleSetUpdate(m.match_id, setUpdate)}
                 onUndoSet={(setNum) => handleUndoSet(m.match_id, setNum)}
                 onServeChange={(server) => handleServeChange(m.match_id, server)}
+                onReload={loadTournamentData}
                 onFinish={async () => {
                   await handlePatchMatch(m.match_id, { status: "done" });
                   setActiveMatchId(null);
@@ -496,7 +483,7 @@ export default function AdminPortal({ onLogout }) {
 }
 
 // ── Live Scorer (Sets-Based) ──────────────────────────────────────────────────
-function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFinish }) {
+function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onReload, onFinish }) {
   const setsToWin = match?.sets_to_win ?? 2;
 
   const completedSets = (match?.sets ?? [])
@@ -506,21 +493,34 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFi
   const setsWonP1 = completedSets.filter(s => s.winner_position === 1).length;
   const setsWonP2 = completedSets.filter(s => s.winner_position === 2).length;
 
-  // Which set the admin is currently on — only advances when they confirm
   const [adminSetNum, setAdminSetNum] = useState(1);
-
-  // matchWinner only becomes true after admin has confirmed the deciding set
-  // (i.e. adminSetNum has advanced past it). Keeps scoring screen open until then.
   const confirmedSetsWonP1 = completedSets.filter(s => s.winner_position === 1 && s.set_number < adminSetNum).length;
   const confirmedSetsWonP2 = completedSets.filter(s => s.winner_position === 2 && s.set_number < adminSetNum).length;
   const matchWinner = confirmedSetsWonP1 >= setsToWin ? 1 : confirmedSetsWonP2 >= setsToWin ? 2 : null;
 
-  // Local points for current set (always editable)
   const [s1, setS1] = useState(0);
   const [s2, setS2] = useState(0);
   const [saving, setSaving] = useState(false);
 
-  // If a set is undone, go back to it with 0-0
+  // ── Position swap ─────────────────────────────────────────────
+  // swapped=false → left=P1(pos1), right=P2(pos2)
+  // swapped=true  → left=P2(pos2), right=P1(pos1)
+  // Auto-swaps after every confirmed set.
+  // Manual override only allowed in Set 1 before any points scored.
+  const [swapped, setSwapped] = useState(false);
+  const [showSwapBanner, setShowSwapBanner] = useState(false);
+
+  const leftPos  = swapped ? 2 : 1;   // backend position of visual left player
+  const rightPos = swapped ? 1 : 2;   // backend position of visual right player
+  const leftName  = (swapped ? p2 : p1)?.player?.name ?? "Player 1";
+  const rightName = (swapped ? p1 : p2)?.player?.name ?? "Player 2";
+  const leftScore  = leftPos  === 1 ? s1 : s2;
+  const rightScore = rightPos === 1 ? s1 : s2;
+
+  // Manual swap only before Set 1 has any points
+  const canManualSwap = adminSetNum === 1 && s1 === 0 && s2 === 0;
+  const handleManualSwap = () => { if (canManualSwap) setSwapped(v => !v); };
+
   useEffect(() => {
     const maxValid = completedSets.length + 1;
     if (adminSetNum > maxValid) {
@@ -529,60 +529,93 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFi
     }
   }, [completedSets.length]); // eslint-disable-line
 
-  // Serve tracking
+  // Serve tracking — tracks backend position 1/2
   const [set1FirstServer, setSet1FirstServer] = useState(1);
   const firstServerForSet = (n) => ((set1FirstServer - 1 + (n - 1)) % 2) + 1;
   const firstServer = firstServerForSet(adminSetNum);
   const isDeuce     = s1 >= 10 && s2 >= 10;
-  const serving     = computeServe(s1, s2, firstServer);
+  const serving     = computeServe(s1, s2, firstServer);  // backend pos 1 or 2
 
-  // Detect set winner from current local scores — purely for showing banner
-  const curSetWinner = setWinner(s1, s2);
+  const curSetWinner = setWinner(s1, s2);  // backend pos 1 or 2
 
+  // Keep legacy names for serve button compatibility
   const p1Name = p1?.player?.name ?? "Player 1";
   const p2Name = p2?.player?.name ?? "Player 2";
 
-  // +Point — always works, no locking
-  const addPoint = async (pl) => {
+  // Score queue — we keep only the latest score and send it as soon as
+  // the previous request finishes. This means the UI is NEVER blocked:
+  // tapping +Point updates the score instantly, the API call fires in the background.
+  // If the admin taps faster than the network, we just send the latest value.
+  const latestScoreRef = useRef(null);
+  const sendingScore   = useRef(false);
+
+  const dispatchScore = useCallback((setNum, ns1, ns2) => {
+    latestScoreRef.current = { setNum, ns1, ns2 };
+    if (sendingScore.current) return; // already in flight — latest will flush after
+    const flush = async () => {
+      while (latestScoreRef.current) {
+        const { setNum: sn, ns1: n1, ns2: n2 } = latestScoreRef.current;
+        latestScoreRef.current = null;
+        sendingScore.current = true;
+        try {
+          await onSetUpdate({ set_number: sn, score_p1: n1, score_p2: n2 });
+        } catch(e) { /* silent — score will resync on next poll */ }
+      }
+      sendingScore.current = false;
+    };
+    flush();
+  }, [onSetUpdate]);
+
+  // +Point — left/right buttons map to visual positions → backend positions
+  const addPoint = (side) => {
     if (matchWinner) return;
-    const ns1 = pl === 1 ? s1 + 1 : s1;
-    const ns2 = pl === 2 ? s2 + 1 : s2;
+    // side = "left" or "right"; map to backend position
+    const backendPos = side === "left" ? leftPos : rightPos;
+    const ns1 = backendPos === 1 ? s1 + 1 : s1;
+    const ns2 = backendPos === 2 ? s2 + 1 : s2;
     setS1(ns1); setS2(ns2);
-    await onSetUpdate({ set_number: adminSetNum, score_p1: ns1, score_p2: ns2 });
+    dispatchScore(adminSetNum, ns1, ns2);
   };
 
-  // Undo point — always works
-  const undoPoint = async (pl) => {
+  // Undo point — same visual→backend mapping
+  const undoPoint = (side) => {
     if (matchWinner) return;
-    const ns1 = pl === 1 ? Math.max(0, s1 - 1) : s1;
-    const ns2 = pl === 2 ? Math.max(0, s2 - 1) : s2;
+    const backendPos = side === "left" ? leftPos : rightPos;
+    const ns1 = backendPos === 1 ? Math.max(0, s1 - 1) : s1;
+    const ns2 = backendPos === 2 ? Math.max(0, s2 - 1) : s2;
     setS1(ns1); setS2(ns2);
-    await onSetUpdate({ set_number: adminSetNum, score_p1: ns1, score_p2: ns2 });
+    dispatchScore(adminSetNum, ns1, ns2);
   };
 
-  // Confirm set — saves to backend and resets scores for next set.
-  // Never finishes the match — admin must press Finish Match separately.
+  // Confirm set — auto-swap after confirming, show swap banner
   const confirmAndNext = async () => {
     if (!curSetWinner || saving) return;
     setSaving(true);
     try {
       await onSetUpdate({ set_number: adminSetNum, score_p1: s1, score_p2: s2 });
+      await onReload();
       setAdminSetNum(n => n + 1);
       setS1(0); setS2(0);
+      setSwapped(v => !v);       // auto-swap ends
+      setShowSwapBanner(true);   // show banner
+      setTimeout(() => setShowSwapBanner(false), 2500);
     } finally {
       setSaving(false);
     }
   };
 
-  // Undo last confirmed set
+  // Undo last confirmed set — also reverses the swap
   const undoLastSet = async () => {
     if (completedSets.length === 0 || saving) return;
     const lastSet = completedSets[completedSets.length - 1];
     setSaving(true);
     try {
       await onUndoSet(lastSet.set_number);
+      await onReload();
       setAdminSetNum(lastSet.set_number);
       setS1(0); setS2(0);
+      setSwapped(v => !v);   // reverse the swap that happened when set was confirmed
+      setShowSwapBanner(false);
     } finally {
       setSaving(false);
     }
@@ -600,26 +633,50 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFi
         Best of {setsToWin * 2 - 1} sets · Set {adminSetNum} · Round {match?.round}
       </div>
 
-      {/* Sets scoreboard */}
+      {/* Manual swap — only available before Set 1 has any points */}
+      {canManualSwap && (
+        <div style={{ textAlign: "center" }}>
+          <button onClick={handleManualSwap} style={{
+            background: "#1a1208", border: "1.5px solid #333", borderRadius: 7,
+            color: "#7a6a50", padding: "6px 16px", cursor: "pointer",
+            fontSize: 12, fontWeight: 700, letterSpacing: 1,
+          }}>⇄ Swap starting positions</button>
+          <div style={{ fontSize: 10, color: "#2a2a2a", marginTop: 4 }}>Only available before first point</div>
+        </div>
+      )}
+
+      {/* Swap banner — shown briefly after each set */}
+      {showSwapBanner && (
+        <div style={{
+          textAlign: "center", padding: "10px 16px",
+          background: "#1a2a1a", border: "1.5px solid #2d5a27",
+          borderRadius: 8, fontSize: 13, fontWeight: 700,
+          color: "#4a9a47", letterSpacing: 1, animation: "fadeIn 0.3s ease",
+        }}>
+          ⇄ Players have swapped ends
+        </div>
+      )}
+
+      {/* Sets scoreboard — uses visual left/right */}
       <div style={{
         display: "flex", alignItems: "stretch",
         background: "#1a1208", borderRadius: 10,
         border: "1px solid #2a1a0a", overflow: "hidden",
       }}>
         <div style={{ flex: 1, textAlign: "center", padding: "14px 10px" }}>
-          <div style={{ fontSize: 11, color: "#7a6a50", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>{p1Name}</div>
+          <div style={{ fontSize: 11, color: "#7a6a50", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>{leftName}</div>
           <div style={{
             fontFamily: "'Barlow Condensed', sans-serif", fontSize: 64, fontWeight: 900, lineHeight: 1,
-            color: matchWinner === 1 ? "#d4a017" : setsWonP1 > setsWonP2 ? "#e8dfc8" : "#3a3a3a",
-          }}>{setsWonP1}</div>
+            color: matchWinner === leftPos ? "#d4a017" : (leftPos===1?setsWonP1:setsWonP2) > (leftPos===1?setsWonP2:setsWonP1) ? "#e8dfc8" : "#3a3a3a",
+          }}>{leftPos === 1 ? setsWonP1 : setsWonP2}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", padding: "0 12px", color: "#2a2a2a", fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" }}>SETS</div>
         <div style={{ flex: 1, textAlign: "center", padding: "14px 10px" }}>
-          <div style={{ fontSize: 11, color: "#7a6a50", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>{p2Name}</div>
+          <div style={{ fontSize: 11, color: "#7a6a50", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase", marginBottom: 6 }}>{rightName}</div>
           <div style={{
             fontFamily: "'Barlow Condensed', sans-serif", fontSize: 64, fontWeight: 900, lineHeight: 1,
-            color: matchWinner === 2 ? "#d4a017" : setsWonP2 > setsWonP1 ? "#e8dfc8" : "#3a3a3a",
-          }}>{setsWonP2}</div>
+            color: matchWinner === rightPos ? "#d4a017" : (rightPos===1?setsWonP1:setsWonP2) > (rightPos===1?setsWonP2:setsWonP1) ? "#e8dfc8" : "#3a3a3a",
+          }}>{rightPos === 1 ? setsWonP1 : setsWonP2}</div>
         </div>
       </div>
 
@@ -651,70 +708,87 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFi
         </div>
       )}
 
-      {/* Serve selector */}
+      {/* Serve selector — only changeable before first point of each set */}
       {!matchWinner && (
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
           <div style={{ fontSize: 10, color: "#3a3a3a", fontWeight: 700, letterSpacing: 2, textTransform: "uppercase" }}>
-            Set {adminSetNum} · Serving Now
+            Set {adminSetNum} · First Serve
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {[1, 2].map(pl => {
-              const isServ   = serving === pl;
-              const name     = pl === 1 ? p1Name : p2Name;
-              const targetS1 = ((pl - 1 + (2 - ((adminSetNum - 1) % 2))) % 2) + 1;
+            {/* Show buttons in visual order: left side first, right side second */}
+            {[leftPos, rightPos].map((backendPl, idx) => {
+              const isServ      = serving === backendPl;
+              const displayName = idx === 0 ? leftName : rightName;
+              const isLeft      = idx === 0;
+              const frozen      = s1 > 0 || s2 > 0;  // freeze once scoring starts
+              const targetS1    = ((backendPl - 1 + (2 - ((adminSetNum - 1) % 2))) % 2) + 1;
               return (
-                <button key={pl}
+                <button key={backendPl}
+                  disabled={frozen}
                   onClick={async () => {
+                    if (frozen) return;
                     setSet1FirstServer(targetS1);
-                    await onServeChange(pl);
+                    await onServeChange(backendPl);
                   }}
                   style={{
                     padding: "6px 14px", borderRadius: 7, fontWeight: 800,
-                    fontSize: 13, cursor: "pointer",
+                    fontSize: 13,
+                    cursor: frozen ? "default" : "pointer",
                     background: isServ ? "#d4a017" : "transparent",
-                    color: isServ ? "#1a1208" : "#777",
+                    color: isServ ? "#1a1208" : frozen ? "#2a2a2a" : "#777",
                     border: isServ ? "2px solid #d4a017" : "2px solid #2a2a2a",
+                    opacity: frozen && !isServ ? 0.4 : 1,
                   }}
                 >
-                  {pl === 1 ? `🏓 ${name}` : `${name} 🏓`}
+                  {isLeft ? `🏓 ${displayName}` : `${displayName} 🏓`}
                 </button>
               );
             })}
           </div>
-          <div style={{ fontSize: 10, color: "#333" }}>Tap to override · switches every 2 pts</div>
+          <div style={{ fontSize: 10, color: "#333" }}>
+            {s1 > 0 || s2 > 0 ? "Locked — serve changes automatically every 2 pts" : "Tap to select who serves first · auto-switches every 2 pts"}
+          </div>
         </div>
       )}
 
-      {/* Point scores — always white, no color changes */}
+      {/* Point scores — visual left/right */}
       {!matchWinner && (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12 }}>
           <div style={{ flex: 1, textAlign: "center" }}>
             <div style={{
               fontFamily: "'Barlow Condensed', sans-serif", fontSize: 92, fontWeight: 900, lineHeight: 1,
               color: "#e8dfc8",
-            }}>{s1}</div>
+            }}>{leftScore}</div>
           </div>
           <div style={{ color: "#222", fontSize: 20, fontWeight: 700 }}>–</div>
           <div style={{ flex: 1, textAlign: "center" }}>
             <div style={{
               fontFamily: "'Barlow Condensed', sans-serif", fontSize: 92, fontWeight: 900, lineHeight: 1,
               color: "#e8dfc8",
-            }}>{s2}</div>
+            }}>{rightScore}</div>
           </div>
         </div>
       )}
 
-      {/* +Point freezes when set winner detected; ↩ Undo always active */}
+      {/* +Point / ↩ Undo — left and right sides map to visual positions */}
       {!matchWinner && (
         <div style={{ display: "flex", gap: 10 }}>
-          {[1, 2].map(pl => {
-            const score  = pl === 1 ? s1 : s2;
-            const isServ = serving === pl;
-            const frozen = !!curSetWinner;
+          {["left", "right"].map(side => {
+            const isLeft     = side === "left";
+            const backendPos = isLeft ? leftPos : rightPos;
+            const name       = isLeft ? leftName : rightName;
+            const score      = backendPos === 1 ? s1 : s2;
+            const isServ     = serving === backendPos;
+            const frozen     = !!curSetWinner;
             return (
-              <div key={pl} style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div key={side} style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ textAlign: "center", fontSize: 11, fontWeight: 700,
+                              color: isServ ? "#d4a017" : "#555",
+                              letterSpacing: 1, textTransform: "uppercase" }}>
+                  {isServ ? "🏓 " : ""}{name}
+                </div>
                 <button
-                  onClick={() => addPoint(pl)}
+                  onClick={() => addPoint(side)}
                   disabled={frozen}
                   style={{
                     width: "100%", padding: "16px 0",
@@ -726,10 +800,11 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFi
                     fontSize: 20, fontWeight: 800,
                     cursor: frozen ? "not-allowed" : "pointer",
                     opacity: frozen ? 0.4 : 1,
+                    transition: "opacity 0.1s",
                   }}
                 >+ Point</button>
                 <button
-                  onClick={() => undoPoint(pl)}
+                  onClick={() => undoPoint(side)}
                   disabled={score === 0}
                   style={{
                     width: "100%", padding: "7px 0",
@@ -755,7 +830,7 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFi
             fontSize: 13, fontWeight: 700, color: "#d4a017",
             letterSpacing: 1, textTransform: "uppercase",
           }}>
-            {curSetWinner === 1 ? p1Name : p2Name} wins Set {adminSetNum}
+            {curSetWinner === leftPos ? leftName : rightName} wins Set {adminSetNum}
           </div>
           <button onClick={confirmAndNext} disabled={saving} style={{
             width: "100%", padding: "14px 0",
@@ -781,7 +856,7 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFi
       {/* Match winner */}
       {matchWinner && (
         <div style={{ textAlign: "center", fontSize: 16, fontWeight: 700, color: "#d4a017", letterSpacing: 1, textTransform: "uppercase", padding: "8px 0" }}>
-          🏆 {setsWonP1 >= setsToWin ? p1Name : p2Name} wins the match!
+          🏆 {setsWonP1 >= setsToWin ? (leftPos===1?leftName:rightName) : (leftPos===2?leftName:rightName)} wins the match!
         </div>
       )}
 
@@ -798,7 +873,7 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onFi
         transition: "background .2s",
       }}>
         {matchWinner
-          ? `🏆 Confirm — ${setsWonP1 >= setsToWin ? p1Name : p2Name} Wins`
+          ? `🏆 Confirm — ${setsWonP1 >= setsToWin ? (leftPos===1?leftName:rightName) : (leftPos===2?leftName:rightName)} Wins`
           : `Finish Match (first to ${setsToWin} sets)`
         }
       </button>
@@ -818,21 +893,6 @@ function GroupedMatches({ groups, matches, onStart, onOpenScorer, onDelete, onRe
   const toggleGroup  = (gid) => setOpenGroups(prev => ({ ...prev, [gid]: !prev[gid] }));
   const byGroup      = (gid) => matches.filter(m => m.group_id === gid);
   const ungrouped    = matches.filter(m => !m.group_id);
-
-  // Get players with a bye in a specific round of a group
-  const getByePlayers = (groupId, roundNum, allMatches, allGroups) => {
-    const roundMatches = allMatches.filter(m =>
-      m.group_id === groupId && m.round === roundNum && m.stage === "group"
-    );
-    if (!roundMatches.length) return [];
-    const playersInMatches = new Set(
-      roundMatches.flatMap(m => m.participants?.map(p => p.player_id) ?? [])
-    );
-    // Find all players in this group
-    const group = allGroups.find(g => g.group_id === groupId);
-    if (!group) return [];
-    return group.players.filter(p => !playersInMatches.has(p.player_id));
-  };
 
   const renderMatch = (m) => {
     const p1     = m.participants?.find(p => p.position === 1);
@@ -936,14 +996,6 @@ function GroupedMatches({ groups, matches, onStart, onOpenScorer, onDelete, onRe
         const live   = gm.filter(m => m.status === "live").length;
         const done   = gm.filter(m => m.status === "done" || m.status === "completed").length;
 
-        // Find rounds in this group and check for byes
-        const groupRounds = [...new Set(gm.map(m => m.round))].sort();
-        const byesByRound = {};
-        groupRounds.forEach(r => {
-          const byePlayers = getByePlayers(g.group_id, r, matches, groups);
-          if (byePlayers.length > 0) byesByRound[r] = byePlayers;
-        });
-
         return (
           <div key={g.group_id} style={{ marginBottom: 16 }}>
             <div onClick={() => toggleGroup(g.group_id)} style={{
@@ -962,28 +1014,6 @@ function GroupedMatches({ groups, matches, onStart, onOpenScorer, onDelete, onRe
             </div>
             {isOpen && (
               <div style={{ border: "1.5px solid #cfc0a0", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "12px", background: "#faf7f2" }}>
-                {Object.entries(byesByRound).map(([round, byePlayers]) => (
-                  <div key={round} style={{
-                    marginBottom: 8, padding: "7px 12px",
-                    background: "#fdf6e0", borderRadius: 6,
-                    border: "1px solid #e8d08a",
-                    display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-                  }}>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: "#d4a017",
-                                   textTransform: "uppercase", letterSpacing: 1 }}>
-                      R{round} Bye:
-                    </span>
-                    {byePlayers.map(p => (
-                      <span key={p.player_id} style={{
-                        fontSize: 12, fontWeight: 700, color: "#6b4c2a",
-                        background: "#fff", border: "1px solid #e8d08a",
-                        padding: "2px 8px", borderRadius: 4,
-                      }}>
-                        {p.name} ✓ advances
-                      </span>
-                    ))}
-                  </div>
-                ))}
                 {gm.map(renderMatch)}
               </div>
             )}
@@ -1041,18 +1071,664 @@ function GroupedMatches({ groups, matches, onStart, onOpenScorer, onDelete, onRe
   );
 }
 
-function SeedInput({ playerId, currentSeed, onSet }) {
-  const [val, setVal] = useState(currentSeed ?? "");
+
+
+// ── GroupAssigner — drag players from unassigned pool into group cards ─────────
+function GroupAssigner({ groups, players, onAssign }) {
+  const [dragId, setDragId] = useState(null);
+  const [overGroup, setOverGroup] = useState(null);
+
+  // Build set of assigned player IDs
+  const assignedIds = new Set(groups.flatMap(g => g.players.map(p => p.player_id)));
+  const unassigned  = players.filter(p => !assignedIds.has(p.player_id));
+
+  const GROUP_LABELS = {
+    "Group A": "Men Under 30",
+    "Group B": "Men Under 30",
+    "Group C": "Men 30+",
+    "Group D": "Boys U18 & Women",
+  };
+
+  const subBadge = (sg) => {
+    if (!sg) return null;
+    return (
+      <span style={{
+        marginLeft: 5, fontSize: 10, fontWeight: 700,
+        background: sg === "women" ? "#fde8f0" : "#e8f0fd",
+        color: sg === "women" ? "#c0392b" : "#2d5a27",
+        padding: "1px 5px", borderRadius: 3,
+      }}>
+        {sg === "boys" ? "U18 Boy" : "Woman"}
+      </span>
+    );
+  };
+
+  const playerCard = (p, draggable = true, showRemove = false, groupId = null) => (
+    <div
+      key={p.player_id}
+      draggable={draggable}
+      onDragStart={() => setDragId(p.player_id)}
+      onDragEnd={() => setDragId(null)}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "7px 10px", marginBottom: 4,
+        background: dragId === p.player_id ? "#d4f0d4" : "#fff",
+        border: "1.5px solid #e8dfc8", borderRadius: 7,
+        cursor: "grab", userSelect: "none",
+        transition: "background .15s",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 14 }}>⠿</span>
+        <div style={{ minWidth: 0 }}>
+          <span style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</span>
+          {subBadge(p.sub_group)}
+          <span style={{ color: "#7a6a50", fontSize: 11, marginLeft: 5 }}>
+            {p.gender ?? ""}{p.age ? `, ${p.age}y` : ""}
+          </span>
+        </div>
+      </div>
+      {showRemove && (
+        <button
+          onClick={() => onAssign(p.player_id, null)}
+          style={{
+            background: "transparent", border: "none", color: "#c0392b",
+            cursor: "pointer", fontSize: 14, padding: "0 4px", flexShrink: 0,
+          }}
+          title="Remove from group"
+        >✕</button>
+      )}
+    </div>
+  );
+
+  const dropZone = (groupId) => ({
+    onDragOver: (e) => { e.preventDefault(); setOverGroup(groupId); },
+    onDragLeave: () => setOverGroup(null),
+    onDrop: (e) => {
+      e.preventDefault();
+      setOverGroup(null);
+      if (dragId != null) onAssign(dragId, groupId);
+    },
+  });
+
   return (
-    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <input type="number" min={1} placeholder="—" value={val}
-        onChange={e => setVal(e.target.value)}
-        style={{ width: 48, padding: "3px 6px", background: "#f5f0e8", border: "1px solid #cfc0a0", borderRadius: 4, fontSize: 13 }}
-      />
-      <button onClick={() => onSet(playerId, parseInt(val) || null)} style={{
-        background: "#d4a017", color: "#fff", border: "none", borderRadius: 4,
-        padding: "3px 8px", cursor: "pointer", fontSize: 11, fontWeight: 700,
-      }}>Set</button>
+    <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, alignItems: "start" }}>
+
+      {/* Left — unassigned pool */}
+      <div style={{
+        background: "#f5f0e8", borderRadius: 10,
+        border: "2px dashed #cfc0a0", padding: 12,
+        minHeight: 200,
+        ...(overGroup === "unassigned" ? { borderColor: "#2d5a27", background: "#eaf2e8" } : {}),
+      }}
+        {...dropZone("unassigned")}
+      >
+        <div style={{ fontSize: 11, fontWeight: 800, color: "#7a6a50", letterSpacing: 2,
+                      textTransform: "uppercase", marginBottom: 10 }}>
+          Unassigned ({unassigned.length})
+        </div>
+        {unassigned.length === 0
+          ? <div style={{ color: "#aaa", fontSize: 12, textAlign: "center", padding: "20px 0" }}>
+              All players assigned
+            </div>
+          : unassigned.map(p => playerCard(p, true, false))
+        }
+      </div>
+
+      {/* Right — group cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {groups.map(g => (
+          <div
+            key={g.group_id}
+            style={{
+              background: overGroup === g.group_id ? "#eaf2e8" : "#fff",
+              border: overGroup === g.group_id ? "2px dashed #2d5a27" : "1.5px solid #cfc0a0",
+              borderRadius: 10, padding: 12, minHeight: 160,
+              transition: "border .15s, background .15s",
+            }}
+            {...dropZone(g.group_id)}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 16, fontWeight: 800, color: "#1a1208" }}>
+                {g.group_name}
+              </span>
+              <span style={{ fontSize: 11, color: "#7a6a50" }}>{GROUP_LABELS[g.group_name]}</span>
+            </div>
+            {g.players.length === 0
+              ? <div style={{ color: "#bbb", fontSize: 12, textAlign: "center", padding: "16px 0",
+                              border: "1.5px dashed #e8dfc8", borderRadius: 6 }}>
+                  Drop players here
+                </div>
+              : g.players.map(p => playerCard(p, true, true, g.group_id))
+            }
+          </div>
+        ))}
+      </div>
+
+    </div>
+  );
+}
+
+
+// ── FixtureBuilder — manual match creation per group ─────────────────────────
+const GROUP_TABLE_MAP_FRONT = { "Group A": 1, "Group B": 2, "Group C": 1, "Group D": 2 };
+const OPEN_GROUPS = new Set(["Group A", "Group B"]);
+
+// Stage options for the Create Match form
+const STAGE_OPTIONS = [
+  { value: "group|1",   label: "Group Stage — Round 1",   stage: "group",   round: 1, isKO: false },
+  { value: "group|2",   label: "Group Stage — Round 2",   stage: "group",   round: 2, isKO: false },
+  { value: "group|3",   label: "Group Stage — Round 3",   stage: "group",   round: 3, isKO: false },
+  { value: "group|4",   label: "Group Stage — Round 4",   stage: "group",   round: 4, isKO: false },
+  { value: "quarter|1", label: "Quarter Finals",          stage: "quarter", round: 1, isKO: true  },
+  { value: "semi|1",    label: "Semi Finals",             stage: "semi",    round: 1, isKO: true  },
+  { value: "third|1",   label: "3rd Place",               stage: "third",   round: 1, isKO: true  },
+  { value: "final|1",   label: "Final",                   stage: "final",   round: 1, isKO: true  },
+];
+
+function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOpenScorer, onDelete, onRematch, onPatch, onGiveBye }) {
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [stageKey, setStageKey]           = useState("group|1");
+  const [p1, setP1]                       = useState("");
+  const [p2, setP2]                       = useState("");
+  const [tableNum, setTableNum]           = useState("1");
+  const [editMatchId, setEditMatchId]     = useState(null);
+  const [editTableNum, setEditTableNum]   = useState("1");
+
+  const activeStage = STAGE_OPTIONS.find(s => s.value === stageKey) || STAGE_OPTIONS[0];
+  const isKO = activeStage.isKO;
+
+  const assignedIds      = new Set(groups.flatMap(g => g.players.map(p => p.player_id)));
+  const unassignedPlayers = (players ?? []).filter(p => !assignedIds.has(p.player_id));
+
+  // Groups A/B always selectable even with 0 assigned players
+  const selectableGroups = groups.filter(g =>
+    OPEN_GROUPS.has(g.group_name) || g.players.length >= 1
+  );
+  const activeGroup  = groups.find(g => g.group_id === selectedGroup) || selectableGroups[0];
+  const isOpenGroup  = activeGroup && OPEN_GROUPS.has(activeGroup.group_name);
+
+  const allGroupMatches = (gid) => matches.filter(m => m.group_id === gid && m.stage !== "bye");
+  const allByeMatches   = (gid) => matches.filter(m => m.group_id === gid && m.stage === "bye");
+  const ungrouped       = matches.filter(m => !m.group_id);
+
+  // ── Round-aware group helpers ─────────────────────────────────
+  // Current round for a group = highest round number among its matches (or 1 if none)
+  const currentRound = (gid) => {
+    const rounds = matches
+      .filter(m => m.group_id === gid)
+      .map(m => m.round ?? 1);
+    return rounds.length ? Math.max(...rounds) : 1;
+  };
+
+  // Eliminated players = lost any completed group match
+  const getEliminated = (gid) => new Set(
+    matches
+      .filter(m => m.group_id === gid && m.stage !== "bye" &&
+                   (m.status === "done" || m.status === "completed"))
+      .flatMap(m => (m.participants ?? [])
+        .filter(p => !p.is_winner)
+        .map(p => p.player?.player_id)
+        .filter(Boolean))
+  );
+
+  // Players in a scheduled or live match for a specific round of a group
+  const inRoundScheduledOrLive = (gid, round) => new Set(
+    matches
+      .filter(m => m.group_id === gid && m.round === round &&
+                   (m.status === "scheduled" || m.status === "live"))
+      .flatMap(m => m.participants?.map(p => p.player?.player_id).filter(Boolean) ?? [])
+  );
+
+  // Players who already have any match OR bye in a specific round of a group
+  const inRound = (gid, round) => new Set(
+    matches
+      .filter(m => m.group_id === gid && m.round === round)
+      .flatMap(m => m.participants?.map(p => p.player?.player_id).filter(Boolean) ?? [])
+  );
+
+  // Current round for active group
+  const activeRound = activeGroup ? currentRound(activeGroup.group_id) : 1;
+  const elimActive  = activeGroup ? getEliminated(activeGroup.group_id) : new Set();
+  const inCurRoundActive = activeGroup ? inRoundScheduledOrLive(activeGroup.group_id, activeRound) : new Set();
+
+  // ── KO qualifier pool ─────────────────────────────────────────
+  // For KO stages: show players who won or got a bye in the final round of their group
+  // i.e. alive players (not eliminated) across all groups
+  const koQualifiers = (() => {
+    const result = [];
+    for (const g of groups) {
+      const elim = getEliminated(g.group_id);
+      const lastRound = currentRound(g.group_id);
+      // Players in the last round (won or got bye) = alive and appeared in last round
+      const inLast = inRound(g.group_id, lastRound);
+      for (const p of g.players) {
+        if (!elim.has(p.player_id)) {
+          // Must have appeared in last round (won a match or got a bye)
+          const hasLastRound = inLast.has(p.player_id);
+          // Also include if they never played at all (small group, straight to KO)
+          const neverPlayed = !matches.some(m =>
+            m.group_id === g.group_id &&
+            (m.participants ?? []).some(mp => mp.player?.player_id === p.player_id)
+          );
+          if (hasLastRound || neverPlayed) {
+            result.push({ ...p, _groupName: g.group_name });
+          }
+        }
+      }
+    }
+    // Also include unassigned alive players
+    const assignedSet = new Set(groups.flatMap(g => g.players.map(p => p.player_id)));
+    for (const p of (players ?? [])) {
+      if (!assignedSet.has(p.player_id)) result.push({ ...p, _groupName: "Unassigned" });
+    }
+    return result;
+  })();
+
+  // Players already in a scheduled/live KO match of the active stage
+  const inKOStage = new Set(
+    matches
+      .filter(m => !m.group_id && m.stage === activeStage.stage &&
+                   (m.status === "scheduled" || m.status === "live"))
+      .flatMap(m => m.participants?.map(p => p.player?.player_id).filter(Boolean) ?? [])
+  );
+  const availableKOPlayers = koQualifiers.filter(p => !inKOStage.has(p.player_id));
+
+  // Available players for new match = alive + not already in current round
+  const availableGroupPlayers = (activeGroup?.players ?? []).filter(p =>
+    !elimActive.has(p.player_id) &&
+    !inRound(activeGroup?.group_id, activeRound).has(p.player_id)
+  );
+  const availableUnassigned = isOpenGroup
+    ? unassignedPlayers.filter(p =>
+        !inRound(activeGroup?.group_id, activeRound).has(p.player_id)
+      )
+    : [];
+
+  // Byes for current round of a group = alive players not in any match this round
+  const byesForCurrentRound = (group) => {
+    const round = currentRound(group.group_id);
+    const elim  = getEliminated(group.group_id);
+    const inThisRound = inRound(group.group_id, round);
+    return group.players.filter(p =>
+      !elim.has(p.player_id) && !inThisRound.has(p.player_id)
+    );
+  };
+
+  // Get rounds for a group sorted ascending
+  const getRounds = (gid) => {
+    const rounds = new Set(matches.filter(m => m.group_id === gid).map(m => m.round ?? 1));
+    return [...rounds].sort((a, b) => a - b);
+  };
+
+  const handleAdd = () => {
+    if (!p1 || !p2 || p1 === p2) return;
+    if (!isKO && !activeGroup) return;
+    const tbl = parseInt(tableNum) || (isKO ? 1 : GROUP_TABLE_MAP_FRONT[activeGroup?.group_name] || 1);
+    const groupId = isKO ? null : activeGroup?.group_id;
+    const unassignedToAssign = isKO ? [] :
+      [parseInt(p1), parseInt(p2)].filter(id => !assignedIds.has(id));
+    onCreateMatch(
+      parseInt(p1), parseInt(p2), groupId, tbl,
+      unassignedToAssign, activeStage.round, activeStage.stage
+    );
+    setP1(""); setP2("");
+  };
+
+  const handleSaveEdit = (matchId) => {
+    onPatch(matchId, { table_number: parseInt(editTableNum) || 1 });
+    setEditMatchId(null);
+  };
+
+  const renderMatch = (m) => {
+    const mp1    = m.participants?.find(p => p.position === 1);
+    const mp2    = m.participants?.find(p => p.position === 2);
+    const isLive = m.status === "live";
+    const isDone = m.status === "done" || m.status === "completed";
+    const isEdit = editMatchId === m.match_id;
+    const cSets  = (m.sets ?? []).filter(s => setWinner(s.score_p1, s.score_p2) !== null).sort((a,b)=>a.set_number-b.set_number);
+    const sw1    = cSets.filter(s => setWinner(s.score_p1,s.score_p2)===1).length;
+    const sw2    = cSets.filter(s => setWinner(s.score_p1,s.score_p2)===2).length;
+    const stagePill = m.stage === "quarter" ? "QF" : m.stage === "semi" ? "SF" : m.stage === "third" ? "3rd" : m.stage === "final" ? "F" : null;
+
+    return (
+      <div key={m.match_id} style={{
+        background: "#fff", border: isLive ? "2px solid #c0392b" : "1.5px solid #e8dfc8",
+        borderRadius: 8, padding: "10px 12px", marginBottom: 6,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span style={{ display: "inline-flex", alignItems: "center" }}>
+              {mp1?.player?.name ?? "?"}
+              {playerTag(mp1?.player, groups.find(g => g.group_id === m.group_id)?.group_name)}
+            </span>
+            <span style={{ color: "#7a6a50", fontWeight: 400, fontSize: 12 }}>vs</span>
+            <span style={{ display: "inline-flex", alignItems: "center" }}>
+              {mp2?.player?.name ?? "?"}
+              {playerTag(mp2?.player, groups.find(g => g.group_id === m.group_id)?.group_name)}
+            </span>
+            <span style={{ fontSize: 10, background: "#e8dfc8", color: "#6b4c2a", padding: "1px 5px", borderRadius: 3 }}>R{m.round}</span>
+            {isEdit ? (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <span style={{ fontSize: 11, color: "#7a6a50" }}>Table</span>
+                <input type="number" min={1} max={2} value={editTableNum}
+                  onChange={e => setEditTableNum(e.target.value)}
+                  style={{ width: 44, padding: "2px 4px", border: "1.5px solid #d4a017", borderRadius: 4, fontSize: 12, textAlign: "center" }} />
+                <button onClick={() => handleSaveEdit(m.match_id)} style={{ background: "#2d5a27", color: "#fff", border: "none", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✓</button>
+                <button onClick={() => setEditMatchId(null)} style={{ background: "transparent", color: "#999", border: "none", cursor: "pointer", fontSize: 12 }}>✕</button>
+              </span>
+            ) : (
+              m.table_number && <span style={{ fontSize: 10, background: "#fdf6e0", color: "#d4a017", border: "1px solid #d4a017", padding: "1px 5px", borderRadius: 3 }}>Table {m.table_number}</span>
+            )}
+            {isLive && <span style={{ fontSize: 10, background: "#c0392b", color: "#fff", padding: "1px 5px", borderRadius: 3 }}>🔴 LIVE</span>}
+            {isDone  && <span style={{ fontSize: 10, background: "#eaf2e8", color: "#2d5a27", padding: "1px 5px", borderRadius: 3 }}>✅ DONE</span>}
+            {stagePill && <span style={{ fontSize: 10, background: "#fdf6e0", color: "#d4a017", padding: "1px 5px", borderRadius: 3, fontWeight: 800 }}>{stagePill}</span>}
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {isDone && <span style={{ fontSize: 12, color: "#2d5a27", fontWeight: 700 }}>{sw1}–{sw2}</span>}
+            {!isLive && !isDone && (
+              <>
+                <button onClick={() => { setEditMatchId(m.match_id); setEditTableNum(String(m.table_number || 1)); }}
+                  style={{ background: "transparent", color: "#7a6a50", border: "1px solid #cfc0a0", borderRadius: 5, padding: "4px 8px", cursor: "pointer", fontSize: 11 }} title="Edit table">✏️</button>
+                <button onClick={() => onStart(m.match_id)} style={{ background: "#c0392b", color: "#fff", border: "none", borderRadius: 5, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Start</button>
+              </>
+            )}
+            {isLive  && <button onClick={() => onOpenScorer(m.match_id)} style={{ background: "#c0392b", color: "#fff", border: "none", borderRadius: 5, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>🎯 Score</button>}
+            {isDone  && <button onClick={() => onRematch(m.match_id)} style={{ background: "transparent", color: "#d4a017", border: "1.5px solid #d4a017", borderRadius: 5, padding: "4px 8px", cursor: "pointer", fontSize: 11, fontWeight: 700 }}>↩</button>}
+            {!isDone && !isLive && <button onClick={() => onDelete(m.match_id)} style={{ background: "transparent", color: "#bbb", border: "1px solid #e8dfc8", borderRadius: 5, padding: "4px 8px", cursor: "pointer", fontSize: 12 }}>✕</button>}
+          </div>
+        </div>
+        {isDone && cSets.length > 0 && (
+          <div style={{ marginTop: 4, color: "#7a6a50", fontSize: 11 }}>
+            {cSets.map(s => `${s.score_p1}–${s.score_p2}`).join("  ")}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Group by round for KO sections rendering (used later)
+  const koStageMatches = (stage) => matches.filter(m => !m.group_id && m.stage === stage);
+
+  return (
+    <div>
+      {/* ── Match creator ── */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title" style={{ marginBottom: 10 }}>Create Match</div>
+
+        {/* Stage selector */}
+        <div style={{ marginBottom: 10 }}>
+          <select className="input" style={{ width: "100%" }}
+            value={stageKey}
+            onChange={e => { setStageKey(e.target.value); setP1(""); setP2(""); }}>
+            <optgroup label="Group Stage">
+              {STAGE_OPTIONS.filter(s => !s.isKO).map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Knockout Stage">
+              {STAGE_OPTIONS.filter(s => s.isKO).map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </optgroup>
+          </select>
+        </div>
+
+        {/* Group selector — only for group stage */}
+        {!isKO && (
+          <div style={{ marginBottom: 10 }}>
+            <select className="input" style={{ width: "100%" }}
+              value={activeGroup?.group_id ?? ""}
+              onChange={e => { setSelectedGroup(parseInt(e.target.value)); setP1(""); setP2(""); }}>
+              {selectableGroups.map(g => (
+                <option key={g.group_id} value={g.group_id}>{g.group_name} — {GROUP_LABELS[g.group_name]}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {isKO && (
+          <div style={{ marginBottom: 8, padding: "6px 10px", background: "#fdf6e0",
+                        border: "1px solid #e8d08a", borderRadius: 6, fontSize: 12, color: "#6b4c2a" }}>
+            💡 Showing players who won or received a bye in their last group round
+          </div>
+        )}
+        {!isKO && isOpenGroup && availableUnassigned.length > 0 && (
+          <div style={{ marginBottom: 8, padding: "6px 10px", background: "#fdf6e0",
+                        border: "1px solid #e8d08a", borderRadius: 6, fontSize: 12, color: "#6b4c2a" }}>
+            💡 Unassigned players shown below — they'll be auto-added to {activeGroup?.group_name}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {/* Player 1 */}
+          <select className="input" style={{ flex: 2, minWidth: 140 }}
+            value={p1} onChange={e => setP1(e.target.value)}>
+            <option value="">Player 1…</option>
+            {isKO ? (
+              availableKOPlayers.map(p => (
+                <option key={p.player_id} value={p.player_id}>
+                  {p.name}{p._groupName ? ` (${p._groupName})` : ""}{p.age ? ` · ${p.age}y` : ""}
+                </option>
+              ))
+            ) : (
+              <>
+                {availableGroupPlayers.length > 0 && (
+                  <optgroup label="In group">
+                    {availableGroupPlayers.map(p => (
+                      <option key={p.player_id} value={p.player_id}>{p.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {isOpenGroup && availableUnassigned.length > 0 && (
+                  <optgroup label="Unassigned → will be added to group">
+                    {availableUnassigned.map(p => (
+                      <option key={p.player_id} value={p.player_id}>{p.name}{p.age ? ` (${p.age})` : ""}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </>
+            )}
+          </select>
+
+          <span style={{ color: "#7a6a50", fontWeight: 700 }}>vs</span>
+
+          {/* Player 2 */}
+          <select className="input" style={{ flex: 2, minWidth: 140 }}
+            value={p2} onChange={e => setP2(e.target.value)}>
+            <option value="">Player 2…</option>
+            {isKO ? (
+              availableKOPlayers.filter(p => p.player_id !== parseInt(p1)).map(p => (
+                <option key={p.player_id} value={p.player_id}>
+                  {p.name}{p._groupName ? ` (${p._groupName})` : ""}{p.age ? ` · ${p.age}y` : ""}
+                </option>
+              ))
+            ) : (
+              <>
+                {availableGroupPlayers.filter(p => p.player_id !== parseInt(p1)).length > 0 && (
+                  <optgroup label="In group">
+                    {availableGroupPlayers.filter(p => p.player_id !== parseInt(p1)).map(p => (
+                      <option key={p.player_id} value={p.player_id}>{p.name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                {isOpenGroup && availableUnassigned.filter(p => p.player_id !== parseInt(p1)).length > 0 && (
+                  <optgroup label="Unassigned → will be added to group">
+                    {availableUnassigned.filter(p => p.player_id !== parseInt(p1)).map(p => (
+                      <option key={p.player_id} value={p.player_id}>{p.name}{p.age ? ` (${p.age})` : ""}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </>
+            )}
+          </select>
+
+          {/* Table selector */}
+          <select className="input" style={{ width: 100 }}
+            value={tableNum} onChange={e => setTableNum(e.target.value)}>
+            <option value="1">Table 1</option>
+            <option value="2">Table 2</option>
+          </select>
+
+          <button className="btn-primary" onClick={handleAdd} disabled={!p1 || !p2 || p1 === p2}>
+            + Add Match
+          </button>
+        </div>
+      </div>
+
+      {/* ── Group matches — grouped by round ── */}
+      {groups.map(g => {
+        const allGM    = allGroupMatches(g.group_id);
+        const allByes  = allByeMatches(g.group_id);
+        const rounds   = getRounds(g.group_id);
+        const curRound = currentRound(g.group_id);
+        // Pending byes = alive players not in any match this round
+        const pendingByes = byesForCurrentRound(g);
+
+        if (!allGM.length && !allByes.length && !pendingByes.length) return null;
+
+        const totalLive = allGM.filter(m => m.status === "live").length;
+        const totalDone = allGM.filter(m => m.status === "done" || m.status === "completed").length;
+
+        return (
+          <div key={g.group_id} style={{ marginBottom: 16 }}>
+            {/* Group header */}
+            <div style={{
+              background: "#e8dfc8", borderRadius: "8px 8px 0 0",
+              padding: "10px 16px", border: "1.5px solid #cfc0a0", borderBottom: "none",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 16, fontWeight: 800, color: "#1a1208" }}>{g.group_name}</span>
+                <span style={{ fontSize: 11, color: "#7a6a50" }}>{GROUP_LABELS[g.group_name]}</span>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {totalLive > 0 && <span style={{ fontSize: 11, background: "#c0392b", color: "#fff", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>🔴 {totalLive} LIVE</span>}
+                {allGM.length > 0 && <span style={{ fontSize: 12, color: "#7a6a50" }}>{totalDone}/{allGM.length} done</span>}
+              </div>
+            </div>
+            <div style={{ border: "1.5px solid #cfc0a0", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "10px 12px", background: "#faf7f2" }}>
+
+              {/* Render each round */}
+              {(rounds.length ? rounds : [curRound]).map(round => {
+                const roundMatches = allGM.filter(m => (m.round ?? 1) === round);
+                const roundByes    = allByes.filter(m => (m.round ?? 1) === round);
+                const roundLive    = roundMatches.filter(m => m.status === "live").length;
+                const roundDone    = roundMatches.filter(m => m.status === "done" || m.status === "completed").length;
+                const allRoundDone = roundMatches.length > 0 &&
+                  roundMatches.every(m => m.status === "done" || m.status === "completed");
+
+                // For current round only: show pending byes
+                const showPendingByes = round === curRound && pendingByes.length > 0;
+
+                if (!roundMatches.length && !roundByes.length && !showPendingByes) return null;
+
+                return (
+                  <div key={round} style={{ marginBottom: 10 }}>
+                    {/* Round label */}
+                    <div style={{
+                      display: "flex", alignItems: "center", gap: 8,
+                      marginBottom: 6, paddingBottom: 5,
+                      borderBottom: "1px solid #e8dfc8",
+                    }}>
+                      <span style={{
+                        fontFamily: "'Barlow Condensed',sans-serif",
+                        fontSize: 13, fontWeight: 800, color: "#6b4c2a",
+                        letterSpacing: 1, textTransform: "uppercase",
+                      }}>Round {round}</span>
+                      {roundLive > 0 && <span style={{ fontSize: 10, background: "#c0392b", color: "#fff", padding: "1px 6px", borderRadius: 3, fontWeight: 700 }}>🔴 LIVE</span>}
+                      {allRoundDone && <span style={{ fontSize: 10, color: "#2d5a27", fontWeight: 700 }}>✓ complete</span>}
+                      {roundMatches.length > 0 && !allRoundDone && <span style={{ fontSize: 10, color: "#7a6a50" }}>{roundDone}/{roundMatches.length} done</span>}
+                    </div>
+
+                    {/* Matches */}
+                    {roundMatches.map(renderMatch)}
+
+                    {/* Byes for this round */}
+                    {roundByes.map(m => {
+                      const bp = m.participants?.[0];
+                      return (
+                        <div key={m.match_id} style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          padding: "7px 10px", marginBottom: 6,
+                          background: "#fdf6e0", border: "1px solid #e8d08a", borderRadius: 7,
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span style={{ fontSize: 10, fontWeight: 800, color: "#d4a017", textTransform: "uppercase", letterSpacing: 1 }}>BYE R{round}</span>
+                            <span style={{ fontWeight: 600, fontSize: 13 }}>{bp?.player?.name ?? "?"}</span>
+                            {playerTag(bp?.player, g.group_name)}
+                            <span style={{ fontSize: 11, color: "#2d5a27", fontWeight: 700 }}>✓ advances</span>
+                          </div>
+                          <button onClick={() => onDelete(m.match_id)} style={{
+                            background: "transparent", color: "#bbb", border: "1px solid #e8dfc8",
+                            borderRadius: 5, padding: "3px 8px", cursor: "pointer", fontSize: 12,
+                          }}>✕</button>
+                        </div>
+                      );
+                    })}
+
+                    {/* Pending byes — current round only, auto-detected */}
+                    {showPendingByes && round === curRound && (
+                      <div style={{
+                        padding: "8px 10px", background: "#f5f0e8",
+                        border: "1.5px dashed #cfc0a0", borderRadius: 7,
+                        display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                      }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: "#7a6a50" }}>Auto-bye Round {round}:</span>
+                        {pendingByes.map(p => (
+                          <button key={p.player_id}
+                            onClick={() => onGiveBye(p.player_id, g.group_id, round)}
+                            style={{
+                              background: "#fff", border: "1.5px solid #d4a017", borderRadius: 6,
+                              padding: "4px 10px", cursor: "pointer", fontSize: 12, fontWeight: 700,
+                              color: "#6b4c2a", display: "inline-flex", alignItems: "center", gap: 4,
+                            }}>
+                            {p.name}
+                            {playerTag(p, g.group_name)}
+                            <span style={{ marginLeft: 4, fontSize: 10, color: "#d4a017" }}>→ bye</span>
+                          </button>
+                        ))}
+                        <span style={{ fontSize: 10, color: "#7a6a50", fontStyle: "italic" }}>These players have no match this round — click to confirm bye</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* ── KO matches ── */}
+      {["quarter","semi","third","final"].map(stage => {
+        const sm = ungrouped.filter(m => m.stage === stage);
+        if (!sm.length) return null;
+        const label = stage === "quarter" ? "🏆 Quarter Finals" : stage === "semi" ? "🏆 Semi Finals" : stage === "third" ? "🥉 3rd Place" : "🏆 Final";
+        const live = sm.filter(m => m.status === "live").length;
+        const done = sm.filter(m => m.status === "done" || m.status === "completed").length;
+        return (
+          <div key={stage} style={{ marginBottom: 16 }}>
+            <div style={{
+              background: "#fdf6e0", borderRadius: "8px 8px 0 0",
+              padding: "10px 16px", border: "1.5px solid #d4a017", borderBottom: "none",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 16, fontWeight: 800, color: "#d4a017" }}>{label}</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                {live > 0 && <span style={{ fontSize: 11, background: "#c0392b", color: "#fff", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>🔴 {live} LIVE</span>}
+                <span style={{ fontSize: 12, color: "#7a6a50" }}>{done}/{sm.length} done</span>
+              </div>
+            </div>
+            <div style={{ border: "1.5px solid #d4a017", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "10px 12px", background: "#fffdf5" }}>
+              {sm.map(renderMatch)}
+            </div>
+          </div>
+        );
+      })}
+
+      {matches.length === 0 && (
+        <div className="empty">No matches yet — create matches above.</div>
+      )}
     </div>
   );
 }

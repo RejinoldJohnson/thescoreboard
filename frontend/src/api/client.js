@@ -66,6 +66,9 @@ export const createMatch      = (data) => request("POST",   "/matches/", data);
 export const deleteMatch      = (id)   => request("DELETE", `/matches/${id}`);
 export const generateFixtures = (tId)  => request("POST",   `/matches/generate/${tId}`);
 export const triggerKnockout   = (tId)  => request("POST",   `/matches/trigger-ko/${tId}`);
+export const assignPlayerGroup  = (tId, pId, gId) => request("PATCH", `/tournaments/${tId}/participants/${pId}/group${gId != null ? `?group_id=${gId}` : ""}`);
+export const createManualMatch  = (data) => request("POST", "/matches/", data);
+export const createBye          = (tId, pId, gId, round) => request("POST", `/matches/bye/${tId}?player_id=${pId}${gId ? `&group_id=${gId}` : ""}&round_num=${round || 1}`);
 export const rematchMatch     = (id)   => request("POST",   `/matches/${id}/rematch`);
 
 // General-purpose match patch — accepts any combo of status, table_number, set_update

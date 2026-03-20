@@ -9,10 +9,10 @@ from routers.auth import verify_token
 
 def _sub_group_label(group_name: str) -> str:
     labels = {
-        "Group A": "Boys U18 & Women",
-        "Group B": "Men 18–29",
-        "Group C": "Men 18–29",
-        "Group D": "Men 30+",
+        "Group A": "Men Under 30",
+        "Group B": "Men Under 30",
+        "Group C": "Men 30+",
+        "Group D": "Boys U18 & Women",
     }
     return labels.get(group_name, "")
 
@@ -117,7 +117,7 @@ def get_tournament(tournament_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{tournament_id}/participants/{player_id}", response_model=PlayerOut)
 def add_player_to_tournament(
-    tournament_id: int, player_id: int, seed: Optional[int] = None,
+    tournament_id: int, player_id: int,
     db: Session = Depends(get_db),
     authorization: Optional[str] = Header(None),
 ):
@@ -133,19 +133,11 @@ def add_player_to_tournament(
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Player already in this tournament")
-
-    counts = _group_counts(tournament_id, db)
-    group_name, sub_group = assign_group_and_subgroup(player.age, player.gender, counts)
-    group = db.query(Group).filter(
-        Group.tournament_id == tournament_id, Group.name == group_name,
-    ).first()
-
     db.add(TournamentParticipant(
         tournament_id=tournament_id,
         player_id=player_id,
-        group_id=group.group_id if group else None,
-        seed=seed,
-        sub_group=sub_group,
+        group_id=None,
+        sub_group=None,
     ))
     db.commit()
     return player
@@ -166,6 +158,48 @@ def remove_player_from_tournament(
     db.delete(tp)
     db.commit()
     return {"ok": True}
+
+
+@router.patch("/{tournament_id}/participants/{player_id}/group")
+def assign_player_group(
+    tournament_id: int, player_id: int,
+    group_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Assign or move a player to a group (or back to unassigned if group_id=None).
+    Automatically sets sub_group for Group A based on player gender/age.
+    """
+    require_admin(authorization)
+    tp = db.query(TournamentParticipant).filter_by(
+        tournament_id=tournament_id, player_id=player_id
+    ).first()
+    if not tp:
+        raise HTTPException(status_code=404, detail="Player not in this tournament")
+
+    if group_id is None:
+        tp.group_id  = None
+        tp.sub_group = None
+    else:
+        group = db.query(Group).filter(
+            Group.group_id == group_id,
+            Group.tournament_id == tournament_id,
+        ).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found")
+
+        player = db.query(Player).filter(Player.player_id == player_id).first()
+        tp.group_id = group_id
+
+        # Set sub_group for Group D based on gender/age (boys U18 + women all ages)
+        if group.name == "Group D":
+            tp.sub_group = "women" if _is_female(player.gender) else "boys"
+        else:
+            tp.sub_group = None
+
+    db.commit()
+    return {"ok": True, "group_id": tp.group_id, "sub_group": tp.sub_group}
 
 
 @router.patch("/{tournament_id}/participants/{player_id}/seed")
