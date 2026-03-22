@@ -236,7 +236,7 @@ def _advance_group_round(match: object, tournament_id: int, db) -> None:
     )
 
     # Determine sub-pools for this group
-    if group.name in ("Group A", "Group D"):
+    if group.name == "Group A":
         sub_pools    = ["boys", "women"]
         qualifiers_per_pool = 1
     else:
@@ -399,7 +399,7 @@ def _check_and_trigger_knockout(tournament_id: int, db: Session):
                             s["diff"] += st.score_p2 - st.score_p1
             return s
 
-        if group.name in ("Group A", "Group D"):
+        if group.name == "Group A":
             boys_pids  = [tp.player_id for tp in tps if getattr(tp, "sub_group", None) == "boys"]
             women_pids = [tp.player_id for tp in tps if getattr(tp, "sub_group", None) == "women"]
             for pool in [boys_pids, women_pids]:
@@ -685,8 +685,7 @@ def update_match(
     db.commit()
 
     if m.status in ("done", "completed") and m.stage == "group":
-        # Auto-round advancement disabled — admin creates fixtures manually
-        # _advance_group_round(m, m.tournament_id, db)
+        _advance_group_round(m, m.tournament_id, db)
         _check_and_trigger_knockout(m.tournament_id, db)
 
     if m.status in ("done", "completed") and m.stage in ("quarter", "semi"):
@@ -761,60 +760,6 @@ def trigger_knockout(
         Match.stage != "group",
     ).count()
     return {"ok": True, "ko_matches_created": ko_matches}
-
-
-# ── POST /matches/bye/{tournament_id} ────────────────────────
-@router.post("/bye/{tournament_id}")
-def create_bye(
-    tournament_id: int,
-    player_id: int,
-    group_id: Optional[int] = None,
-    round_num: int = 1,
-    db: Session = Depends(get_db),
-    authorization: Optional[str] = Header(None),
-):
-    """
-    Give a player a bye for a specific round.
-    A player can receive byes in multiple rounds (one per round).
-    """
-    require_admin(authorization)
-    player = db.query(Player).filter(Player.player_id == player_id).first()
-    if not player:
-        raise HTTPException(status_code=404, detail="Player not found")
-
-    # Check no existing bye for this player in this round
-    existing = (
-        db.query(Match)
-        .filter(
-            Match.tournament_id == tournament_id,
-            Match.stage == "bye",
-            Match.group_id == group_id,
-            Match.round == round_num,
-        )
-        .options(joinedload(Match.participants))
-        .all()
-    )
-    for m in existing:
-        if any(p.player_id == player_id for p in m.participants):
-            raise HTTPException(status_code=400, detail="Player already has a bye this round")
-
-    m = Match(
-        tournament_id=tournament_id,
-        group_id=group_id,
-        round=round_num,
-        status="done",
-        stage="bye",
-        table_number=None,
-        sets_to_win=1,
-    )
-    db.add(m); db.flush()
-    db.add(MatchParticipant(
-        match_id=m.match_id,
-        player_id=player_id,
-        position=1, score=0, is_winner=True,
-    ))
-    db.commit()
-    return _load_match(m.match_id, db)
 
 
 # ── POST /matches/generate/{tournament_id} ────────────────────

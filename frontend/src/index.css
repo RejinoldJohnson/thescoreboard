@@ -40,12 +40,12 @@ body {
   box-shadow: 0 2px 8px rgba(0,0,0,0.18);
 }
 .header-inner {
-  max-width: 1200px;
+  max-width: 100%;
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
+  height: 72px;
   gap: 8px;
 }
 .header-sub {
@@ -148,7 +148,7 @@ body {
 .tab-active { color: var(--green); border-bottom: 3px solid var(--green); }
 
 /* ── Content ────────────────────────────────────── */
-.content { max-width: 1200px; margin: 0 auto; padding: 16px; }
+.content { max-width: 100%; padding: 16px 12px; }
 
 .section-label {
   font-family: 'Barlow Condensed', sans-serif;
@@ -286,7 +286,7 @@ button { min-height: 36px; }
 /* ── Mobile ─────────────────────────────────────── */
 @media (max-width: 600px) {
   .header-title { font-size: 18px; }
-  .header-inner { height: 52px; }
+  .header-inner { height: 64px; }
   .header-sub   { font-size: 9px; letter-spacing: 2px; }
   .tabs  { padding: 0 8px; }
   .tab   { padding: 12px 12px; font-size: 14px; min-height: 44px; }
@@ -320,8 +320,8 @@ button { min-height: 36px; }
 
 /* ── Desktop 601px+ ─────────────────────────────── */
 @media (min-width: 601px) {
-  .content       { padding: 24px 20px; }
-  .section-label { font-size: 12px; margin: 20px 0 8px; }
+  .content       { padding: 16px 20px; }
+  .section-label { font-size: 12px; margin: 16px 0 8px; }
   .match-row     { padding: 12px 18px; }
   .match-player  { font-size: 15px; }
   .match-vs      { font-size: 17px; min-width: 64px; }
@@ -387,4 +387,42 @@ button { min-height: 36px; }
 }
 @media (min-width: 1100px) {
   .player-grid-desktop { grid-template-columns: repeat(6, 1fr); }
+}
+
+/* ── Live tab desktop layout ─────────────────────────────── */
+.live-desktop-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.live-cards-area {
+  flex: 1;
+}
+.upcoming-panel {
+  display: none; /* hidden on mobile */
+}
+
+@media (min-width: 900px) {
+  .live-desktop-layout {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 24px;
+  }
+  .live-cards-area {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .upcoming-panel {
+    display: block;
+    width: 280px;
+    flex-shrink: 0;
+    background: #faf7f2;
+    border: 1.5px solid #e8dfc8;
+    border-radius: 12px;
+    padding: 16px;
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+  }
 }
