@@ -128,8 +128,14 @@ export default function PublicPortal() {
   // as winner cards — they stay visible until the next match goes live.
   // We find the last "batch" by taking done matches sorted by match_id descending,
   // then include all done matches from the same round+group as the most recent one.
+  // If the final is done, the tournament is over — show results, not match cards
+  const tournamentOver = matches.some(m =>
+    m.stage === "final" && (m.status === "done" || m.status === "completed")
+  );
+
   const recentlyDoneCards = (() => {
     if (liveMatches.length > 0) return [];
+    if (tournamentOver) return [];   // final is done — show results screen instead
     const done = matches
       .filter(m => (m.status === "done" || m.status === "completed") && m.stage !== "bye")
       .sort((a, b) => b.match_id - a.match_id);
@@ -1069,10 +1075,12 @@ function MatchRow({ m, groupName }) {
   );
 }
 
-// ── TournamentResults — shown on Live tab when no matches are live ────────────
+// ── TournamentResults — shown on Live tab when tournament is over ─────────────
 function TournamentResults({ matches }) {
-  const finalMatch = matches.find(m => m.stage === "final" && (m.status === "done" || m.status === "completed"));
-  const thirdMatch = matches.find(m => m.stage === "third" && (m.status === "done" || m.status === "completed"));
+  const finalMatch = matches.find(m => m.stage === "final" &&
+    (m.status === "done" || m.status === "completed"));
+  const thirdMatch = matches.find(m => m.stage === "third" &&
+    (m.status === "done" || m.status === "completed"));
 
   if (!finalMatch) return null;
 
@@ -1082,60 +1090,119 @@ function TournamentResults({ matches }) {
 
   if (!champion) return null;
 
+  const specialAwards = [
+    { emoji: "🏓", label: "Best Player · Women", name: "Megha Thomas" },
+    { emoji: "🏅", label: "Best Player · Above 30", name: "Anson Paul" },
+  ];
+
   return (
-    <div style={{
-      background: "linear-gradient(135deg, #fdf6e0 0%, #fff 60%)",
-      border: "2px solid #d4a017",
-      borderRadius: 20,
-      padding: "36px 32px 40px",
-      marginBottom: 28,
-      textAlign: "center",
-      boxShadow: "0 8px 40px rgba(212,160,23,0.15)",
-    }}>
+    <div style={{ maxWidth: 520, margin: "0 auto 20px", padding: "0 4px" }}>
+
+      {/* Header */}
       <div style={{
+        textAlign: "center", marginBottom: 16,
         fontFamily: "'Barlow Condensed',sans-serif",
-        fontSize: 15, fontWeight: 800, letterSpacing: 4,
-        color: "#d4a017", textTransform: "uppercase",
-        marginBottom: 32,
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
-      }}>
-        <span style={{ flex: 1, height: 1, background: "#e8d08a", display: "block" }} />
-        🏆 Tournament Results
-        <span style={{ flex: 1, height: 1, background: "#e8d08a", display: "block" }} />
-      </div>
-      <div style={{
-        background: "linear-gradient(135deg, #d4a017, #f0c040)",
-        borderRadius: 16, padding: "28px 24px", marginBottom: 20,
-        boxShadow: "0 4px 20px rgba(212,160,23,0.3)",
-      }}>
-        <div style={{ fontSize: 40, marginBottom: 8 }}>🥇</div>
+        fontSize: 13, fontWeight: 800, letterSpacing: 4,
+        color: "#7a6a50", textTransform: "uppercase",
+      }}>🏆 Final Results</div>
+
+      {/* Podium rows — compact list style */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+
+        {/* 1st */}
         <div style={{
-          fontFamily: "'Barlow Condensed',sans-serif",
-          fontSize: "clamp(32px, 5vw, 56px)",
-          fontWeight: 900, color: "#fff", lineHeight: 1, letterSpacing: 1,
-          textShadow: "0 2px 8px rgba(0,0,0,0.15)",
-        }}>{champion.player?.name ?? "—"}</div>
-        <div style={{
-          fontFamily: "'Barlow Condensed',sans-serif",
-          fontSize: 13, fontWeight: 800, letterSpacing: 3,
-          color: "rgba(255,255,255,0.8)", textTransform: "uppercase", marginTop: 8,
-        }}>Champion</div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: third ? "1fr 1fr" : "1fr", gap: 12 }}>
+          display: "flex", alignItems: "center", gap: 12,
+          background: "#d4a017", borderRadius: 10, padding: "12px 16px",
+          boxShadow: "0 3px 12px rgba(212,160,23,0.35)",
+        }}>
+          <span style={{ fontSize: 28, flexShrink: 0 }}>🥇</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontFamily: "'Barlow Condensed',sans-serif",
+              fontSize: "clamp(20px, 4vw, 30px)", fontWeight: 900,
+              color: "#fff", lineHeight: 1, letterSpacing: 0.5,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>{champion.player?.name ?? "—"}</div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,0.75)",
+                          letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Champion</div>
+          </div>
+        </div>
+
+        {/* 2nd */}
         {runnerUp && (
-          <div style={{ background: "#fff", border: "2px solid #bbb", borderRadius: 14, padding: "20px 16px" }}>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>🥈</div>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: "clamp(20px, 3vw, 32px)", fontWeight: 900, color: "#1a1208", lineHeight: 1 }}>{runnerUp.player?.name ?? "—"}</div>
-            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, color: "#888", textTransform: "uppercase", marginTop: 6 }}>Runner Up</div>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            background: "#fff", border: "1.5px solid #ccc",
+            borderRadius: 10, padding: "10px 16px",
+          }}>
+            <span style={{ fontSize: 24, flexShrink: 0 }}>🥈</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontFamily: "'Barlow Condensed',sans-serif",
+                fontSize: "clamp(17px, 3vw, 24px)", fontWeight: 900,
+                color: "#1a1208", lineHeight: 1,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>{runnerUp.player?.name ?? "—"}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#999",
+                            letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>Runner Up</div>
+            </div>
           </div>
         )}
+
+        {/* 3rd */}
         {third && (
-          <div style={{ background: "linear-gradient(135deg, #fdf0e8, #fff5ef)", border: "2px solid #cd7f32", borderRadius: 14, padding: "20px 16px" }}>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>🥉</div>
-            <div style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: "clamp(20px, 3vw, 32px)", fontWeight: 900, color: "#1a1208", lineHeight: 1 }}>{third.player?.name ?? "—"}</div>
-            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 2, color: "#a0522d", textTransform: "uppercase", marginTop: 6 }}>3rd Place</div>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            background: "#fff", border: "1.5px solid #cd7f32",
+            borderRadius: 10, padding: "10px 16px",
+          }}>
+            <span style={{ fontSize: 24, flexShrink: 0 }}>🥉</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontFamily: "'Barlow Condensed',sans-serif",
+                fontSize: "clamp(17px, 3vw, 24px)", fontWeight: 900,
+                color: "#1a1208", lineHeight: 1,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>{third.player?.name ?? "—"}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#cd7f32",
+                            letterSpacing: 2, textTransform: "uppercase", marginTop: 2 }}>3rd Place</div>
+            </div>
           </div>
         )}
+      </div>
+
+      {/* Special Awards */}
+      <div style={{
+        borderTop: "1.5px solid #e8dfc8", paddingTop: 10,
+      }}>
+        <div style={{
+          fontFamily: "'Barlow Condensed',sans-serif",
+          fontSize: 10, fontWeight: 800, letterSpacing: 3,
+          color: "#7a6a50", textTransform: "uppercase", marginBottom: 8,
+        }}>Special Awards</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          {specialAwards.map(a => (
+            <div key={a.label} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              background: "#fff", border: "1.5px solid #e8dfc8",
+              borderRadius: 8, padding: "8px 12px",
+            }}>
+              <span style={{ fontSize: 20, flexShrink: 0 }}>{a.emoji}</span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontFamily: "'Barlow Condensed',sans-serif",
+                  fontSize: "clamp(14px, 2.5vw, 18px)", fontWeight: 900,
+                  color: "#1a1208", lineHeight: 1,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>{a.name}</div>
+                <div style={{
+                  fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+                  color: "#7a6a50", textTransform: "uppercase", marginTop: 3,
+                }}>{a.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

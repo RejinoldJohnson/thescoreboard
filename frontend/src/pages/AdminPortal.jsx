@@ -1290,10 +1290,10 @@ function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOp
   const ungrouped       = matches.filter(m => !m.group_id);
 
   // ── Round-aware group helpers ─────────────────────────────────
-  // Current round for a group = highest round number among its matches (or 1 if none)
+  // Current round = highest round among REAL matches only (NOT byes)
   const currentRound = (gid) => {
     const rounds = matches
-      .filter(m => m.group_id === gid)
+      .filter(m => m.group_id === gid && m.stage !== "bye")
       .map(m => m.round ?? 1);
     return rounds.length ? Math.max(...rounds) : 1;
   };
@@ -1309,25 +1309,28 @@ function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOp
         .filter(Boolean))
   );
 
-  // Players in a scheduled or live match for a specific round of a group
+  // Players in a scheduled or live REAL match for a specific round (byes excluded)
   const inRoundScheduledOrLive = (gid, round) => new Set(
     matches
-      .filter(m => m.group_id === gid && m.round === round &&
+      .filter(m => m.group_id === gid && m.round === round && m.stage !== "bye" &&
                    (m.status === "scheduled" || m.status === "live"))
       .flatMap(m => m.participants?.map(p => p.player?.player_id).filter(Boolean) ?? [])
   );
 
-  // Players who already have any match OR bye in a specific round of a group
+  // Players already in a REAL match this round (byes excluded)
+  // Bye recipients are intentionally NOT blocked — they must be schedulable for round 2
   const inRound = (gid, round) => new Set(
     matches
-      .filter(m => m.group_id === gid && m.round === round)
+      .filter(m => m.group_id === gid && m.round === round && m.stage !== "bye")
       .flatMap(m => m.participants?.map(p => p.player?.player_id).filter(Boolean) ?? [])
   );
 
-  // Current round for active group
+  // Current round for active group — used for display/bye detection only
   const activeRound = activeGroup ? currentRound(activeGroup.group_id) : 1;
+  // Round being CREATED — driven by the stage selector dropdown
+  const targetRound = isKO || isExhibition ? 1 : (activeStage?.round ?? activeRound);
   const elimActive  = activeGroup ? getEliminated(activeGroup.group_id) : new Set();
-  const inCurRoundActive = activeGroup ? inRoundScheduledOrLive(activeGroup.group_id, activeRound) : new Set();
+  const inCurRoundActive = activeGroup ? inRoundScheduledOrLive(activeGroup.group_id, targetRound) : new Set();
 
   // ── KO qualifier pool ─────────────────────────────────────────
   // For KO stages: show players who won or got a bye in the final round of their group
@@ -1371,14 +1374,14 @@ function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOp
   );
   const availableKOPlayers = koQualifiers.filter(p => !inKOStage.has(p.player_id));
 
-  // Available players for new match = alive + not already in current round
+  // Available players for new match = alive + not already in target round
   const availableGroupPlayers = (activeGroup?.players ?? []).filter(p =>
     !elimActive.has(p.player_id) &&
-    !inRound(activeGroup?.group_id, activeRound).has(p.player_id)
+    !inRound(activeGroup?.group_id, targetRound).has(p.player_id)
   );
   const availableUnassigned = isOpenGroup
     ? unassignedPlayers.filter(p =>
-        !inRound(activeGroup?.group_id, activeRound).has(p.player_id)
+        !inRound(activeGroup?.group_id, targetRound).has(p.player_id)
       )
     : [];
 
@@ -1386,9 +1389,17 @@ function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOp
   const byesForCurrentRound = (group) => {
     const round = currentRound(group.group_id);
     const elim  = getEliminated(group.group_id);
-    const inThisRound = inRound(group.group_id, round);
+    const inThisRound = inRound(group.group_id, round);  // real matches only
+    // Also exclude players who already have a bye THIS round
+    const byeThisRound = new Set(
+      matches
+        .filter(m => m.group_id === group.group_id && m.round === round && m.stage === "bye")
+        .flatMap(m => m.participants?.map(p => p.player?.player_id).filter(Boolean) ?? [])
+    );
     return group.players.filter(p =>
-      !elim.has(p.player_id) && !inThisRound.has(p.player_id)
+      !elim.has(p.player_id) &&
+      !inThisRound.has(p.player_id) &&
+      !byeThisRound.has(p.player_id)
     );
   };
 
