@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from database import get_db
 from models.models import Match, MatchParticipant, MatchSet, Player, TournamentParticipant, Group
-from schemas import MatchCreate, MatchOut, MatchUpdate
+from schemas import MatchCreate, ExhibitionMatchCreate, MatchOut, MatchUpdate
 from routers.auth import verify_token
 import random
 
@@ -42,9 +42,9 @@ def _load_match(match_id: int, db: Session) -> Match:
 def _sets_to_win(stage: str) -> int:
     """
     group / quarter  →  best-of-3  (first to 2 sets)
-    semi / final     →  best-of-5  (first to 3 sets)
+    semi / third / final  →  best-of-5  (first to 3 sets)
     """
-    return 3 if stage in ("semi", "final") else 2
+    return 3 if stage in ("semi", "third", "final") else 2
 
 
 def _set_winner(p1: int, p2: int) -> Optional[int]:
@@ -236,7 +236,7 @@ def _advance_group_round(match: object, tournament_id: int, db) -> None:
     )
 
     # Determine sub-pools for this group
-    if group.name == "Group A":
+    if group.name in ("Group A", "Group D"):
         sub_pools    = ["boys", "women"]
         qualifiers_per_pool = 1
     else:
@@ -399,7 +399,7 @@ def _check_and_trigger_knockout(tournament_id: int, db: Session):
                             s["diff"] += st.score_p2 - st.score_p1
             return s
 
-        if group.name == "Group A":
+        if group.name in ("Group A", "Group D"):
             boys_pids  = [tp.player_id for tp in tps if getattr(tp, "sub_group", None) == "boys"]
             women_pids = [tp.player_id for tp in tps if getattr(tp, "sub_group", None) == "women"]
             for pool in [boys_pids, women_pids]:
@@ -526,7 +526,7 @@ def _advance_knockout(tournament_id: int, db: Session):
                 m3 = Match(
                     tournament_id=tournament_id, group_id=None,
                     round=1, status="scheduled",
-                    stage="third", table_number=2, sets_to_win=2,
+                    stage="third", table_number=2, sets_to_win=3,
                 )
                 db.add(m3); db.flush()
                 db.add_all([
@@ -550,6 +550,22 @@ def get_matches(tournament_id: Optional[int] = None, db: Session = Depends(get_d
     if tournament_id:
         q = q.filter(Match.tournament_id == tournament_id)
     return q.order_by(Match.stage, Match.round, Match.match_id).all()
+
+
+@router.get("/live", response_model=List[MatchOut])
+def get_live_matches(tournament_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """
+    Lightweight endpoint — returns only live matches.
+    Polled every 1s by the public portal for real-time scores.
+    Much cheaper than the full /matches/ endpoint.
+    """
+    q = db.query(Match).options(
+        joinedload(Match.participants).joinedload(MatchParticipant.player),
+        joinedload(Match.sets),
+    ).filter(Match.status == "live")
+    if tournament_id:
+        q = q.filter(Match.tournament_id == tournament_id)
+    return q.all()
 
 
 # ── POST /matches/ ────────────────────────────────────────────
@@ -583,7 +599,34 @@ def create_match(
     return _load_match(m.match_id, db)
 
 
-# ── PATCH /matches/{match_id} ─────────────────────────────────
+# ── POST /matches/exhibition ──────────────────────────────────
+@router.post("/exhibition", response_model=MatchOut)
+def create_exhibition_match(
+    data: ExhibitionMatchCreate,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Create an exhibition match with free-text player names.
+    Not counted in tournament standings or KO qualification.
+    No DB players required — names stored directly on the match.
+    """
+    require_admin(authorization)
+    m = Match(
+        tournament_id=data.tournament_id,
+        group_id=None,
+        round=1,
+        status="scheduled",
+        stage="exhibition",
+        table_number=data.table_number,
+        sets_to_win=2,
+        exhibition_p1=data.player1_name.strip(),
+        exhibition_p2=data.player2_name.strip(),
+    )
+    db.add(m)
+    db.commit()
+    db.refresh(m)
+    return _load_match(m.match_id, db)
 @router.patch("/{match_id}", response_model=MatchOut)
 def update_match(
     match_id: int,
@@ -637,21 +680,21 @@ def update_match(
         s_p1 = sum(1 for s in all_sets if s.winner_position == 1)
         s_p2 = sum(1 for s in all_sets if s.winner_position == 2)
 
-        parts = sorted(m.participants, key=lambda x: x.position)
-        if len(parts) == 2:
-            parts[0].score = s_p1
-            parts[1].score = s_p2
-            # Update is_winner based on sets won, but do NOT auto-finish the match.
-            # The admin must explicitly press "Finish Match" which sends status:"done".
-            if s_p1 >= m.sets_to_win:
-                parts[0].is_winner = True
-                parts[1].is_winner = False
-            elif s_p2 >= m.sets_to_win:
-                parts[1].is_winner = True
-                parts[0].is_winner = False
-            else:
-                parts[0].is_winner = False
-                parts[1].is_winner = False
+        # Exhibition matches have no participants — skip score/winner tracking
+        if m.stage != "exhibition":
+            parts = sorted(m.participants, key=lambda x: x.position)
+            if len(parts) == 2:
+                parts[0].score = s_p1
+                parts[1].score = s_p2
+                if s_p1 >= m.sets_to_win:
+                    parts[0].is_winner = True
+                    parts[1].is_winner = False
+                elif s_p2 >= m.sets_to_win:
+                    parts[1].is_winner = True
+                    parts[0].is_winner = False
+                else:
+                    parts[0].is_winner = False
+                    parts[1].is_winner = False
 
     # ── Undo a confirmed set ───────────────────────────────
     if data.undo_set is not None:
@@ -661,31 +704,39 @@ def update_match(
         ).delete()
         db.flush()
 
+        # Clear current_server — admin must re-select serve for the replayed set
+        m.current_server = None
+
         # Recalculate sets won after deletion
         remaining = db.query(MatchSet).filter(MatchSet.match_id == match_id).all()
         s_p1 = sum(1 for s in remaining if s.winner_position == 1)
         s_p2 = sum(1 for s in remaining if s.winner_position == 2)
 
-        parts = sorted(m.participants, key=lambda x: x.position)
-        if len(parts) == 2:
-            parts[0].score = s_p1
-            parts[1].score = s_p2
-            parts[0].is_winner = False
-            parts[1].is_winner = False
-            # Only restore to done if still enough sets won
-            if s_p1 >= m.sets_to_win:
-                parts[0].is_winner = True
-            elif s_p2 >= m.sets_to_win:
-                parts[1].is_winner = True
-            else:
-                # Match is no longer done — revert to live
-                if m.status in ("done", "completed"):
-                    m.status = "live"
+        # Exhibition matches have no participants — skip
+        if m.stage != "exhibition":
+            parts = sorted(m.participants, key=lambda x: x.position)
+            if len(parts) == 2:
+                parts[0].score = s_p1
+                parts[1].score = s_p2
+                parts[0].is_winner = False
+                parts[1].is_winner = False
+                if s_p1 >= m.sets_to_win:
+                    parts[0].is_winner = True
+                elif s_p2 >= m.sets_to_win:
+                    parts[1].is_winner = True
+                else:
+                    if m.status in ("done", "completed"):
+                        m.status = "live"
+        else:
+            # For exhibition, just revert to live if undoing
+            if m.status in ("done", "completed"):
+                m.status = "live"
 
     db.commit()
 
     if m.status in ("done", "completed") and m.stage == "group":
-        _advance_group_round(m, m.tournament_id, db)
+        # Auto-round advancement disabled — admin creates fixtures manually
+        # _advance_group_round(m, m.tournament_id, db)
         _check_and_trigger_knockout(m.tournament_id, db)
 
     if m.status in ("done", "completed") and m.stage in ("quarter", "semi"):
@@ -760,6 +811,60 @@ def trigger_knockout(
         Match.stage != "group",
     ).count()
     return {"ok": True, "ko_matches_created": ko_matches}
+
+
+# ── POST /matches/bye/{tournament_id} ────────────────────────
+@router.post("/bye/{tournament_id}")
+def create_bye(
+    tournament_id: int,
+    player_id: int,
+    group_id: Optional[int] = None,
+    round_num: int = 1,
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Give a player a bye for a specific round.
+    A player can receive byes in multiple rounds (one per round).
+    """
+    require_admin(authorization)
+    player = db.query(Player).filter(Player.player_id == player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # Check no existing bye for this player in this round
+    existing = (
+        db.query(Match)
+        .filter(
+            Match.tournament_id == tournament_id,
+            Match.stage == "bye",
+            Match.group_id == group_id,
+            Match.round == round_num,
+        )
+        .options(joinedload(Match.participants))
+        .all()
+    )
+    for m in existing:
+        if any(p.player_id == player_id for p in m.participants):
+            raise HTTPException(status_code=400, detail="Player already has a bye this round")
+
+    m = Match(
+        tournament_id=tournament_id,
+        group_id=group_id,
+        round=round_num,
+        status="done",
+        stage="bye",
+        table_number=None,
+        sets_to_win=1,
+    )
+    db.add(m); db.flush()
+    db.add(MatchParticipant(
+        match_id=m.match_id,
+        player_id=player_id,
+        position=1, score=0, is_winner=True,
+    ))
+    db.commit()
+    return _load_match(m.match_id, db)
 
 
 # ── POST /matches/generate/{tournament_id} ────────────────────

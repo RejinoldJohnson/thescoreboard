@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, ForeignKey, DateTime, Boolean,
-    UniqueConstraint, CheckConstraint
+    UniqueConstraint, CheckConstraint, Index
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -76,8 +76,17 @@ class Match(Base):
     table_number  = Column(Integer, nullable=True)
     sets_to_win    = Column(Integer, default=2)
     current_server = Column(Integer, nullable=True)   # 1 or 2 — updated live by admin
+    exhibition_p1  = Column(String(100), nullable=True)  # free-text name, exhibition only
+    exhibition_p2  = Column(String(100), nullable=True)  # free-text name, exhibition only
     scheduled_at   = Column(DateTime, nullable=True)
     created_date  = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        # The two most common queries: all matches for a tournament, and live matches
+        Index("ix_match_tournament",        "tournament_id"),
+        Index("ix_match_tournament_status", "tournament_id", "status"),
+        Index("ix_match_status",            "status"),
+    )
 
     tournament   = relationship("Tournament", back_populates="matches")
     group        = relationship("Group",      back_populates="matches")

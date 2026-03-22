@@ -5,7 +5,7 @@ import {
   getTournaments, createTournament,
   getParticipants,
   getMatches, updateMatch, deleteMatch, rematchMatch,
-  assignPlayerGroup, createManualMatch, createBye,
+  assignPlayerGroup, createManualMatch, createBye, createExhibitionMatch,
   logout,
 } from "../api/client";
 
@@ -193,6 +193,19 @@ export default function AdminPortal({ onLogout }) {
     } catch (e) { flash("Error: " + e.message, "err"); }
   };
 
+  const handleCreateExhibition = async (p1Name, p2Name, tableNum) => {
+    try {
+      await createExhibitionMatch({
+        tournament_id: activeTId,
+        player1_name: p1Name,
+        player2_name: p2Name,
+        table_number: tableNum || 1,
+      });
+      await loadTournamentData();
+      flash("Exhibition match created!");
+    } catch (e) { flash("Error: " + e.message, "err"); }
+  };
+
   const handleGiveBye = async (playerId, groupId, round) => {
     try {
       await createBye(activeTId, playerId, groupId, round);
@@ -216,7 +229,12 @@ export default function AdminPortal({ onLogout }) {
   // Does NOT reload tournament data — scores are already in local state (optimistic UI).
   // Data is only reloaded when a set is confirmed or match is finished.
   const handleSetUpdate = async (matchId, setUpdate) => {
-    try { await updateMatch(matchId, { set_update: setUpdate }); }
+    try {
+      const { current_server, ...scoreOnly } = setUpdate;
+      const payload = { set_update: scoreOnly };
+      if (current_server != null) payload.current_server = current_server;
+      await updateMatch(matchId, payload);
+    }
     catch (e) { flash("Error saving set: " + e.message, "err"); }
   };
 
@@ -425,6 +443,7 @@ export default function AdminPortal({ onLogout }) {
                   onRematch={handleRematch}
                   onPatch={handlePatchMatch}
                   onGiveBye={handleGiveBye}
+                  onCreateExhibition={handleCreateExhibition}
                 />
               </>
             )}
@@ -436,8 +455,13 @@ export default function AdminPortal({ onLogout }) {
       {activeMatchId && (() => {
         const m = matches.find(x => x.match_id === activeMatchId);
         if (!m) return null;
-        const p1 = getP1(m);
-        const p2 = getP2(m);
+        // For exhibition matches, create synthetic participant objects from stored names
+        const p1 = m.stage === "exhibition"
+          ? { position: 1, player: { name: m.exhibition_p1 ?? "Player 1" }, is_winner: false, score: 0 }
+          : getP1(m);
+        const p2 = m.stage === "exhibition"
+          ? { position: 2, player: { name: m.exhibition_p2 ?? "Player 2" }, is_winner: false, score: 0 }
+          : getP2(m);
         return (
           <div style={{
             position: "fixed", inset: 0, zIndex: 9999,
@@ -549,16 +573,18 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onRe
   const latestScoreRef = useRef(null);
   const sendingScore   = useRef(false);
 
-  const dispatchScore = useCallback((setNum, ns1, ns2) => {
-    latestScoreRef.current = { setNum, ns1, ns2 };
+  const dispatchScore = useCallback((setNum, ns1, ns2, server) => {
+    latestScoreRef.current = { setNum, ns1, ns2, server };
     if (sendingScore.current) return; // already in flight — latest will flush after
     const flush = async () => {
       while (latestScoreRef.current) {
-        const { setNum: sn, ns1: n1, ns2: n2 } = latestScoreRef.current;
+        const { setNum: sn, ns1: n1, ns2: n2, server: srv } = latestScoreRef.current;
         latestScoreRef.current = null;
         sendingScore.current = true;
         try {
-          await onSetUpdate({ set_number: sn, score_p1: n1, score_p2: n2 });
+          // Include current_server with every score update so public portal
+          // always shows the correct server in real time
+          await onSetUpdate({ set_number: sn, score_p1: n1, score_p2: n2, current_server: srv });
         } catch(e) { /* silent — score will resync on next poll */ }
       }
       sendingScore.current = false;
@@ -569,12 +595,13 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onRe
   // +Point — left/right buttons map to visual positions → backend positions
   const addPoint = (side) => {
     if (matchWinner) return;
-    // side = "left" or "right"; map to backend position
     const backendPos = side === "left" ? leftPos : rightPos;
     const ns1 = backendPos === 1 ? s1 + 1 : s1;
     const ns2 = backendPos === 2 ? s2 + 1 : s2;
     setS1(ns1); setS2(ns2);
-    dispatchScore(adminSetNum, ns1, ns2);
+    // Compute who will be serving AFTER this point and include in dispatch
+    const newServing = computeServe(ns1, ns2, firstServer);
+    dispatchScore(adminSetNum, ns1, ns2, newServing);
   };
 
   // Undo point — same visual→backend mapping
@@ -584,7 +611,8 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onRe
     const ns1 = backendPos === 1 ? Math.max(0, s1 - 1) : s1;
     const ns2 = backendPos === 2 ? Math.max(0, s2 - 1) : s2;
     setS1(ns1); setS2(ns2);
-    dispatchScore(adminSetNum, ns1, ns2);
+    const newServing = computeServe(ns1, ns2, firstServer);
+    dispatchScore(adminSetNum, ns1, ns2, newServing);
   };
 
   // Confirm set — auto-swap after confirming, show swap banner
@@ -614,7 +642,8 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onRe
       await onReload();
       setAdminSetNum(lastSet.set_number);
       setS1(0); setS2(0);
-      setSwapped(v => !v);   // reverse the swap that happened when set was confirmed
+      setSet1FirstServer(1);     // reset serve — must be re-selected for replayed set
+      setSwapped(v => !v);       // reverse the swap that happened when set was confirmed
       setShowSwapBanner(false);
     } finally {
       setSaving(false);
@@ -637,11 +666,13 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onRe
       {canManualSwap && (
         <div style={{ textAlign: "center" }}>
           <button onClick={handleManualSwap} style={{
-            background: "#1a1208", border: "1.5px solid #333", borderRadius: 7,
-            color: "#7a6a50", padding: "6px 16px", cursor: "pointer",
-            fontSize: 12, fontWeight: 700, letterSpacing: 1,
-          }}>⇄ Swap starting positions</button>
-          <div style={{ fontSize: 10, color: "#2a2a2a", marginTop: 4 }}>Only available before first point</div>
+            background: "linear-gradient(135deg, #1a4a8a, #2d6abf)",
+            border: "none", borderRadius: 8,
+            color: "#fff", padding: "10px 24px", cursor: "pointer",
+            fontSize: 14, fontWeight: 800, letterSpacing: 1,
+            boxShadow: "0 2px 8px rgba(45,106,191,0.4)",
+          }}>⇄ Swap Starting Positions</button>
+          <div style={{ fontSize: 10, color: "#3a3a3a", marginTop: 5 }}>Only available before first point</div>
         </div>
       )}
 
@@ -700,9 +731,11 @@ function LiveScorer({ match, p1, p2, onSetUpdate, onUndoSet, onServeChange, onRe
           })}
           {!matchWinner && (
             <button onClick={undoLastSet} disabled={saving} style={{
-              background: "transparent", color: "#c0392b",
-              border: "1px solid #c0392b", borderRadius: 5,
-              padding: "3px 8px", cursor: "pointer", fontSize: 11, fontWeight: 700,
+              background: saving ? "#1a0a0a" : "#c0392b",
+              color: saving ? "#555" : "#fff",
+              border: "none", borderRadius: 6,
+              padding: "6px 16px", cursor: saving ? "not-allowed" : "pointer",
+              fontSize: 13, fontWeight: 800, letterSpacing: 0.5,
             }}>↩ Undo Set</button>
           )}
         </div>
@@ -1224,19 +1257,23 @@ const STAGE_OPTIONS = [
   { value: "semi|1",    label: "Semi Finals",             stage: "semi",    round: 1, isKO: true  },
   { value: "third|1",   label: "3rd Place",               stage: "third",   round: 1, isKO: true  },
   { value: "final|1",   label: "Final",                   stage: "final",   round: 1, isKO: true  },
+  { value: "exhibition|1", label: "⭐ Exhibition Match",      stage: "exhibition", round: 1, isKO: false, isExhibition: true },
 ];
 
-function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOpenScorer, onDelete, onRematch, onPatch, onGiveBye }) {
+function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOpenScorer, onDelete, onRematch, onPatch, onGiveBye, onCreateExhibition }) {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [stageKey, setStageKey]           = useState("group|1");
   const [p1, setP1]                       = useState("");
   const [p2, setP2]                       = useState("");
+  const [exP1, setExP1]                   = useState("");
+  const [exP2, setExP2]                   = useState("");
   const [tableNum, setTableNum]           = useState("1");
   const [editMatchId, setEditMatchId]     = useState(null);
   const [editTableNum, setEditTableNum]   = useState("1");
 
   const activeStage = STAGE_OPTIONS.find(s => s.value === stageKey) || STAGE_OPTIONS[0];
   const isKO = activeStage.isKO;
+  const isExhibition = activeStage.isExhibition ?? false;
 
   const assignedIds      = new Set(groups.flatMap(g => g.players.map(p => p.player_id)));
   const unassignedPlayers = (players ?? []).filter(p => !assignedIds.has(p.player_id));
@@ -1373,6 +1410,7 @@ function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOp
       unassignedToAssign, activeStage.round, activeStage.stage
     );
     setP1(""); setP2("");
+    setExP1(""); setExP2("");
   };
 
   const handleSaveEdit = (matchId) => {
@@ -1493,13 +1531,47 @@ function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOp
             💡 Showing players who won or received a bye in their last group round
           </div>
         )}
-        {!isKO && isOpenGroup && availableUnassigned.length > 0 && (
+        {!isKO && !isExhibition && isOpenGroup && availableUnassigned.length > 0 && (
           <div style={{ marginBottom: 8, padding: "6px 10px", background: "#fdf6e0",
                         border: "1px solid #e8d08a", borderRadius: 6, fontSize: 12, color: "#6b4c2a" }}>
             💡 Unassigned players shown below — they'll be auto-added to {activeGroup?.group_name}
           </div>
         )}
 
+        {/* Exhibition form — free text names */}
+        {isExhibition && (
+          <div>
+            <div style={{ marginBottom: 8, padding: "6px 10px", background: "#f0f4ff",
+                          border: "1px solid #b8c8f0", borderRadius: 6, fontSize: 12, color: "#3a5cc7" }}>
+              ⭐ Exhibition match — not counted in tournament standings
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input className="input" style={{ flex: 2, minWidth: 140 }}
+                placeholder="Player 1 name…"
+                value={exP1} onChange={e => setExP1(e.target.value)} />
+              <span style={{ color: "#7a6a50", fontWeight: 700 }}>vs</span>
+              <input className="input" style={{ flex: 2, minWidth: 140 }}
+                placeholder="Player 2 name…"
+                value={exP2} onChange={e => setExP2(e.target.value)} />
+              <select className="input" style={{ width: 100 }}
+                value={tableNum} onChange={e => setTableNum(e.target.value)}>
+                <option value="1">Table 1</option>
+                <option value="2">Table 2</option>
+              </select>
+              <button className="btn-primary"
+                style={{ background: "#3a5cc7" }}
+                disabled={!exP1.trim() || !exP2.trim() || exP1.trim() === exP2.trim()}
+                onClick={() => {
+                  onCreateExhibition(exP1.trim(), exP2.trim(), parseInt(tableNum) || 1);
+                  setExP1(""); setExP2("");
+                }}>
+                + Add Exhibition
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!isExhibition && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {/* Player 1 */}
           <select className="input" style={{ flex: 2, minWidth: 140 }}
@@ -1574,6 +1646,7 @@ function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOp
             + Add Match
           </button>
         </div>
+        )}
       </div>
 
       {/* ── Group matches — grouped by round ── */}
@@ -1725,6 +1798,63 @@ function FixtureBuilder({ groups, players, matches, onCreateMatch, onStart, onOp
           </div>
         );
       })}
+
+      {/* ── Exhibition matches ── */}
+      {(() => {
+        const em = matches.filter(m => m.stage === "exhibition");
+        if (!em.length) return null;
+        const live = em.filter(m => m.status === "live").length;
+        const done = em.filter(m => m.status === "done" || m.status === "completed").length;
+        return (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{
+              background: "#f0f4ff", borderRadius: "8px 8px 0 0",
+              padding: "10px 16px", border: "1.5px solid #b8c8f0", borderBottom: "none",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 16, fontWeight: 800, color: "#3a5cc7" }}>⭐ Exhibition Matches</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                {live > 0 && <span style={{ fontSize: 11, background: "#c0392b", color: "#fff", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>🔴 {live} LIVE</span>}
+                <span style={{ fontSize: 12, color: "#7a6a50" }}>{done}/{em.length} done</span>
+              </div>
+            </div>
+            <div style={{ border: "1.5px solid #b8c8f0", borderTop: "none", borderRadius: "0 0 8px 8px", padding: "10px 12px", background: "#f8f9ff" }}>
+              {em.map(m => {
+                const isLive = m.status === "live";
+                const isDone = m.status === "done" || m.status === "completed";
+                return (
+                  <div key={m.match_id} style={{
+                    background: "#fff", border: isLive ? "2px solid #c0392b" : "1.5px solid #b8c8f0",
+                    borderRadius: 8, padding: "10px 12px", marginBottom: 6,
+                    display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8,
+                  }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 10, background: "#f0f4ff", color: "#3a5cc7", padding: "1px 6px", borderRadius: 3, fontWeight: 800 }}>⭐ EXH</span>
+                      <span>{m.exhibition_p1 ?? "?"}</span>
+                      <span style={{ color: "#7a6a50", fontWeight: 400, fontSize: 12 }}>vs</span>
+                      <span>{m.exhibition_p2 ?? "?"}</span>
+                      {m.table_number && <span style={{ fontSize: 10, background: "#fdf6e0", color: "#d4a017", border: "1px solid #d4a017", padding: "1px 5px", borderRadius: 3 }}>Table {m.table_number}</span>}
+                      {isLive && <span style={{ fontSize: 10, background: "#c0392b", color: "#fff", padding: "1px 5px", borderRadius: 3 }}>🔴 LIVE</span>}
+                      {isDone  && <span style={{ fontSize: 10, background: "#eaf2e8", color: "#2d5a27", padding: "1px 5px", borderRadius: 3 }}>✅ DONE</span>}
+                    </div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      {!isLive && !isDone && (
+                        <button onClick={() => onStart(m.match_id)} style={{ background: "#c0392b", color: "#fff", border: "none", borderRadius: 5, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>▶ Start</button>
+                      )}
+                      {isLive && (
+                        <button onClick={() => onOpenScorer(m.match_id)} style={{ background: "#c0392b", color: "#fff", border: "none", borderRadius: 5, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>🎯 Score</button>
+                      )}
+                      {!isDone && !isLive && (
+                        <button onClick={() => onDelete(m.match_id)} style={{ background: "transparent", color: "#bbb", border: "1px solid #e8dfc8", borderRadius: 5, padding: "4px 8px", cursor: "pointer", fontSize: 12 }}>✕</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {matches.length === 0 && (
         <div className="empty">No matches yet — create matches above.</div>

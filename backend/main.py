@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from database import engine, Base
 from routers import players, matches, auth, tournaments
 import os
@@ -7,6 +8,9 @@ import os
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Table Tennis Tournament API", version="1.0.0")
+
+# Compress responses > 1KB — reduces payload by ~70% for JSON
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "*")
 

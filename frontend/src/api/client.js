@@ -62,6 +62,8 @@ export const setPlayerSeed     = (tId, pId, seed) =>
 
 // ── Matches ──────────────────────────────────────────────────
 export const getMatches       = (tId)  => request("GET",    `/matches/?tournament_id=${tId}`);
+export const getLiveMatches   = (tId)  => request("GET",    `/matches/live?tournament_id=${tId}`);
+export const createExhibitionMatch = (data) => request("POST", "/matches/exhibition", data);
 export const createMatch      = (data) => request("POST",   "/matches/", data);
 export const deleteMatch      = (id)   => request("DELETE", `/matches/${id}`);
 export const generateFixtures = (tId)  => request("POST",   `/matches/generate/${tId}`);

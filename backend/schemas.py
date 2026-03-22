@@ -84,12 +84,21 @@ class MatchCreate(BaseModel):
     table_number:  Optional[int] = None
 
 
+class ExhibitionMatchCreate(BaseModel):
+    tournament_id: int
+    player1_name:  str
+    player2_name:  str
+    table_number:  Optional[int] = None
+
+
 class MatchUpdate(BaseModel):
     status:         Optional[str]       = None
     table_number:   Optional[int]       = None
     current_server: Optional[int]       = None   # 1 or 2 — admin sets who is serving
     set_update:     Optional[SetUpdate] = None   # record a completed set
     undo_set:       Optional[int]       = None   # set_number to delete (undo last set)
+    player1_id:     Optional[int]       = None   # swap player in position 1
+    player2_id:     Optional[int]       = None   # swap player in position 2
 
 
 class MatchOut(BaseModel):
@@ -103,6 +112,8 @@ class MatchOut(BaseModel):
     sets_to_win:    int
     current_server: Optional[int]
     scheduled_at:   Optional[datetime]
+    exhibition_p1:  Optional[str] = None
+    exhibition_p2:  Optional[str] = None
     participants:  List[MatchParticipantOut]
     sets:          List[MatchSetOut] = []
 
