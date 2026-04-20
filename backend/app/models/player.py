@@ -1,0 +1,57 @@
+"""
+Player   — individual competitor (TT, Badminton).
+Team     — a squad for team sports (Cricket, Football).
+TeamMember — a player within a team roster.
+"""
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Index
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from app.database import Base
+
+
+class Player(Base):
+    __tablename__ = "players"
+
+    player_id  = Column(Integer, primary_key=True)
+    org_id     = Column(Integer, ForeignKey("organizations.org_id", ondelete="SET NULL"), nullable=True)
+    name       = Column(String(150), nullable=False)
+    age        = Column(Integer,     nullable=True)
+    gender     = Column(String(20),  nullable=True)
+    phone      = Column(String(30),  nullable=True)
+    email      = Column(String(200), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    org = relationship("Organization")
+    event_participations = relationship("EventParticipant", back_populates="player",
+                                        foreign_keys="EventParticipant.player_id")
+
+
+class Team(Base):
+    __tablename__ = "teams"
+
+    team_id       = Column(Integer, primary_key=True)
+    org_id        = Column(Integer, ForeignKey("organizations.org_id", ondelete="SET NULL"), nullable=True)
+    name          = Column(String(150), nullable=False)
+    sport_key     = Column(String(50),  nullable=True)
+    contact_name  = Column(String(150), nullable=True)
+    contact_phone = Column(String(30),  nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    org = relationship("Organization")
+    members              = relationship("TeamMember", back_populates="team",
+                                        cascade="all, delete-orphan")
+    event_participations = relationship("EventParticipant", back_populates="team",
+                                        foreign_keys="EventParticipant.team_id")
+
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+
+    tm_id         = Column(Integer, primary_key=True)
+    team_id       = Column(Integer, ForeignKey("teams.team_id", ondelete="CASCADE"), nullable=False)
+    name          = Column(String(150), nullable=False)
+    role          = Column(String(50),  nullable=True)   # captain / player / goalkeeper
+    jersey_number = Column(Integer,     nullable=True)
+    created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    team = relationship("Team", back_populates="members")

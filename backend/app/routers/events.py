@@ -1,0 +1,135 @@
+"""
+Event routes — manage sport events within a tournament.
+"""
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List
+
+from app.database import get_db
+from app.models.user import User
+from app.models.organization import OrgMember
+from app.models.tournament import Tournament
+from app.models.event import Event
+from app.schemas.event import EventCreate, EventUpdate, EventOut
+from app.utils.auth import get_current_user
+from app.sports.registry import get_sport_engine, list_sports
+
+router = APIRouter()
+
+
+def _get_tournament_and_check(tournament_id: int, user: User, db: Session) -> Tournament:
+    t = db.query(Tournament).filter(Tournament.tournament_id == tournament_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Tournament not found")
+
+    if not user.is_superadmin:
+        member = db.query(OrgMember).filter(
+            OrgMember.org_id == t.org_id,
+            OrgMember.user_id == user.user_id,
+        ).first()
+        if not member:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    return t
+
+
+@router.get("/sports")
+def get_available_sports():
+    """List all supported sports for the event creation form."""
+    return list_sports()
+
+
+@router.post("/tournaments/{tournament_id}/events", response_model=EventOut)
+def create_event(
+    tournament_id: int,
+    data: EventCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    t = _get_tournament_and_check(tournament_id, user, db)
+
+    # Validate sport key
+    try:
+        engine = get_sport_engine(data.sport_key)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Validate and merge sport config
+    base_config = engine.get_default_config()
+    if data.sport_config:
+        try:
+            base_config = engine.validate_config({**base_config, **data.sport_config})
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid sport config: {e}")
+
+    valid_formats = ["group_knockout", "direct_knockout", "round_robin"]
+    if data.format not in valid_formats:
+        raise HTTPException(status_code=400, detail=f"Format must be one of {valid_formats}")
+
+    event = Event(
+        tournament_id=tournament_id,
+        name=data.name,
+        sport_key=data.sport_key,
+        format=data.format,
+        participant_type=data.participant_type,
+        sport_config=base_config,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@router.get("/tournaments/{tournament_id}/events", response_model=List[EventOut])
+def list_events(tournament_id: int, db: Session = Depends(get_db)):
+    """Public — list all events in a tournament."""
+    return (
+        db.query(Event)
+        .filter(Event.tournament_id == tournament_id, Event.is_active == True)
+        .order_by(Event.created_at)
+        .all()
+    )
+
+
+@router.get("/events/{event_id}", response_model=EventOut)
+def get_event(event_id: int, db: Session = Depends(get_db)):
+    event = db.query(Event).filter(Event.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
+
+
+@router.patch("/events/{event_id}", response_model=EventOut)
+def update_event(
+    event_id: int,
+    data: EventUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    event = db.query(Event).filter(Event.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Check access via tournament → org
+    t = db.query(Tournament).filter(Tournament.tournament_id == event.tournament_id).first()
+    if not user.is_superadmin:
+        member = db.query(OrgMember).filter(
+            OrgMember.org_id == t.org_id,
+            OrgMember.user_id == user.user_id,
+        ).first()
+        if not member:
+            raise HTTPException(status_code=403, detail="Not authorized")
+
+    if data.sport_config is not None:
+        engine = get_sport_engine(event.sport_key)
+        try:
+            data.sport_config = engine.validate_config(data.sport_config)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid sport config: {e}")
+
+    for field, val in data.model_dump(exclude_unset=True).items():
+        setattr(event, field, val)
+
+    db.commit()
+    db.refresh(event)
+    return event
