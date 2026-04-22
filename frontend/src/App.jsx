@@ -16,7 +16,7 @@ import EventWorkspace     from "./pages/organiser/workspace/EventWorkspace";
 
 function RequireAuth({ children }) {
   if (!isLoggedIn()) return <Navigate to="/login" replace />;
-  return children;
+  return <div className="organizer-flow">{children}</div>; // Forces Organizer Theme
 }
 
 export default function App() {
@@ -40,13 +40,11 @@ export default function App() {
         <Route path="/organiser" element={<RequireAuth><OrgDashboard /></RequireAuth>} />
         <Route path="/organiser/create" element={<RequireAuth><CreateTournament /></RequireAuth>} />
 
-        {/* Tournament overview — all events as cards */}
         <Route
           path="/organiser/tournament/:tournamentId"
           element={<RequireAuth><TournamentOverview /></RequireAuth>}
         />
 
-        {/* Event workspace — one sport, full tabs */}
         <Route
           path="/organiser/tournament/:tournamentId/event/:eventId"
           element={<RequireAuth><EventWorkspace /></RequireAuth>}

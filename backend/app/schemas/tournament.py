@@ -8,8 +8,11 @@ class EventInput(BaseModel):
     name: str
     sport_key: str
     format: str = "group_knockout"
-    participant_type: str = "individual"
+    participant_type: str = "individual"   # individual | doubles_pair | team
     sport_config: Optional[dict] = None
+    squad_size:   Optional[int] = None    # cricket
+    team_size:    Optional[int] = None    # football (players on field)
+    substitutes:  Optional[int] = None    # football (bench size)
 
 
 class TournamentCreate(BaseModel):

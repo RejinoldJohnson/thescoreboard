@@ -1,106 +1,112 @@
-const SPORT_LABELS = {
-    table_tennis: "Table Tennis",
-    badminton: "Badminton",
-    cricket: "Cricket",
-    football: "Football",
-  };
-  const SPORT_ICONS = {
-    table_tennis: "\uD83C\uDFD3",
-    badminton: "\uD83C\uDFF8",
-    cricket: "\uD83C\uDFCF",
-    football: "\u26BD",
-  };
-  const STATUS_STYLES = {
-    live: { bg: "#c0392b", color: "#fff", label: "LIVE" },
-    upcoming: { bg: "#d4a017", color: "#1a1208", label: "UPCOMING" },
-    completed: { bg: "#2d5a27", color: "#fff", label: "COMPLETED" },
-  };
-  
-  export default function TournamentCard({ tournament: t, onClick }) {
-    const allLiveMatches = t.events?.flatMap((e) => e.live_matches || []) || [];
-    const st = STATUS_STYLES[t.status] || STATUS_STYLES.upcoming;
-  
-    return (
-      <div className="t-card" onClick={onClick} style={t.primary_color ? { borderTopColor: t.primary_color } : {}}>
-        {/* Status badge */}
-        <div className="t-card-status" style={{ background: st.bg, color: st.color }}>
-          {t.is_live && <span className="live-dot" style={{ background: "#fff" }} />}
-          {st.label}
+export const SPORT_LABELS = {
+  table_tennis: "Table Tennis",
+  badminton:    "Badminton",
+  cricket:      "Cricket",
+  football:     "Football",
+};
+
+export const SPORT_ICONS = {
+  table_tennis: "🏓",
+  badminton:    "🏸",
+  cricket:      "🏏",
+  football:     "⚽",
+};
+
+const STATUS_META = {
+  live:      { label:"LIVE",     pillClass:"pill-orange" },
+  upcoming:  { label:"UPCOMING", pillClass:"pill-gold"   },
+  completed: { label:"DONE",     pillClass:"pill-green"  },
+  draft:     { label:"DRAFT",    pillClass:"pill-gray"   },
+};
+
+export default function TournamentCard({ tournament: t, onClick }) {
+  const allLive = t.events?.flatMap(e => e.live_matches || []) || [];
+  const sm      = STATUS_META[t.status] || STATUS_META.upcoming;
+
+  return (
+    <div
+      className="sport-card"
+      onClick={onClick}
+      style={{ cursor:"pointer", padding:"16px" }}
+    >
+      {/* Top row: name + status */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10, gap:8 }}>
+        <div style={{ minWidth:0 }}>
+          <h3 style={{
+            fontFamily:"var(--font-display)", fontSize:15, fontWeight:900,
+            textTransform:"uppercase", letterSpacing:-0.5,
+            color:"var(--ink)", lineHeight:1.2, margin:0,
+            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
+          }}>{t.name}</h3>
+          {t.org_name && <div style={{ fontSize:11, color:"var(--muted)", marginTop:3 }}>by {t.org_name}</div>}
         </div>
-  
-        {/* Header */}
-        <div className="t-card-header">
-          <h3 className="t-card-name">{t.name}</h3>
-          {t.org_name && <span className="t-card-meta">by {t.org_name}</span>}
-          {t.city && <span className="t-card-meta">📍 {t.city}{t.state ? `, ${t.state}` : ""}</span>}
-          {t.venue && <span className="t-card-meta">{t.venue}</span>}
-          {t.start_date && <span className="t-card-meta">📅 {t.start_date}</span>}
-        </div>
-  
-        {/* Sport badges */}
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
-          {(t.sports || []).map((s) => (
-            <span key={s} className="sport-badge">
-              {SPORT_ICONS[s] || ""} {SPORT_LABELS[s] || s}
-            </span>
+        <span className={`pill ${sm.pillClass}`} style={{ flexShrink:0 }}>
+          {t.status === "live" && <span className="live-dot" style={{ width:6, height:6 }}/>}
+          {sm.label}
+        </span>
+      </div>
+
+      {/* Meta */}
+      <div style={{ display:"flex", flexDirection:"column", gap:2, marginBottom:10, fontSize:12, color:"var(--muted)" }}>
+        {t.city && <span>📍 {t.city}{t.state ? `, ${t.state}` : ""}</span>}
+        {t.venue && <span>{t.venue}</span>}
+        {t.start_date && <span>📅 {t.start_date}</span>}
+      </div>
+
+      {/* Sport badges */}
+      <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginBottom:10 }}>
+        {(t.sports || []).map(s => (
+          <span key={s} style={{
+            fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:.5,
+            padding:"2px 8px", borderRadius:4,
+            background:"var(--primary-dim)", color:"var(--primary)",
+            border:"1px solid rgba(255,107,53,0.25)",
+          }}>
+            {SPORT_ICONS[s]||""} {SPORT_LABELS[s]||s}
+          </span>
+        ))}
+      </div>
+
+      {/* Stats */}
+      <div style={{ display:"flex", gap:16, paddingTop:10, borderTop:"1px solid var(--border)" }}>
+        {[
+          { label:"Players",  value: t.total_players },
+          { label:"Matches",  value: t.total_matches },
+          { label:"Done",     value: t.completed_matches, color:"var(--green)"   },
+          t.live_count > 0 && { label:"Live", value: t.live_count, color:"var(--primary)" },
+        ].filter(Boolean).map(({ label, value, color }) => (
+          <div key={label} style={{ textAlign:"center" }}>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:20, fontWeight:900, color: color||"var(--ink)", lineHeight:1 }}>{value}</div>
+            <div style={{ fontSize:10, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:.5, marginTop:2 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Live match previews */}
+      {allLive.length > 0 && (
+        <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:4 }}>
+          {allLive.slice(0,3).map(m => (
+            <div key={m.match_id} style={{
+              display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+              background:"var(--primary-dim)", border:"1px solid rgba(255,107,53,0.2)",
+              borderRadius:6, padding:"5px 10px",
+            }}>
+              <span style={{ fontSize:12, fontWeight:600, color:"var(--ink)", maxWidth:90, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {m.current_server===1 && "🏓 "}{m.player_1?.name}
+              </span>
+              <span style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:900, color:"var(--primary)", letterSpacing:1, minWidth:44, textAlign:"center" }}>
+                {m.player_1?.score}–{m.player_2?.score}
+              </span>
+              <span style={{ fontSize:12, fontWeight:600, color:"var(--ink)", maxWidth:90, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                {m.player_2?.name}{m.current_server===2 && " 🏓"}
+              </span>
+            </div>
           ))}
+          {allLive.length > 3 && (
+            <div style={{ fontSize:11, color:"var(--muted)", textAlign:"center" }}>+{allLive.length-3} more live</div>
+          )}
         </div>
-  
-        {/* Stats */}
-        <div className="t-card-stats">
-          <TCardStat num={t.total_players} label="Players" />
-          <TCardStat num={t.total_matches} label="Matches" />
-          <TCardStat num={t.completed_matches} label="Done" color="#2d5a27" />
-          {t.live_count > 0 && <TCardStat num={t.live_count} label="Live" color="#c0392b" />}
-        </div>
-  
-        {/* Live match previews */}
-        {allLiveMatches.length > 0 && (
-          <div className="t-card-live-matches">
-            {allLiveMatches.slice(0, 3).map((m) => (
-              <div key={m.match_id} className="t-live-match">
-                <span className="t-live-name">
-                  {m.current_server === 1 && "🏓 "}{m.player_1?.name}
-                </span>
-                <span className="t-live-score">{m.player_1?.score} – {m.player_2?.score}</span>
-                <span className="t-live-name">
-                  {m.player_2?.name}{m.current_server === 2 && " 🏓"}
-                </span>
-              </div>
-            ))}
-            {allLiveMatches.length > 3 && (
-              <div style={{ fontSize: 11, color: "#7a6a50", textAlign: "center" }}>
-                +{allLiveMatches.length - 3} more live
-              </div>
-            )}
-          </div>
-        )}
-  
-        {/* Event list when not live */}
-        {allLiveMatches.length === 0 && (t.events || []).length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            {t.events.map((e) => (
-              <div key={e.event_id} style={{
-                fontSize: 12, color: "#7a6a50",
-                display: "flex", justifyContent: "space-between", padding: "2px 0",
-              }}>
-                <span>{e.name}</span>
-                <span>{e.done_matches}/{e.total_matches}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-  
-  function TCardStat({ num, label, color }) {
-    return (
-      <div className="t-stat">
-        <span className="t-stat-num" style={color ? { color } : {}}>{num}</span>
-        <span className="t-stat-label">{label}</span>
-      </div>
-    );
-  }
-  
-  export { SPORT_LABELS, SPORT_ICONS };
+      )}
+    </div>
+  );
+}

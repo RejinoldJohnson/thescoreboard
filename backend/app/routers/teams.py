@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.player import Team, TeamMember
 from app.models.group import EventParticipant
+from app.models.organization import Organization, OrgMember
 from app.models.event import Event
 from app.models.tournament import Tournament
 from app.utils.auth import get_current_user
@@ -77,6 +78,18 @@ def create_team(
     user: User = Depends(get_current_user),
 ):
     """Organiser creates a team and adds it to their org."""
+    org = db.query(Organization).filter(Organization.org_id == org_id).first()
+    if not org:
+        raise HTTPException(status_code=404, detail="Organization not found")
+        
+    if not getattr(user, "is_superadmin", False):
+        member = db.query(OrgMember).filter(
+            OrgMember.org_id == org_id, 
+            OrgMember.user_id == user.user_id
+        ).first()
+        if not member:
+            raise HTTPException(status_code=403, detail="Not authorized for this organization")
+
     team = Team(
         org_id=org_id,
         name=data.name.strip(),

@@ -1,44 +1,59 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { isLoggedIn } from "../../api/client";
 
-export default function Header({ showSearch = false, onSearch, searchPlaceholder = "Search tournaments, cities..." }) {
+export default function Header({ showSearch = false, onSearch, searchPlaceholder = "Search tournaments…" }) {
   const navigate = useNavigate();
-  const [searchVal, setSearchVal] = useState("");
+  const [val, setVal] = useState("");
+  const [theme, setTheme] = useState(document.documentElement.getAttribute("data-theme") || "light");
 
-  const handleSearch = (val) => {
-    setSearchVal(val);
-    if (onSearch) onSearch(val);
+  const handleSearch = (v) => { setVal(v); if (onSearch) onSearch(v); };
+
+  const toggleTheme = () => {
+    const newTheme = theme === "light" ? "dark" : "light";
+    setTheme(newTheme);
+    document.documentElement.setAttribute("data-theme", newTheme);
+    localStorage.setItem("theme", newTheme);
   };
 
   return (
-    <header className="header">
-      <div className="header-inner">
-        <h1 className="header-title header-title-link" onClick={() => navigate("/")}>
-          TheScoreBoard
-        </h1>
+    <header className="site-header" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+      <div className="header-row">
+        <span className="header-brand" onClick={() => navigate("/")} style={{ color: "var(--ink)", cursor: "pointer", fontWeight: "bold" }}>
+          The<span className="accent" style={{ color: "var(--primary)" }}>Score</span>Board
+        </span>
 
         {showSearch && (
-          <div className="header-search">
-            <span className="header-search-icon">🔍</span>
+          <div style={{ flex:1, maxWidth:400, position:"relative", display:"flex", alignItems:"center", margin:"0 20px" }}>
+            <span style={{ position:"absolute", left:12, fontSize:13, opacity:.5, pointerEvents:"none", color: "var(--ink)" }}>🔍</span>
             <input
-              className="header-search-input"
-              type="text"
+              style={{
+                width:"100%", background:"var(--input-bg)",
+                border:"1.5px solid var(--input-border)", borderRadius:8,
+                padding:"7px 32px 7px 34px", fontSize:13,
+                fontFamily:"var(--font-body)", color:"var(--ink)", outline:"none",
+              }}
               placeholder={searchPlaceholder}
-              value={searchVal}
-              onChange={(e) => handleSearch(e.target.value)}
+              value={val}
+              onChange={e => handleSearch(e.target.value)}
             />
-            {searchVal && (
-              <button className="header-search-clear" onClick={() => handleSearch("")}>✕</button>
+            {val && (
+              <button onClick={() => handleSearch("")}
+                style={{ position:"absolute", right:10, background:"none", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:14 }}>
+                ×
+              </button>
             )}
           </div>
         )}
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <button onClick={toggleTheme} style={{ background:"none", border:"none", cursor:"pointer", fontSize:18, color:"var(--ink)" }}>
+            {theme === "light" ? "🌙" : "☀️"}
+          </button>
           {isLoggedIn() ? (
-            <button className="btn-ghost" onClick={() => navigate("/dashboard")}>Dashboard</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate("/organiser")} style={{ color: "var(--ink)" }}>Dashboard</button>
           ) : (
-            <button className="btn-ghost" onClick={() => navigate("/login")}>Log in</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => navigate("/login")} style={{ color: "var(--ink)" }}>Log in</button>
           )}
         </div>
       </div>

@@ -55,3 +55,8 @@ class Event(Base):
     groups = relationship("Group", back_populates="event", cascade="all, delete-orphan")
     participants = relationship("EventParticipant", back_populates="event", cascade="all, delete-orphan")
     matches = relationship("Match", back_populates="event", cascade="all, delete-orphan")
+
+    # Sport sub-format config
+    squad_size  = Column(Integer, nullable=True)   # cricket
+    team_size   = Column(Integer, nullable=True)   # football: players on field
+    substitutes = Column(Integer, nullable=True)   # football: bench size

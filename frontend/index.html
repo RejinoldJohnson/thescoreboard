@@ -6,7 +6,6 @@
     <title>TheScoreBoard</title>
     <meta name="description" content="Live tournament scores for Table Tennis, Badminton, Cricket, Football and more." />
 
-    <!-- OG tags for WhatsApp/social sharing — dynamic values injected by backend for /t/ pages -->
     <meta property="og:title" content="TheScoreBoard" />
     <meta property="og:description" content="Live tournament scores" />
     <meta property="og:type" content="website" />
@@ -15,6 +14,11 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    
+    <script>
+      const savedTheme = localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -92,6 +92,9 @@ def create_tournament(
             format=ev_input.format,
             participant_type=ev_input.participant_type,
             sport_config=config,
+            squad_size       = ev_input.squad_size,
+    team_size        = ev_input.team_size,
+    substitutes      = ev_input.substitutes,
         )
         db.add(event)
 
@@ -208,6 +211,9 @@ def get_workspace(
             "participant_type": event.participant_type,
             "sport_config": event.sport_config,
             "status": event.status,
+            "squad_size":      event.squad_size,
+    "team_size":       event.team_size,
+    "substitutes":     event.substitutes,
             "player_count": player_count,
             "match_count": match_count,
             "live_count": live_count,
@@ -224,6 +230,7 @@ def get_workspace(
     return {
         "tournament": {
             "tournament_id": t.tournament_id,
+            "org_id": t.org_id,
             "name": t.name,
             "slug": t.slug,
             "description": t.description,
