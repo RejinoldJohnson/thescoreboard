@@ -149,7 +149,7 @@ export default function Dashboard() {
 
         {/* ── MAIN ── */}
         <main style={{ flex:1, padding:"28px 32px", maxWidth:900 }}>
-          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:24 }}>
+          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:24 }} className="dashboard-header">
             <div>
               <div style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:900, textTransform:"uppercase", letterSpacing:"-1px", color:"var(--ink)" }}>
                 Tournaments
@@ -172,7 +172,7 @@ export default function Dashboard() {
 
           {/* Stats */}
           {tournaments.length > 0 && (
-            <div className="stats-grid">
+            <div className="stats-grid dashboard-stats">
               <div className="stat-card">
                 <div className="stat-num">{tournaments.length}</div>
                 <div className="stat-label">Total</div>
@@ -206,7 +206,7 @@ export default function Dashboard() {
               <p style={{ fontSize:13 }}>Hit <strong>+ New Tournament</strong> to get started.</p>
             </div>
           ) : (
-            sorted.map(t => (
+            <div className="dashboard-tournaments">{sorted.map(t => (
               <TournamentCard key={t.tournament_id} tournament={t}
                 showKebab={showKebab===t.tournament_id}
                 onKebabToggle={e => { e.stopPropagation(); setShowKebab(showKebab===t.tournament_id?null:t.tournament_id); }}
@@ -214,7 +214,7 @@ export default function Dashboard() {
                 onDelete={() => { setShowKebab(null); setShowDeleteModal(t); }}
                 onCopy={() => { navigator.clipboard.writeText(`${window.location.origin}/t/${t.slug}`); flash("Link copied!"); setShowKebab(null); }}
               />
-            ))
+            ))}</div>
           )}
         </main>
       </div>

@@ -1,9 +1,15 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 export default function OrgHeader({ crumbs = [], right = null, user = null, onLogout = null }) {
   const navigate = useNavigate();
-  const [theme, setTheme] = useState(document.documentElement.getAttribute("data-theme") || "light");
+  const [theme, setTheme] = useState("light");
+
+  // Force light theme in organizer
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", "light");
+    localStorage.setItem("theme", "light");
+  }, []);
 
   const toggleTheme = () => {
     const newTheme = theme === "light" ? "dark" : "light";
@@ -13,23 +19,27 @@ export default function OrgHeader({ crumbs = [], right = null, user = null, onLo
   };
 
   return (
-    <header className="site-header" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
-      {/* ── Row 1: brand + user + logout ── */}
+    <header className="site-header org-header" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+      {/* ── Row 1: brand + controls ── */}
       <div className="header-row">
-        <span
-          className="header-brand"
-          onClick={() => navigate("/organiser")}
-          style={{ color: "var(--ink)", cursor: "pointer", fontWeight: "bold" }}
-        >
-          The<span className="accent" style={{ color: "var(--primary)" }}>Score</span>Board
-        </span>
+        {/* Brand - Full width on mobile */}
+        <div className="org-header-brand">
+          <span
+            className="header-brand"
+            onClick={() => navigate("/organiser")}
+            style={{ color: "var(--ink)", cursor: "pointer", fontWeight: "bold" }}
+          >
+            The<span className="accent" style={{ color: "var(--primary)" }}>Score</span>Board
+          </span>
+        </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {/* Controls - Separate row on mobile */}
+        <div className="org-header-right">
           <button onClick={toggleTheme} style={{ background:"none", border:"none", cursor:"pointer", fontSize:18, color:"var(--ink)" }}>
             {theme === "light" ? "🌙" : "☀️"}
           </button>
           {user?.name && (
-            <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
+            <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }} className="user-name">
               {user.name}
             </span>
           )}

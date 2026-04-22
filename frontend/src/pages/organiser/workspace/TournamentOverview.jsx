@@ -92,7 +92,7 @@ export default function TournamentOverview() {
         </div>
 
         {/* ── STATS ── */}
-        <div className="stats-grid" style={{ gridTemplateColumns: "repeat(4,1fr)", marginBottom: 20 }}>
+        <div className="stats-grid" style={{ marginBottom: 20 }}>
           {[
             { label: "Events",  value: stats.total_events  },
             { label: "Players", value: stats.total_players },
@@ -169,7 +169,7 @@ export default function TournamentOverview() {
         </div>
 
         {/* ── SHARE LINK ── */}
-        <div className="card" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
+        <div className="card share-link-card" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
           <div style={{ flex: 1, fontFamily: "monospace", fontSize: 13, color: "var(--muted)", wordBreak: "break-all" }}>
             {window.location.origin}/t/{t.slug}
           </div>

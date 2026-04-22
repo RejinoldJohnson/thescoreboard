@@ -275,7 +275,7 @@ export default function EventWorkspace() {
                   </div>
                 </div>
               </div>
-              <div className="stats-grid" style={{  marginBottom: 0 }}>
+              <div className="stats-grid" style={{ marginBottom: 0 }}>
                 {[
                   { label: isDoubles ? "Pairs" : isTeam ? "Teams" : "Players", value: currentEvent.player_count },
                   { label: "Matches", value: currentEvent.match_count },
@@ -289,7 +289,7 @@ export default function EventWorkspace() {
                 ))}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }} className="event-actions">
               <button className="btn btn-primary" onClick={() => setTab(pTab)}>
                 {isDoubles ? "Manage Pairs" : isTeam ? "Manage Teams" : "Add Players"}
               </button>

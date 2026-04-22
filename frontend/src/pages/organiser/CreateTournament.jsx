@@ -317,7 +317,7 @@ export default function CreateTournament() {
       </div>
 
       {/* ── CONTENT ── */}
-      <div style={{ maxWidth: 620, margin: "0 auto", padding: "28px 24px" }}>
+      <div style={{ maxWidth: 620, margin: "0 auto", padding: "28px 24px" }} className="create-content">
         {error && (
           <div style={{ background: "var(--red-dim)", border: "1px solid rgba(229,62,62,0.3)", borderRadius: 6, padding: "10px 14px", marginBottom: 16, fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, color: "var(--red)" }}>
             {error}
