@@ -1114,8 +1114,30 @@
    ::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 3px; }
    ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
    
-   /* ── Responsive ───────────────────────────────────────────── */
+   /* ── OrgHeader Desktop Styles ─────────────────────────────── */
+   .site-header.org-header .org-header-right {
+     display: flex;
+     align-items: center;
+     gap: 16px;
+   }
+   
+   .site-header.org-header .user-name-desktop {
+     font-size: 13px;
+     color: var(--muted);
+     font-weight: 600;
+     margin-right: 4px;
+   }
+   
+   .site-header.org-header .org-logout-btn {
+     color: var(--ink);
+   }
+   
+   /* ══════════════════════════════════════════════════════════
+      MOBILE RESPONSIVE - CONSOLIDATED
+      ══════════════════════════════════════════════════════════ */
+   
    @media (max-width: 768px) {
+     /* ── Global Mobile ────────────────────────────────────── */
      .sidebar { display: none; }
      .page-content { padding: 16px 14px; }
      .header-row { padding: 0 14px; }
@@ -1124,492 +1146,262 @@
      .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
      .field-row { grid-template-columns: 1fr; }
      .field-row-3 { grid-template-columns: 1fr; }
-     /* Header improvements */
      .header-brand { font-size: 14px; }
-  .breadcrumb-item { font-size: 10px; }
-
-    /* Cards */
-  .card { padding: 14px 16px; }
-  .match-row { padding: 10px 12px; }
-  
-  /* Buttons */
-  .btn-lg { padding: 12px 24px; font-size: 12px; min-height: 44px; }
-  
-  /* Modals */
-  .modal { max-width: 95vw; margin: 10px; }
-  .modal-header { padding: 16px 18px 0; }
-  .modal-body { padding: 0 18px; }
-  .modal-footer { padding: 16px 18px; flex-direction: column; }
-  .modal-footer .btn { width: 100%; }
-  
-  /* Sport cards grid */
-  .sport-card { padding: 14px; }
-  /* Tournament cards */
-  .tournament-card { 
-    flex-direction: column; 
-    align-items: flex-start !important;
-  }
-  .tournament-card > div:last-child {
-    width: 100%;
-    margin-top: 12px;
-  }
-  
-  /* Lifecycle bar */
-  .lifecycle-inner { 
-    overflow-x: auto;
-    padding: 0 10px;
-  }
-  .lifecycle-label { font-size: 9px; }
-  .lifecycle-dot { width: 18px; height: 18px; font-size: 9px; }
-   }
-
-   @media (max-width: 768px) {
-    .header-search { 
-      margin: 0 8px !important;
-      max-width: none !important;
-    }
-  }
-  
-  @media (max-width: 480px) {
-    .header-row { flex-wrap: wrap; gap: 8px; padding: 8px 14px !important; }
-    .header-search { 
-      order: 3;
-      width: 100%;
-      margin: 0 !important;
-    }
-    .live-badge { display: none !important; } /* Hide on very small screens */
-  }
+     .breadcrumb-item { font-size: 10px; }
+     .card { padding: 14px 16px; }
+     .match-row { padding: 10px 12px; }
+     .btn-lg { padding: 12px 24px; font-size: 12px; min-height: 44px; }
+     .modal { max-width: 95vw; margin: 10px; }
+     .modal-header { padding: 16px 18px 0; }
+     .modal-body { padding: 0 18px; }
+     .modal-footer { padding: 16px 18px; flex-direction: column; }
+     .modal-footer .btn { width: 100%; }
+     .sport-card { padding: 14px; }
+     .tournament-card { flex-direction: column; align-items: flex-start !important; }
+     .tournament-card > div:last-child { width: 100%; margin-top: 12px; }
+     .lifecycle-inner { overflow-x: auto; padding: 0 10px; }
+     .lifecycle-label { font-size: 9px; }
+     .lifecycle-dot { width: 18px; height: 18px; font-size: 9px; }
+     .header-search { margin: 0 8px !important; max-width: none !important; }
+     .tournament-grid { grid-template-columns: 1fr !important; }
+     .sport-hero { padding: 0 16px; }
+     .sport-hero > div:first-child { width: 100%; margin-bottom: 12px; }
+     .tournament-info-strip { font-size: 11px !important; gap: 10px !important; }
+     .tournament-info-strip > div:last-child { width: 100%; margin-top: 4px; }
+     .live-banner { padding: 8px 16px !important; font-size: 11px !important; }
+     .live-banner > div { font-size: 11px !important; }
+     .progress-container { padding: 0 14px !important; overflow-x: auto; }
+     .events-grid { grid-template-columns: 1fr !important; }
    
-
+     /* ── OrgHeader Mobile ─────────────────────────────────── */
+     .site-header.org-header .header-row {
+       flex-wrap: wrap !important;
+       gap: 0 !important;
+       padding: 10px 16px !important;
+       min-height: auto !important;
+       align-items: center !important;
+     }
+   
+     .site-header.org-header .org-header-brand {
+       width: 100% !important;
+       flex: 0 0 100% !important;
+       margin-bottom: 10px !important;
+       text-align: center !important;
+     }
+   
+     .site-header.org-header .header-brand {
+       font-size: 15px !important;
+     }
+   
+     .site-header.org-header .org-header-right {
+       width: 100% !important;
+       flex: 0 0 100% !important;
+       display: flex !important;
+       justify-content: space-between !important;
+       align-items: center !important;
+       gap: 12px !important;
+       padding-top: 8px !important;
+       border-top: 1px solid var(--border) !important;
+     }
+   
+     .site-header.org-header .theme-toggle-btn {
+       order: 1 !important;
+       display: block !important;
+       flex-shrink: 0 !important;
+     }
+   
+     .site-header.org-header .user-name-desktop {
+       display: none !important;
+     }
+   
+     .site-header.org-header .org-logout-btn {
+       order: 3 !important;
+       display: inline-flex !important;
+       padding: 6px 14px !important;
+       font-size: 11px !important;
+       white-space: nowrap !important;
+       flex-shrink: 0 !important;
+       margin-left: auto !important;
+     }
+   
+     .site-header.org-header .breadcrumb-row {
+       padding: 8px 16px !important;
+       overflow-x: auto;
+       white-space: nowrap;
+     }
+   
+     /* ── Dashboard ────────────────────────────────────────── */
+     .dashboard-header {
+       flex-direction: column !important;
+       gap: 16px !important;
+       align-items: stretch !important;
+     }
+     
+     .dashboard-header > div:first-child {
+       width: 100%;
+     }
+     
+     .dashboard-header .btn-gradient {
+       width: 100% !important;
+       justify-content: center;
+     }
+   
+     .dashboard-stats {
+       grid-template-columns: 1fr !important;
+       gap: 10px !important;
+     }
+   
+     .dashboard-stats .stat-card {
+       padding: 14px 16px !important;
+     }
+   
+     .dashboard-stats .stat-num {
+       font-size: 28px !important;
+     }
+   
+     .dashboard-tournaments .tournament-card {
+       padding: 16px !important;
+     }
+   
+     .dashboard-tournaments .tournament-card-icon {
+       width: 48px !important;
+       height: 48px !important;
+       font-size: 20px !important;
+     }
+   
+     .dashboard-tournaments .tournament-card > div:first-child {
+       flex-direction: column !important;
+       align-items: flex-start !important;
+       gap: 12px !important;
+     }
+   
+     .dashboard-tournaments .tournament-card h3,
+     .dashboard-tournaments .tournament-card > div > div > div:first-child {
+       font-size: 14px !important;
+       white-space: normal !important;
+       overflow: visible !important;
+       text-overflow: clip !important;
+     }
+   
+     .dashboard-tournaments .tournament-card > div:last-child {
+       flex-direction: column !important;
+       gap: 8px !important;
+       width: 100% !important;
+     }
+   
+     .dashboard-tournaments .tournament-card .btn {
+       width: 100% !important;
+     }
+   
+     /* ── Create Tournament ────────────────────────────────── */
+     .create-content {
+       padding: 20px 16px !important;
+     }
+   
+     .progress-container {
+       overflow-x: auto;
+       margin: 0 -16px;
+       padding: 0 16px;
+     }
+   
+     /* ── Event Workspace ──────────────────────────────────── */
+     .event-actions {
+       flex-direction: column !important;
+       gap: 10px !important;
+     }
+     
+     .event-actions .btn {
+       width: 100% !important;
+       justify-content: center;
+     }
+   
+     .share-link-card {
+       flex-direction: column !important;
+       align-items: stretch !important;
+     }
+     
+     .share-link-card > div:first-child {
+       margin-bottom: 12px;
+     }
+     
+     .share-link-card .btn {
+       width: 100%;
+     }
+   
+     /* ── Misc ─────────────────────────────────────────────── */
+     .sport-card h3 {
+       font-size: 13px !important;
+       line-height: 1.3 !important;
+     }
+   
+     .section-label {
+       margin: 24px 0 14px !important;
+       font-size: 11px !important;
+     }
+   
+     .sidebar-layout > main {
+       padding: 20px 16px !important;
+     }
+   }
    
    @media (max-width: 480px) {
+     .header-row { flex-wrap: wrap; gap: 8px; padding: 8px 14px !important; }
+     .header-search { order: 3; width: 100%; margin: 0 !important; }
+     .live-badge { display: none !important; }
      .stats-grid { grid-template-columns: 1fr 1fr; }
+     .progress-container > div { min-width: 500px; }
+     .sport-selector-grid { grid-template-columns: 1fr !important; }
+   
+     /* ── OrgHeader Extra Small ────────────────────────────── */
+     .site-header.org-header .header-brand {
+       font-size: 14px !important;
+     }
+   
+     .site-header.org-header .org-header-right {
+       gap: 10px !important;
+     }
+   
+     .site-header.org-header .org-logout-btn {
+       padding: 5px 12px !important;
+       font-size: 10px !important;
+     }
+   
+     /* ── Dashboard Small ──────────────────────────────────── */
+     .dashboard-stats {
+       grid-template-columns: 1fr !important;
+     }
+   
+     .dashboard-tournaments .tournament-card {
+       padding: 14px !important;
+     }
+   
+     .dashboard-tournaments .tournament-card-icon {
+       width: 40px !important;
+       height: 40px !important;
+     }
+   
+     .card-title {
+       font-size: 11px !important;
+     }
+   
+     .section-label {
+       font-size: 10px !important;
+     }
    }
 
-   @media (max-width: 768px) {
-    .tournament-grid { grid-template-columns: 1fr !important; }
-  }
-
-  @media (max-width: 768px) {
-    .sport-hero { padding: 0 16px; }
-    .sport-hero > div:first-child { 
-      width: 100%; 
-      margin-bottom: 12px;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .tournament-info-strip { 
-      font-size: 11px !important;
-      gap: 10px !important;
-    }
-    .tournament-info-strip > div:last-child {
-      width: 100%;
-      margin-top: 4px;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .live-banner { 
-      padding: 8px 16px !important;
-      font-size: 11px !important;
-    }
-    .live-banner > div {
-      font-size: 11px !important;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .progress-container { 
-      padding: 0 14px !important;
-      overflow-x: auto;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .progress-container > div {
-      min-width: 500px; /* Force horizontal scroll instead of cramping */
-    }
-  }
-
-  @media (max-width: 480px) {
-    .sport-selector-grid { grid-template-columns: 1fr !important; }
-  }
-
-  @media (max-width: 768px) {
-    .events-grid { grid-template-columns: 1fr !important; }
-  }
-
-  @media (max-width: 768px) {
-    .dashboard-header {
-      flex-direction: column !important;
-      gap: 16px !important;
-    }
-    .dashboard-header > div:first-child {
-      width: 100%;
-    }
-    .dashboard-header .btn-gradient {
-      width: 100%;
-      justify-content: center;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .create-content {
-      padding: 20px 16px !important;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .event-actions {
-      flex-direction: column;
-    }
-    .event-actions .btn {
-      width: 100%;
-      justify-content: center;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .share-link-card {
-      flex-direction: column !important;
-      align-items: stretch !important;
-    }
-    .share-link-card > div:first-child {
-      margin-bottom: 12px;
-    }
-    .share-link-card .btn {
-      width: 100%;
-    }
-  }
-
-  /* ── Organizer Page Mobile Fixes ──────────────────────────── */
-@media (max-width: 768px) {
-  /* Dashboard header */
-  .dashboard-header {
-    flex-direction: column !important;
-    gap: 16px !important;
-  }
-  .dashboard-header > div:first-child {
-    width: 100%;
-  }
-  .dashboard-header .btn-gradient {
-    width: 100%;
-    justify-content: center;
-  }
-
-  /* Create tournament content */
-  .create-content {
-    padding: 20px 16px !important;
-  }
-
-  /* Event workspace actions */
-  .event-actions {
-    flex-direction: column;
-  }
-  .event-actions .btn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  /* Share link card */
-  .share-link-card {
-    flex-direction: column !important;
-    align-items: stretch !important;
-  }
-  .share-link-card > div:first-child {
-    margin-bottom: 12px;
-  }
-  .share-link-card .btn {
-    width: 100%;
-  }
-}
-
-@media (max-width: 480px) {
-  /* Force progress stepper to scroll */
-  .progress-container > div {
-    min-width: 500px;
-  }
-}
-/* ══════════════════════════════════════════════════════════
-   ORGANIZER MOBILE FIXES
-   ══════════════════════════════════════════════════════════ */
-
-   @media (max-width: 768px) {
-    /* ── OrgHeader Mobile Layout ──────────────────────────── */
-    .site-header.org-header .header-row {
-      flex-wrap: wrap !important;
-      gap: 10px !important;
-      padding: 12px 16px !important;
-      min-height: auto !important;
-      align-items: flex-start !important;
-    }
-  
-    .site-header.org-header .header-brand {
-      font-size: 16px !important;
-      flex-shrink: 0;
-    }
-  
-    .site-header.org-header .org-header-right {
-      width: 100% !important;
-      display: flex !important;
-      justify-content: space-between !important;
-      order: 3 !important;
-      padding-top: 10px !important;
-      margin-top: 2px !important;
-      border-top: 1px solid var(--border) !important;
-    }
-  
-    .site-header.org-header .user-name {
-      flex: 1;
-      text-align: left;
-    }
-  
-    .site-header.org-header .btn-ghost.btn-sm {
-      padding: 6px 12px !important;
-      font-size: 11px !important;
-      white-space: nowrap;
-    }
-  
-    /* ── Breadcrumb Row Mobile ────────────────────────────── */
-    .site-header.org-header .breadcrumb-row {
-      padding: 8px 16px !important;
-      overflow-x: auto;
-      white-space: nowrap;
-    }
-  
-    /* ── Dashboard Header ────────────────────────────────── */
-    .dashboard-header {
-      flex-direction: column !important;
-      gap: 16px !important;
-      align-items: stretch !important;
-    }
-    
-    .dashboard-header > div:first-child {
-      width: 100%;
-    }
-    
-    .dashboard-header .btn-gradient {
-      width: 100% !important;
-      justify-content: center;
-    }
-  
-    /* ── Stats Grid ──────────────────────────────────────── */
-    .stats-grid {
-      grid-template-columns: repeat(2, 1fr) !important;
-      gap: 12px !important;
-    }
-  
-    /* ── Tournament Cards ────────────────────────────────── */
-    .tournament-card {
-      flex-direction: column !important;
-      align-items: flex-start !important;
-    }
-  
-    .tournament-card > div:first-child {
-      width: 100%;
-    }
-  
-    .tournament-card > div:last-child {
-      width: 100%;
-      margin-top: 12px;
-      justify-content: flex-start !important;
-    }
-  
-    /* ── Create Tournament ───────────────────────────────── */
-    .create-content {
-      padding: 20px 16px !important;
-    }
-  
-    .progress-container {
-      overflow-x: auto;
-      margin: 0 -16px;
-      padding: 0 16px;
-    }
-  
-    /* ── Event Workspace Actions ─────────────────────────── */
-    .event-actions {
-      flex-direction: column !important;
-      gap: 10px !important;
-    }
-    
-    .event-actions .btn {
-      width: 100% !important;
-      justify-content: center;
-    }
-  
-    /* ── Share Link Card ─────────────────────────────────── */
-    .share-link-card {
-      flex-direction: column !important;
-      align-items: stretch !important;
-    }
-    
-    .share-link-card > div:first-child {
-      margin-bottom: 12px;
-    }
-    
-    .share-link-card .btn {
-      width: 100%;
-    }
-  
-    /* ── Sport Cards ─────────────────────────────────────── */
-    .sport-card h3 {
-      font-size: 13px !important;
-      line-height: 1.3 !important;
-    }
-  
-    /* ── Phase Control Dots ──────────────────────────────── */
-    .lifecycle-inner {
-      overflow-x: auto;
-      padding: 0 10px;
-    }
-  
-    .lifecycle-label {
-      font-size: 8px !important;
-    }
-  
-    .lifecycle-dot {
-      width: 20px !important;
-      height: 20px !important;
-      font-size: 9px !important;
-    }
-  
-    /* ── Cards & Modals ──────────────────────────────────── */
-    .card {
-      padding: 14px 16px !important;
-    }
-  
-    .modal {
-      max-width: 95vw !important;
-      margin: 10px !important;
-    }
-  
-    .modal-footer {
-      flex-direction: column !important;
-      gap: 10px !important;
-    }
-  
-    .modal-footer .btn {
-      width: 100% !important;
-    }
+   .site-header.org-header .theme-toggle-btn {
+    order: 1 !important;
+    display: block !important;
+    flex-shrink: 0 !important;
+    visibility: visible !important; /* ADD THIS */
+    opacity: 1 !important; /* ADD THIS */
   }
   
-  @media (max-width: 480px) {
-    /* ── Extra Small Screens ─────────────────────────────── */
-    .site-header.org-header .header-brand {
-      font-size: 14px !important;
-    }
-  
-    .site-header.org-header .org-header-right {
-      gap: 8px !important;
-    }
-  
-    .site-header.org-header .btn-ghost.btn-sm {
-      padding: 5px 10px !important;
-      font-size: 10px !important;
-    }
-  
-    /* ── Force Progress Stepper Scroll ───────────────────── */
-    .progress-container > div {
-      min-width: 500px;
-    }
-  
-    /* ── Single Column Grids ─────────────────────────────── */
-    .sport-selector-grid {
-      grid-template-columns: 1fr !important;
-    }
-  
-    .stats-grid {
-      grid-template-columns: 1fr 1fr !important;
-    }
-  
-    /* ── Smaller Text ────────────────────────────────────── */
-    .card-title {
-      font-size: 13px !important;
-    }
-  
-    .section-label {
-      font-size: 11px !important;
-    }
-  }
-
-  @media (max-width: 768px) {
-    /* ... existing rules ... */
-  
-    /* ── Dashboard Stats Grid ────────────────────────────── */
-    .dashboard-stats {
-      grid-template-columns: 1fr !important;
-      gap: 10px !important;
-    }
-  
-    .dashboard-stats .stat-card {
-      padding: 14px 16px !important;
-    }
-  
-    .dashboard-stats .stat-num {
-      font-size: 28px !important;
-    }
-  
-    /* ── Dashboard Tournament Cards ──────────────────────── */
-    .dashboard-tournaments .tournament-card {
-      padding: 16px !important;
-    }
-  
-    .dashboard-tournaments .tournament-card-icon {
-      width: 48px !important;
-      height: 48px !important;
-      font-size: 20px !important;
-    }
-  
-    .dashboard-tournaments .tournament-card > div:first-child {
-      flex-direction: column !important;
-      align-items: flex-start !important;
-      gap: 12px !important;
-    }
-  
-    .dashboard-tournaments .tournament-card h3,
-    .dashboard-tournaments .tournament-card > div > div > div:first-child {
-      font-size: 14px !important;
-      white-space: normal !important;
-      overflow: visible !important;
-      text-overflow: clip !important;
-    }
-  
-    .dashboard-tournaments .tournament-card > div:last-child {
-      flex-direction: column !important;
-      gap: 8px !important;
-    }
-  
-    .dashboard-tournaments .tournament-card .btn {
-      width: 100% !important;
-    }
-  
-    /* ── Section Labels Better Spacing ───────────────────── */
-    .section-label {
-      margin: 24px 0 14px !important;
-      font-size: 11px !important;
-    }
-  
-    /* ── Main Content Padding ────────────────────────────── */
-    .sidebar-layout > main {
-      padding: 20px 16px !important;
-    }
-  }
-  
-  @media (max-width: 480px) {
-    /* ... existing rules ... */
-  
-    /* ── Single Column Stats on Tiny Screens ─────────────── */
-    .dashboard-stats {
-      grid-template-columns: 1fr !important;
-    }
-  
-    .dashboard-tournaments .tournament-card {
-      padding: 14px !important;
-    }
-  
-    .dashboard-tournaments .tournament-card-icon {
-      width: 40px !important;
-      height: 40px !important;
-    }
+  .site-header.org-header .org-logout-btn {
+    order: 3 !important;
+    display: inline-flex !important;
+    visibility: visible !important; /* ADD THIS */
+    opacity: 1 !important; /* ADD THIS */
+    flex-shrink: 0 !important;
+    margin-left: auto !important;
   }

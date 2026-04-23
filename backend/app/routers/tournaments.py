@@ -1,6 +1,7 @@
 """
 Tournament routes — create wizard, workspace data, lifecycle management.
 """
+import random
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import List
@@ -20,6 +21,8 @@ from app.sports.registry import get_sport_engine
 router = APIRouter()
 
 
+# ── Helpers ───────────────────────────────────────────────────
+
 def _check_org_access(org_id: int, user: User, db: Session):
     if not user.is_superadmin:
         member = db.query(OrgMember).filter(
@@ -34,6 +37,61 @@ def _check_tournament_access(tournament_id: int, user: User, db: Session) -> Tou
         raise HTTPException(status_code=404, detail="Tournament not found")
     _check_org_access(t.org_id, user, db)
     return t
+
+
+def _normalize_participant_type(pt: str) -> str:
+    """doubles_pair is a frontend concept — backend stores it as 'team'."""
+    if pt == "doubles_pair":
+        return "team"
+    return pt
+
+
+def _serialize_match(m: Match) -> dict:
+    parts = sorted(m.participants, key=lambda p: p.position)
+    p1 = parts[0] if len(parts) > 0 else None
+    p2 = parts[1] if len(parts) > 1 else None
+    sets = sorted(m.sets, key=lambda s: s.set_number) if m.sets else []
+
+    def _participant_data(p, label):
+        if not p:
+            return {"player_id": None, "team_id": None, "name": "TBD", "score": 0, "is_winner": False}
+        name = "TBD"
+        if p.player:
+            name = p.player.name
+        elif p.team:
+            name = p.team.name
+        return {
+            "player_id": p.player_id,
+            "team_id":   p.team_id,
+            "name":      name,
+            "score":     p.score,
+            "is_winner": p.is_winner,
+        }
+
+    return {
+        "match_id":       m.match_id,
+        "event_id":       m.event_id,
+        "group_id":       m.group_id,
+        "stage":          m.stage,
+        "round":          m.round,
+        "status":         m.status,
+        "table_number":   m.table_number,
+        "current_server": m.current_server,
+        "started_at":     str(m.started_at)  if m.started_at  else None,
+        "finished_at":    str(m.finished_at) if m.finished_at else None,
+        "player_1":       _participant_data(p1, "player_1"),
+        "player_2":       _participant_data(p2, "player_2"),
+        "sets": [
+            {
+                "set_number":  s.set_number,
+                "score_p1":    s.score_p1,
+                "score_p2":    s.score_p2,
+                "winner":      s.winner_position,
+                "is_complete": s.is_complete,
+            }
+            for s in sets
+        ],
+    }
 
 
 # ── Create tournament (wizard) ────────────────────────────────
@@ -65,13 +123,13 @@ def create_tournament(
         start_date=data.start_date,
         end_date=data.end_date,
         is_multi_sport=data.is_multi_sport,
+        is_published=data.is_published,
         primary_color=data.primary_color,
         status="draft",
     )
     db.add(tournament)
     db.flush()
 
-    # Create events from wizard step 2
     for ev_input in data.events:
         try:
             engine = get_sport_engine(ev_input.sport_key)
@@ -85,16 +143,19 @@ def create_tournament(
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
 
+        # Normalize doubles_pair → team before storing
+        participant_type = _normalize_participant_type(ev_input.participant_type)
+
         event = Event(
             tournament_id=tournament.tournament_id,
             name=ev_input.name,
             sport_key=ev_input.sport_key,
             format=ev_input.format,
-            participant_type=ev_input.participant_type,
+            participant_type=participant_type,
             sport_config=config,
-            squad_size       = ev_input.squad_size,
-    team_size        = ev_input.team_size,
-    substitutes      = ev_input.substitutes,
+            squad_size=ev_input.squad_size,
+            team_size=ev_input.team_size,
+            substitutes=ev_input.substitutes,
         )
         db.add(event)
 
@@ -132,7 +193,7 @@ def get_tournament(
     return _check_tournament_access(tournament_id, user, db)
 
 
-# ── Tournament workspace data (the big one) ───────────────────
+# ── Tournament workspace data ─────────────────────────────────
 
 @router.get("/tournaments/{tournament_id}/workspace")
 def get_workspace(
@@ -154,6 +215,8 @@ def get_workspace(
     ).all()
 
     for event in events:
+        is_team_event = event.participant_type == "team"
+
         # Groups
         groups = db.query(Group).filter(Group.event_id == event.event_id).order_by(Group.name).all()
         groups_data = []
@@ -161,16 +224,23 @@ def get_workspace(
             participants = (
                 db.query(EventParticipant)
                 .filter(EventParticipant.event_id == event.event_id, EventParticipant.group_id == g.group_id)
-                .options(joinedload(EventParticipant.player))
+                .options(
+                    joinedload(EventParticipant.player),
+                    joinedload(EventParticipant.team),
+                )
                 .all()
             )
             groups_data.append({
                 "group_id": g.group_id,
-                "name": g.name,
+                "name":     g.name,
+                "participants": [
+                    _serialize_participant(ep, is_team_event)
+                    for ep in participants
+                ],
+                # keep backward compat key
                 "players": [
-                    {"player_id": ep.player.player_id, "name": ep.player.name,
-                     "age": ep.player.age, "gender": ep.player.gender, "seed": ep.seed}
-                    for ep in participants if ep.player
+                    _serialize_participant(ep, is_team_event)
+                    for ep in participants
                 ],
             })
 
@@ -178,7 +248,10 @@ def get_workspace(
         ungrouped = (
             db.query(EventParticipant)
             .filter(EventParticipant.event_id == event.event_id, EventParticipant.group_id == None)
-            .options(joinedload(EventParticipant.player))
+            .options(
+                joinedload(EventParticipant.player),
+                joinedload(EventParticipant.team),
+            )
             .all()
         )
 
@@ -187,71 +260,94 @@ def get_workspace(
             db.query(Match).filter(Match.event_id == event.event_id)
             .options(
                 joinedload(Match.participants).joinedload(MatchParticipant.player),
-                joinedload(Match.sets))
+                joinedload(Match.participants).joinedload(MatchParticipant.team),
+                joinedload(Match.sets),
+            )
             .order_by(Match.stage, Match.round, Match.match_id)
             .all()
         )
 
-        player_count = db.query(EventParticipant).filter(
+        participant_count = db.query(EventParticipant).filter(
             EventParticipant.event_id == event.event_id).count()
-        match_count = len(matches)
-        live_count = sum(1 for m in matches if m.status == "live")
-        done_count = sum(1 for m in matches if m.status == "done")
+        match_count  = len(matches)
+        live_count   = sum(1 for m in matches if m.status == "live")
+        done_count   = sum(1 for m in matches if m.status == "done")
 
-        total_players += player_count
+        total_players += participant_count
         total_matches += match_count
-        total_live += live_count
-        total_done += done_count
+        total_live    += live_count
+        total_done    += done_count
 
         events_data.append({
-            "event_id": event.event_id,
-            "name": event.name,
-            "sport_key": event.sport_key,
-            "format": event.format,
+            "event_id":        event.event_id,
+            "name":            event.name,
+            "sport_key":       event.sport_key,
+            "format":          event.format,
             "participant_type": event.participant_type,
-            "sport_config": event.sport_config,
-            "status": event.status,
+            "sport_config":    event.sport_config,
+            "status":          event.status,
             "squad_size":      event.squad_size,
-    "team_size":       event.team_size,
-    "substitutes":     event.substitutes,
-            "player_count": player_count,
-            "match_count": match_count,
-            "live_count": live_count,
-            "done_count": done_count,
-            "groups": groups_data,
+            "team_size":       event.team_size,
+            "substitutes":     event.substitutes,
+            "player_count":    participant_count,
+            "match_count":     match_count,
+            "live_count":      live_count,
+            "done_count":      done_count,
+            "groups":          groups_data,
             "ungrouped_players": [
-                {"player_id": ep.player.player_id, "name": ep.player.name,
-                 "age": ep.player.age, "gender": ep.player.gender, "seed": ep.seed}
-                for ep in ungrouped if ep.player
+                _serialize_participant(ep, is_team_event)
+                for ep in ungrouped
             ],
             "matches": [_serialize_match(m) for m in matches],
         })
 
     return {
         "tournament": {
-            "tournament_id": t.tournament_id,
-            "org_id": t.org_id,
-            "name": t.name,
-            "slug": t.slug,
-            "description": t.description,
+            "tournament_id":  t.tournament_id,
+            "org_id":         t.org_id,
+            "name":           t.name,
+            "slug":           t.slug,
+            "description":    t.description,
             "is_multi_sport": t.is_multi_sport,
-            "venue": t.venue,
-            "city": t.city,
-            "start_date": str(t.start_date) if t.start_date else None,
-            "end_date": str(t.end_date) if t.end_date else None,
-            "status": t.status,
-            "primary_color": t.primary_color,
-            "is_published": t.is_published,
+            "venue":          t.venue,
+            "city":           t.city,
+            "start_date":     str(t.start_date) if t.start_date else None,
+            "end_date":       str(t.end_date)   if t.end_date   else None,
+            "status":         t.status,
+            "primary_color":  t.primary_color,
+            "is_published":   t.is_published,
         },
         "events": events_data,
         "stats": {
-            "total_events": len(events_data),
-            "total_players": total_players,
-            "total_matches": total_matches,
-            "live_matches": total_live,
-            "done_matches": total_done,
+            "total_events":   len(events_data),
+            "total_players":  total_players,
+            "total_matches":  total_matches,
+            "live_matches":   total_live,
+            "done_matches":   total_done,
         },
     }
+
+
+def _serialize_participant(ep: EventParticipant, is_team: bool) -> dict:
+    if is_team and ep.team:
+        return {
+            "ep_id":    ep.ep_id,
+            "team_id":  ep.team.team_id,
+            "name":     ep.team.name,
+            "seed":     ep.seed,
+            "group_id": ep.group_id,
+        }
+    elif ep.player:
+        return {
+            "ep_id":     ep.ep_id,
+            "player_id": ep.player.player_id,
+            "name":      ep.player.name,
+            "age":       ep.player.age,
+            "gender":    ep.player.gender,
+            "seed":      ep.seed,
+            "group_id":  ep.group_id,
+        }
+    return {"ep_id": ep.ep_id, "name": "Unknown", "seed": ep.seed, "group_id": ep.group_id}
 
 
 # ── Update tournament ─────────────────────────────────────────
@@ -279,6 +375,7 @@ def update_tournament(
     db.commit()
     db.refresh(t)
     return t
+
 
 # ── Delete tournament ─────────────────────────────────────────
 
@@ -326,7 +423,7 @@ def transition_status(
     return {"ok": True, "status": t.status}
 
 
-# ── Auto-generate fixtures for an event ───────────────────────
+# ── Generate fixtures ─────────────────────────────────────────
 
 @router.post("/events/{event_id}/generate-fixtures")
 def generate_fixtures(
@@ -334,115 +431,193 @@ def generate_fixtures(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Auto-generate round-robin group matches for an event."""
+    """
+    Auto-generate fixtures for an event.
+
+    Behaviour by format:
+      group_knockout  — round-robin within each group (groups must exist and be populated)
+      round_robin     — everyone plays everyone (no groups needed)
+      direct_knockout — single-elimination bracket (no groups needed, participants shuffled randomly)
+
+    Works for both individual (player_id) and team (team_id) events.
+    """
     event = db.query(Event).filter(Event.event_id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    # Check access
     t = db.query(Tournament).filter(Tournament.tournament_id == event.tournament_id).first()
     _check_org_access(t.org_id, user, db)
 
     engine = get_sport_engine(event.sport_key)
-    groups = db.query(Group).filter(Group.event_id == event_id).all()
+    is_team_event = event.participant_type == "team"
 
-    if not groups:
-        raise HTTPException(status_code=400, detail="No groups found. Create groups and assign players first.")
+    # ── Helper: create one match between two participants ─────
+    def _create_match(pid1, pid2, group_id, stage, round_num, table_num):
+        match = Match(
+            event_id=event_id,
+            group_id=group_id,
+            round=round_num,
+            stage=stage,
+            status="scheduled",
+            table_number=table_num,
+        )
+        db.add(match)
+        db.flush()
+
+        if is_team_event:
+            db.add_all([
+                MatchParticipant(match_id=match.match_id, team_id=pid1, position=1),
+                MatchParticipant(match_id=match.match_id, team_id=pid2, position=2),
+            ])
+        else:
+            db.add_all([
+                MatchParticipant(match_id=match.match_id, player_id=pid1, position=1),
+                MatchParticipant(match_id=match.match_id, player_id=pid2, position=2),
+            ])
+
+        if hasattr(engine, "check_set_winner"):
+            db.add(MatchSet(match_id=match.match_id, set_number=1))
+
+        return match
+
+    # ── Helper: get all participant IDs for this event ────────
+    def _get_all_ids():
+        eps = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event_id
+        ).all()
+        if is_team_event:
+            return [ep.team_id for ep in eps if ep.team_id]
+        return [ep.player_id for ep in eps if ep.player_id]
+
+    # ── Helper: already-existing pair set ─────────────────────
+    def _existing_pairs(group_id=None):
+        q = db.query(Match).filter(Match.event_id == event_id)
+        if group_id is not None:
+            q = q.filter(Match.group_id == group_id)
+        existing = q.options(joinedload(Match.participants)).all()
+        pairs = set()
+        for m in existing:
+            if is_team_event:
+                ids = tuple(sorted(p.team_id for p in m.participants if p.team_id))
+            else:
+                ids = tuple(sorted(p.player_id for p in m.participants if p.player_id))
+            if len(ids) == 2:
+                pairs.add(ids)
+        return pairs
 
     matches_created = 0
     table_counter = 0
 
-    for group in groups:
-        participants = (
-            db.query(EventParticipant)
-            .filter(EventParticipant.event_id == event_id, EventParticipant.group_id == group.group_id)
-            .all()
-        )
+    # ════════════════════════════════════════════════════════════
+    # FORMAT: group_knockout — round-robin within each group
+    # ════════════════════════════════════════════════════════════
+    if event.format == "group_knockout":
+        groups = db.query(Group).filter(Group.event_id == event_id).all()
+        if not groups:
+            raise HTTPException(
+                status_code=400,
+                detail="No groups found. Create groups and assign participants first."
+            )
 
-        if len(participants) < 2:
-            continue
+        for group in groups:
+            eps = db.query(EventParticipant).filter(
+                EventParticipant.event_id == event_id,
+                EventParticipant.group_id == group.group_id,
+            ).all()
 
-        player_ids = [ep.player_id for ep in participants]
+            if len(eps) < 2:
+                continue
 
-        # Check which matches already exist in this group
-        existing = (
-            db.query(Match)
-            .filter(Match.event_id == event_id, Match.group_id == group.group_id)
-            .options(joinedload(Match.participants))
-            .all()
-        )
-        existing_pairs = set()
-        for m in existing:
-            pids = tuple(sorted(p.player_id for p in m.participants))
-            existing_pairs.add(pids)
+            ids = [ep.team_id if is_team_event else ep.player_id for ep in eps]
+            existing = _existing_pairs(group.group_id)
 
-        # Round-robin within group
-        for i in range(len(player_ids)):
-            for j in range(i + 1, len(player_ids)):
-                pair = tuple(sorted([player_ids[i], player_ids[j]]))
-                if pair in existing_pairs:
+            for i in range(len(ids)):
+                for j in range(i + 1, len(ids)):
+                    pair = tuple(sorted([ids[i], ids[j]]))
+                    if pair in existing:
+                        continue
+                    table_counter += 1
+                    _create_match(ids[i], ids[j], group.group_id, "group", 1, ((table_counter - 1) % 2) + 1)
+                    matches_created += 1
+
+    # ════════════════════════════════════════════════════════════
+    # FORMAT: round_robin — everyone plays everyone, no groups
+    # ════════════════════════════════════════════════════════════
+    elif event.format == "round_robin":
+        ids = _get_all_ids()
+        if len(ids) < 2:
+            raise HTTPException(status_code=400, detail="Need at least 2 participants to generate fixtures.")
+
+        existing = _existing_pairs()
+
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                pair = tuple(sorted([ids[i], ids[j]]))
+                if pair in existing:
                     continue
-
                 table_counter += 1
-                table = ((table_counter - 1) % 2) + 1
-
-                match = Match(
-                    event_id=event_id,
-                    group_id=group.group_id,
-                    round=1,
-                    stage="group",
-                    status="scheduled",
-                    table_number=table,
-                )
-                db.add(match)
-                db.flush()
-
-                db.add_all([
-                    MatchParticipant(match_id=match.match_id, player_id=player_ids[i], position=1),
-                    MatchParticipant(match_id=match.match_id, player_id=player_ids[j], position=2),
-                ])
-
-                # Create first set for set-based sports
-                if hasattr(engine, "check_set_winner"):
-                    db.add(MatchSet(match_id=match.match_id, set_number=1))
-
+                _create_match(ids[i], ids[j], None, "round_robin", 1, ((table_counter - 1) % 2) + 1)
                 matches_created += 1
 
+    # ════════════════════════════════════════════════════════════
+    # FORMAT: direct_knockout — single elimination bracket
+    # ════════════════════════════════════════════════════════════
+    elif event.format == "direct_knockout":
+        ids = _get_all_ids()
+        if len(ids) < 2:
+            raise HTTPException(status_code=400, detail="Need at least 2 participants to generate fixtures.")
+
+        # Delete any existing knockout matches before regenerating
+        existing_matches = db.query(Match).filter(Match.event_id == event_id).all()
+        for m in existing_matches:
+            db.delete(m)
+        db.flush()
+
+        # Shuffle for random seeding
+        ids_shuffled = ids[:]
+        random.shuffle(ids_shuffled)
+
+        # Pad to next power of 2 with byes (None)
+        import math
+        n = len(ids_shuffled)
+        bracket_size = 2 ** math.ceil(math.log2(n)) if n > 1 else 2
+        byes = bracket_size - n
+        padded = ids_shuffled + [None] * byes
+
+        round_num = 1
+        current_round_ids = padded
+
+        while len(current_round_ids) > 1:
+            next_round = []
+            for i in range(0, len(current_round_ids), 2):
+                a = current_round_ids[i]
+                b = current_round_ids[i + 1] if i + 1 < len(current_round_ids) else None
+
+                if a is None and b is None:
+                    next_round.append(None)
+                elif a is None:
+                    next_round.append(b)   # bye — advance automatically
+                elif b is None:
+                    next_round.append(a)   # bye — advance automatically
+                else:
+                    # Real match
+                    stage = "final" if len(current_round_ids) == 2 else \
+                            "semi"  if len(current_round_ids) == 4 else \
+                            "quarter" if len(current_round_ids) == 8 else "knockout"
+                    table_counter += 1
+                    _create_match(a, b, None, stage, round_num, ((table_counter - 1) % 2) + 1)
+                    matches_created += 1
+                    next_round.append(None)  # winner TBD
+
+            current_round_ids = next_round
+            round_num += 1
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown format: {event.format}")
+
     db.commit()
-    return {"ok": True, "matches_created": matches_created}
-
-
-def _serialize_match(m: Match) -> dict:
-    parts = sorted(m.participants, key=lambda p: p.position)
-    p1 = parts[0] if len(parts) > 0 else None
-    p2 = parts[1] if len(parts) > 1 else None
-    sets = sorted(m.sets, key=lambda s: s.set_number) if m.sets else []
     return {
-        "match_id": m.match_id,
-        "event_id": m.event_id,
-        "group_id": m.group_id,
-        "stage": m.stage,
-        "round": m.round,
-        "status": m.status,
-        "table_number": m.table_number,
-        "current_server": m.current_server,
-        "started_at": str(m.started_at) if m.started_at else None,
-        "finished_at": str(m.finished_at) if m.finished_at else None,
-        "player_1": {
-            "player_id": p1.player_id if p1 else None,
-            "name": p1.player.name if p1 and p1.player else "TBD",
-            "score": p1.score if p1 else 0,
-            "is_winner": p1.is_winner if p1 else False,
-        },
-        "player_2": {
-            "player_id": p2.player_id if p2 else None,
-            "name": p2.player.name if p2 and p2.player else "TBD",
-            "score": p2.score if p2 else 0,
-            "is_winner": p2.is_winner if p2 else False,
-        },
-        "sets": [
-            {"set_number": s.set_number, "score_p1": s.score_p1, "score_p2": s.score_p2,
-             "winner": s.winner_position, "is_complete": s.is_complete}
-            for s in sets
-        ],
+        "ok": True,
+        "format": event.format,
+        "matches_created": matches_created,
     }

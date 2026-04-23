@@ -17,6 +17,13 @@ from app.sports.registry import get_sport_engine, list_sports
 router = APIRouter()
 
 
+def _normalize_participant_type(pt: str) -> str:
+    """doubles_pair is a frontend UI concept — backend stores it as 'team'."""
+    if pt == "doubles_pair":
+        return "team"
+    return pt
+
+
 def _get_tournament_and_check(tournament_id: int, user: User, db: Session) -> Tournament:
     t = db.query(Tournament).filter(Tournament.tournament_id == tournament_id).first()
     if not t:
@@ -66,12 +73,15 @@ def create_event(
     if data.format not in valid_formats:
         raise HTTPException(status_code=400, detail=f"Format must be one of {valid_formats}")
 
+    # Normalize doubles_pair → team before storing
+    participant_type = _normalize_participant_type(data.participant_type)
+
     event = Event(
         tournament_id=tournament_id,
         name=data.name,
         sport_key=data.sport_key,
         format=data.format,
-        participant_type=data.participant_type,
+        participant_type=participant_type,
         sport_config=base_config,
     )
     db.add(event)
@@ -127,7 +137,13 @@ def update_event(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid sport config: {e}")
 
-    for field, val in data.model_dump(exclude_unset=True).items():
+    update_data = data.model_dump(exclude_unset=True)
+
+    # Normalize participant_type if it's being updated
+    if "participant_type" in update_data:
+        update_data["participant_type"] = _normalize_participant_type(update_data["participant_type"])
+
+    for field, val in update_data.items():
         setattr(event, field, val)
 
     db.commit()

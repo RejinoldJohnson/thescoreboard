@@ -30,7 +30,7 @@ export default function FootballScorer({ match, config, onScore, onFinish, onClo
     red:"#ef4444", muted:"#666", ink:"#fff",
   };
 
-  const handleScore = () => onScore(goals1, goals2, { minute, half });
+  const handleScore = () => onScore(goals1, goals2, { football_minute: minute, football_half: half });
   const handleFullTime = () => onFinish(goals1 > goals2 ? 1 : goals2 > goals1 ? 2 : null);
 
   const GoalButton = ({ pos, score, setScore }) => (

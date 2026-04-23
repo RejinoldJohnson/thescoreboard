@@ -16,7 +16,7 @@ class EventInput(BaseModel):
 
 
 class TournamentCreate(BaseModel):
-    """Step 1-3 of creation wizard combined."""
+    """Step 1-5 of creation wizard combined."""
     name: str
     venue: Optional[str] = None
     city: Optional[str] = None
@@ -24,6 +24,7 @@ class TournamentCreate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     is_multi_sport: bool = False
+    is_published: bool = False
     primary_color: Optional[str] = None
     events: List[EventInput] = []
 

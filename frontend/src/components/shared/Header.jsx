@@ -5,7 +5,19 @@ import { isLoggedIn } from "../../api/client";
 export default function Header({ showSearch = false, onSearch, searchPlaceholder = "Search tournaments…" }) {
   const navigate = useNavigate();
   const [val, setVal] = useState("");
-  const [theme, setTheme] = useState(document.documentElement.getAttribute("data-theme") || "light");
+  
+  // Initialize theme from localStorage or default to light
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem("theme") || "light";
+  });
+
+  useEffect(() => {
+    const savedTheme = localStorage.getItem("theme");
+    if (savedTheme) {
+      document.documentElement.setAttribute("data-theme", savedTheme);
+      setTheme(savedTheme);
+    }
+  }, []);
 
   const handleSearch = (v) => { setVal(v); if (onSearch) onSearch(v); };
 

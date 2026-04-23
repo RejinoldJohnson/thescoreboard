@@ -3,12 +3,22 @@ import { useNavigate } from "react-router-dom";
 
 export default function OrgHeader({ crumbs = [], right = null, user = null, onLogout = null }) {
   const navigate = useNavigate();
-  const [theme, setTheme] = useState("light");
+  
+  console.log("🔍 OrgHeader render:", { user, onLogout: !!onLogout, crumbs });
+  
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem("theme") || "light";
+  });
 
-  // Force light theme in organizer
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", "light");
-    localStorage.setItem("theme", "light");
+    const savedTheme = localStorage.getItem("theme");
+    if (!savedTheme) {
+      document.documentElement.setAttribute("data-theme", "light");
+      localStorage.setItem("theme", "light");
+    } else {
+      document.documentElement.setAttribute("data-theme", savedTheme);
+      setTheme(savedTheme);
+    }
   }, []);
 
   const toggleTheme = () => {
@@ -22,7 +32,7 @@ export default function OrgHeader({ crumbs = [], right = null, user = null, onLo
     <header className="site-header org-header" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
       {/* ── Row 1: brand + controls ── */}
       <div className="header-row">
-        {/* Brand - Full width on mobile */}
+        {/* Brand wrapper */}
         <div className="org-header-brand">
           <span
             className="header-brand"
@@ -33,19 +43,43 @@ export default function OrgHeader({ crumbs = [], right = null, user = null, onLo
           </span>
         </div>
 
-        {/* Controls - Separate row on mobile */}
+        {/* Controls wrapper */}
         <div className="org-header-right">
-          <button onClick={toggleTheme} style={{ background:"none", border:"none", cursor:"pointer", fontSize:18, color:"var(--ink)" }}>
+        {console.log("🎨 Rendering org-header-right, onLogout =", !!onLogout)}
+          {/* Theme toggle */}
+          <button 
+            onClick={toggleTheme} 
+            className="theme-toggle-btn"
+            style={{ 
+              background: "none", 
+              border: "none", 
+              cursor: "pointer", 
+              fontSize: 18, 
+              color: "var(--ink)", 
+              flexShrink: 0 
+            }}
+            title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+          >
             {theme === "light" ? "🌙" : "☀️"}
           </button>
+          
+          {/* Username (desktop only) */}
           {user?.name && (
-            <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }} className="user-name">
+            <span className="user-name user-name-desktop" style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
               {user.name}
             </span>
           )}
+          
+          {/* Right slot (if any custom content) */}
           {right}
+          
+          {/* Logout button */}
           {onLogout && (
-            <button className="btn btn-ghost btn-sm" onClick={onLogout} style={{ color: "var(--ink)" }}>
+            <button 
+              className="btn btn-ghost btn-sm org-logout-btn" 
+              onClick={onLogout}
+              style={{ color: "var(--ink)" }}
+            >
               Logout
             </button>
           )}

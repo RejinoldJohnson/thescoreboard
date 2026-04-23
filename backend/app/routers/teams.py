@@ -81,10 +81,10 @@ def create_team(
     org = db.query(Organization).filter(Organization.org_id == org_id).first()
     if not org:
         raise HTTPException(status_code=404, detail="Organization not found")
-        
+
     if not getattr(user, "is_superadmin", False):
         member = db.query(OrgMember).filter(
-            OrgMember.org_id == org_id, 
+            OrgMember.org_id == org_id,
             OrgMember.user_id == user.user_id
         ).first()
         if not member:
@@ -155,8 +155,15 @@ def add_team_to_event(
     event = db.query(Event).filter(Event.event_id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    if event.participant_type != "team":
-        raise HTTPException(status_code=400, detail="This event is for individual players, not teams")
+
+    # Accept both "team" and "doubles_pair" — doubles_pair is stored as "team"
+    # but old events created before the fix may still have "doubles_pair" in the DB
+    if event.participant_type not in ("team", "doubles_pair"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"This event is for individual players, not teams. "
+                   f"Event participant_type is '{event.participant_type}'."
+        )
 
     existing = db.query(EventParticipant).filter(
         EventParticipant.event_id == event_id,
@@ -274,13 +281,13 @@ def public_register_team(
             Event.tournament_id == tournament_id,
             Event.event_id.in_(data.event_ids),
             Event.is_active == True,
-            Event.participant_type == "team",
+            Event.participant_type.in_(["team", "doubles_pair"]),
         ).all()
     else:
         target_events = db.query(Event).filter(
             Event.tournament_id == tournament_id,
             Event.is_active == True,
-            Event.participant_type == "team",
+            Event.participant_type.in_(["team", "doubles_pair"]),
         ).all()
 
     if not target_events:
@@ -299,10 +306,10 @@ def public_register_team(
 
     db.commit()
     return {
-        "ok":             True,
-        "team_id":        team.team_id,
-        "team_name":      team.name,
-        "member_count":   len(data.members),
+        "ok":              True,
+        "team_id":         team.team_id,
+        "team_name":       team.name,
+        "member_count":    len(data.members),
         "enrolled_events": enrolled,
-        "message":        f"Team '{team.name}' registered for {tournament.name}",
+        "message":         f"Team '{team.name}' registered for {tournament.name}",
     }

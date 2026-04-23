@@ -10,8 +10,6 @@ const SPORTS = [
   { key: "football",     label: "Football",     icon: "⚽" },
 ];
 
-// Sub-formats per sport
-// Each sub-format defines: label, participant_type, extra config fields
 const SPORT_SUBFORMATS = {
   table_tennis: [
     {
@@ -60,8 +58,10 @@ const SPORT_SUBFORMATS = {
       participant_type: "team",
       config:           { squad_size: 11 },
       configFields:     [
-        { key: "squad_size", label: "Squad Size", type: "number", min: 6, max: 15, default: 11,
-          hint: "Total players per team including subs (e.g. 11 = playing XI)" },
+        {
+          key: "squad_size", label: "Squad Size", type: "number", min: 6, max: 15, default: 11,
+          hint: "Total players per team including subs (e.g. 11 = playing XI)",
+        },
       ],
     },
   ],
@@ -110,11 +110,12 @@ const STEPS = ["Type", "Sport & Format", "Structure", "Details", "Review"];
 export default function CreateTournament() {
   const navigate = useNavigate();
 
-  const [step,           setStep]           = useState(1);
-  const [activeOrg,      setActiveOrg]      = useState(null);
-  const [loading,        setLoading]        = useState(false);
-  const [error,          setError]          = useState("");
-  const [isMultiSport,   setIsMultiSport]   = useState(false);
+  const [step,         setStep]         = useState(1);
+  const [activeOrg,    setActiveOrg]    = useState(null);
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState("");
+  const [isMultiSport, setIsMultiSport] = useState(false);
+  const [isPublished,  setIsPublished]  = useState(false);
 
   // events array — each entry:
   // { sport_key, subformat_key, participant_type, format, name, sport_config }
@@ -138,10 +139,9 @@ export default function CreateTournament() {
   const getSubformat = (sportKey, sfKey) =>
     SPORT_SUBFORMATS[sportKey]?.find(sf => sf.key === sfKey);
 
-  // Add a new sport event slot
   const addSportEvent = (sportKey) => {
     const subformats = SPORT_SUBFORMATS[sportKey] || [];
-    const sf         = subformats[0]; // default to first
+    const sf         = subformats[0];
     setEvents(prev => [...prev, {
       sport_key:        sportKey,
       subformat_key:    sf?.key || "singles",
@@ -173,7 +173,6 @@ export default function CreateTournament() {
       idx === i ? { ...ev, sport_config: { ...ev.sport_config, [key]: val } } : ev
     ));
 
-  // Toggle sport for multi-sport
   const toggleSport = (sportKey) => {
     const existing = events.find(e => e.sport_key === sportKey);
     if (existing) {
@@ -183,7 +182,6 @@ export default function CreateTournament() {
     }
   };
 
-  // Single sport — replace
   const setSingleSport = (sportKey) => {
     const subformats = SPORT_SUBFORMATS[sportKey] || [];
     const sf         = subformats[0];
@@ -197,7 +195,6 @@ export default function CreateTournament() {
     }]);
   };
 
-  // Validation
   const canAdvance = () => {
     if (step === 2) return events.length > 0;
     if (step === 3) return events.every(e => e.format !== "");
@@ -207,6 +204,10 @@ export default function CreateTournament() {
 
   const next = () => { if (!canAdvance()) return; setError(""); setStep(s => Math.min(s + 1, 5)); };
   const back = () => setStep(s => Math.max(s - 1, 1));
+
+  // Normalize doubles_pair → team for the backend
+  const normalizeParticipantType = (pt) =>
+    pt === "doubles_pair" ? "team" : pt;
 
   const handleCreate = async () => {
     if (!activeOrg)     return setError("No organization found.");
@@ -221,6 +222,7 @@ export default function CreateTournament() {
         city:           city.trim()  || null,
         start_date:     startDate    || null,
         is_multi_sport: isMultiSport,
+        is_published:   isPublished,
         events: events.map(e => {
           const sf      = getSubformat(e.sport_key, e.subformat_key);
           const evtName = e.name.trim() ||
@@ -229,12 +231,11 @@ export default function CreateTournament() {
             name:             evtName,
             sport_key:        e.sport_key,
             format:           e.format,
-            participant_type: e.participant_type,
+            participant_type: normalizeParticipantType(e.participant_type),
             sport_config:     {
               ...(sf?.config || {}),
               ...e.sport_config,
             },
-            // flat columns for the backend
             squad_size:   e.sport_config?.squad_size  || null,
             team_size:    e.sport_config?.team_size   || null,
             substitutes:  e.sport_config?.substitutes || null,
@@ -249,7 +250,7 @@ export default function CreateTournament() {
     }
   };
 
-  // ── Styles (Stadium Lights) ───────────────────────────────
+  // ── Styles ────────────────────────────────────────────────
   const c = {
     bg: "var(--bg)", surface: "var(--surface)", border: "var(--border)",
     orange: "var(--primary)", gold: "var(--gold)", muted: "var(--muted)",
@@ -357,7 +358,6 @@ export default function CreateTournament() {
               {isMultiSport ? "Pick all sports and their format." : "Pick your sport and format."}
             </p>
 
-            {/* Sport picker */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }} className="sport-selector-grid">
               {SPORTS.map(sport => {
                 const selected = events.some(e => e.sport_key === sport.key);
@@ -384,10 +384,9 @@ export default function CreateTournament() {
               })}
             </div>
 
-            {/* Sub-format picker — shown per selected sport */}
             {events.map((ev, i) => {
               const subformats = SPORT_SUBFORMATS[ev.sport_key] || [];
-              if (subformats.length <= 1) return null; // cricket only has one
+              if (subformats.length <= 1) return null;
               return (
                 <div key={`${ev.sport_key}-${i}`} style={{ marginBottom: 16 }}>
                   <div style={{ fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: c.orange, marginBottom: 8 }}>
@@ -420,7 +419,6 @@ export default function CreateTournament() {
               );
             })}
 
-            {/* Squad / team size config — shown for team sports */}
             {events.map((ev, i) => {
               const sf = getSubformat(ev.sport_key, ev.subformat_key);
               if (!sf?.configFields?.length) return null;
@@ -504,6 +502,7 @@ export default function CreateTournament() {
                 value={name} onChange={e => setName(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && name.trim() && next()} />
             </div>
+
             <div className="field-row">
               <div className="field">
                 <label>Venue</label>
@@ -514,9 +513,39 @@ export default function CreateTournament() {
                 <input className="input" placeholder="e.g. Mumbai" value={city} onChange={e => setCity(e.target.value)} />
               </div>
             </div>
+
             <div className="field">
               <label>Start Date</label>
               <input className="input" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            </div>
+
+            {/* Visibility toggle */}
+            <div className="field">
+              <label>Visibility</label>
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                {[
+                  { value: false, icon: "🔒", label: "Private", sub: "Accessible via direct link only" },
+                  { value: true,  icon: "🌐", label: "Public",  sub: "Listed on tournament discovery" },
+                ].map(opt => (
+                  <div
+                    key={String(opt.value)}
+                    style={{
+                      ...selStyle(isPublished === opt.value),
+                      flex: 1,
+                      padding: "12px 14px",
+                      marginBottom: 0,
+                      textAlign: "center",
+                    }}
+                    onClick={() => setIsPublished(opt.value)}
+                  >
+                    <div style={{ fontSize: 20, marginBottom: 4 }}>{opt.icon}</div>
+                    <div style={{ fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: isPublished === opt.value ? c.orange : c.ink }}>
+                      {opt.label}
+                    </div>
+                    <div style={{ fontSize: 11, color: c.muted, marginTop: 2 }}>{opt.sub}</div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Optional event name overrides */}
@@ -553,10 +582,10 @@ export default function CreateTournament() {
             <div className="card-title">Step 5 — Review & Create</div>
             <p style={{ fontSize: 13, color: c.muted, marginBottom: 20 }}>Double-check everything before creating.</p>
 
-            {/* Tournament details */}
             {[
               ["Name",       name],
               ["Type",       isMultiSport ? "Multi-Sport" : "Single Sport"],
+              ["Visibility", isPublished ? "🌐 Public" : "🔒 Private"],
               venue     && ["Venue",      venue],
               city      && ["City",       city],
               startDate && ["Start Date", startDate],
@@ -567,15 +596,14 @@ export default function CreateTournament() {
               </div>
             ))}
 
-            {/* Events summary */}
             <div style={{ background: "var(--elevated)", border: `1px solid ${c.border}`, borderRadius: 8, padding: "14px 16px", marginTop: 16 }}>
               <div style={{ fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: c.orange, marginBottom: 12 }}>
                 Events ({events.length})
               </div>
               {events.map((ev, i) => {
-                const sf      = getSubformat(ev.sport_key, ev.subformat_key);
-                const evName  = ev.name.trim() || `${sl(ev.sport_key)} ${sf?.label || ""}`.trim();
-                const pType   = sf?.participant_type || ev.participant_type;
+                const sf        = getSubformat(ev.sport_key, ev.subformat_key);
+                const evName    = ev.name.trim() || `${sl(ev.sport_key)} ${sf?.label || ""}`.trim();
+                const pType     = sf?.participant_type || ev.participant_type;
                 const isDoubles = pType === "doubles_pair";
                 const isTeam    = pType === "team";
                 return (
@@ -612,4 +640,4 @@ export default function CreateTournament() {
       </div>
     </div>
   );
-}   
+}
