@@ -5,6 +5,7 @@ import {
   getTournaments, deleteTournament, clearToken,
 } from "../../api/client";
 import OrgHeader from "../../components/shared/OrgHeader";
+import CitySelect, { CITY_STATE_MAP } from "../../components/shared/CitySelect";
 
 const STATUS_META = {
   draft:        { label: "Draft",        pill: "pill-gray"   },
@@ -252,10 +253,17 @@ export default function Dashboard() {
                 <input className="input" autoFocus placeholder="e.g. Tenx Sports Club" value={orgForm.name}
                   onChange={e=>setOrgForm(f=>({...f,name:e.target.value}))}
                   onKeyDown={e=>e.key==="Enter"&&handleCreateOrg()} /></div>
-              <div className="field-row">
-                <div className="field"><label>City</label><input className="input" placeholder="Mumbai" value={orgForm.city} onChange={e=>setOrgForm(f=>({...f,city:e.target.value}))}/></div>
-                <div className="field"><label>State</label><input className="input" placeholder="Maharashtra" value={orgForm.state} onChange={e=>setOrgForm(f=>({...f,state:e.target.value}))}/></div>
-              </div>
+              <CitySelect
+                city={orgForm.city}
+                onChange={city => setOrgForm(f => ({ ...f, city, state: city ? (CITY_STATE_MAP[city] || "") : "" }))}
+              />
+              {orgForm.city && (
+                <div className="field">
+                  <label>State</label>
+                  <input className="input" value={orgForm.state} readOnly
+                    style={{ color: "var(--muted)", cursor: "default", background: "var(--elevated)" }} />
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setShowOrgModal(false)}>Cancel</button>
