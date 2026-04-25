@@ -10,11 +10,14 @@ from app.models.user import User
 from app.models.organization import OrgMember
 from app.models.tournament import Tournament
 from app.models.event import Event
-from app.schemas.event import EventCreate, EventUpdate, EventOut
+from app.models.match import Match
+from app.schemas.event import EventCreate, EventUpdate, EventOut, EventSetupInput
 from app.utils.auth import get_current_user
 from app.sports.registry import get_sport_engine, list_sports
 
 router = APIRouter()
+
+_VALID_FORMATS = ["group_knockout", "direct_knockout", "round_robin"]
 
 
 def _normalize_participant_type(pt: str) -> str:
@@ -28,7 +31,6 @@ def _get_tournament_and_check(tournament_id: int, user: User, db: Session) -> To
     t = db.query(Tournament).filter(Tournament.tournament_id == tournament_id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
-
     if not user.is_superadmin:
         member = db.query(OrgMember).filter(
             OrgMember.org_id == t.org_id,
@@ -36,8 +38,22 @@ def _get_tournament_and_check(tournament_id: int, user: User, db: Session) -> To
         ).first()
         if not member:
             raise HTTPException(status_code=403, detail="Not authorized")
-
     return t
+
+
+def _get_event_and_check(event_id: int, user: User, db: Session) -> Event:
+    event = db.query(Event).filter(Event.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    t = db.query(Tournament).filter(Tournament.tournament_id == event.tournament_id).first()
+    if not user.is_superadmin:
+        member = db.query(OrgMember).filter(
+            OrgMember.org_id == t.org_id,
+            OrgMember.user_id == user.user_id,
+        ).first()
+        if not member:
+            raise HTTPException(status_code=403, detail="Not authorized")
+    return event
 
 
 @router.get("/sports")
@@ -55,13 +71,11 @@ def create_event(
 ):
     t = _get_tournament_and_check(tournament_id, user, db)
 
-    # Validate sport key
     try:
         engine = get_sport_engine(data.sport_key)
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Validate and merge sport config
     base_config = engine.get_default_config()
     if data.sport_config:
         try:
@@ -69,11 +83,9 @@ def create_event(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid sport config: {e}")
 
-    valid_formats = ["group_knockout", "direct_knockout", "round_robin"]
-    if data.format not in valid_formats:
-        raise HTTPException(status_code=400, detail=f"Format must be one of {valid_formats}")
+    if data.format not in _VALID_FORMATS:
+        raise HTTPException(status_code=400, detail=f"Format must be one of {_VALID_FORMATS}")
 
-    # Normalize doubles_pair → team before storing
     participant_type = _normalize_participant_type(data.participant_type)
 
     event = Event(
@@ -83,6 +95,7 @@ def create_event(
         format=data.format,
         participant_type=participant_type,
         sport_config=base_config,
+        is_configured=True,
     )
     db.add(event)
     db.commit()
@@ -116,19 +129,7 @@ def update_event(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    event = db.query(Event).filter(Event.event_id == event_id).first()
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-
-    # Check access via tournament → org
-    t = db.query(Tournament).filter(Tournament.tournament_id == event.tournament_id).first()
-    if not user.is_superadmin:
-        member = db.query(OrgMember).filter(
-            OrgMember.org_id == t.org_id,
-            OrgMember.user_id == user.user_id,
-        ).first()
-        if not member:
-            raise HTTPException(status_code=403, detail="Not authorized")
+    event = _get_event_and_check(event_id, user, db)
 
     if data.sport_config is not None:
         engine = get_sport_engine(event.sport_key)
@@ -139,12 +140,98 @@ def update_event(
 
     update_data = data.model_dump(exclude_unset=True)
 
-    # Normalize participant_type if it's being updated
     if "participant_type" in update_data:
         update_data["participant_type"] = _normalize_participant_type(update_data["participant_type"])
 
     for field, val in update_data.items():
         setattr(event, field, val)
+
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+# ── Sport setup wizard ────────────────────────────────────────
+
+@router.post("/events/{event_id}/configure", response_model=EventOut)
+def configure_event(
+    event_id: int,
+    data: EventSetupInput,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Save (or re-save) the sport-specific configuration for one event.
+
+    This is the endpoint called by the setup wizard shown in the dashboard
+    when organiser opens an unconfigured multi-sport event for the first time.
+
+    Edit lock rules
+    ---------------
+    Not yet configured     → always allowed
+    Configured, no fixtures → always allowed (full edit)
+    Configured, has fixtures but no completed matches
+                           → sport_config edits allowed;
+                             format + participant_type are LOCKED
+    Configured, has completed matches → all changes rejected
+    """
+    event = _get_event_and_check(event_id, user, db)
+
+    # ── Edit lock checks (only apply when re-editing an already configured event)
+    if event.is_configured:
+        match_count = db.query(Match).filter(Match.event_id == event_id).count()
+        if match_count > 0:
+            completed_count = db.query(Match).filter(
+                Match.event_id == event_id, Match.status == "done"
+            ).count()
+            if completed_count > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Configuration cannot be changed after matches are completed.",
+                )
+            # Fixtures exist but none finished — lock format + participant_type only
+            normalized_new_pt = _normalize_participant_type(data.participant_type)
+            if data.format != event.format or normalized_new_pt != event.participant_type:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Format and participant type cannot be changed after fixtures have been "
+                        "generated. Delete all fixtures first, then reconfigure."
+                    ),
+                )
+
+    # ── Validate format
+    if data.format not in _VALID_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Format must be one of {_VALID_FORMATS}",
+        )
+
+    # ── Validate and merge sport config
+    try:
+        engine = get_sport_engine(event.sport_key)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    merged_config = engine.get_default_config()
+    if data.sport_config:
+        try:
+            merged_config = engine.validate_config({**merged_config, **data.sport_config})
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid sport config: {e}")
+
+    participant_type = _normalize_participant_type(data.participant_type)
+
+    # ── Apply
+    event.format           = data.format
+    event.participant_type = participant_type
+    event.sport_config     = merged_config
+    event.is_configured    = True
+
+    if data.squad_size  is not None: event.squad_size  = data.squad_size
+    if data.team_size   is not None: event.team_size   = data.team_size
+    if data.substitutes is not None: event.substitutes = data.substitutes
+    if data.name:                    event.name        = data.name.strip()
 
     db.commit()
     db.refresh(event)

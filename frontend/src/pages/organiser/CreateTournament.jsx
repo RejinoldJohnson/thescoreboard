@@ -181,8 +181,7 @@ export default function CreateTournament() {
     if (!canAdvance()) return;
     setError("");
     if (isMultiSport && step === 2) {
-      // Assign default format to all events, then skip Step 3
-      setEvents(prev => prev.map(e => ({ ...e, format: e.format || "direct_knockout" })));
+      // Multi-sport: leave format as null — setup wizard fills it per sport
       setStep(4);
     } else {
       setStep(s => Math.min(s + 1, 5));
@@ -219,12 +218,27 @@ export default function CreateTournament() {
         is_multi_sport: isMultiSport,
         is_published:   isPublished,
         events: events.map(e => {
+          if (isMultiSport) {
+            // Multi-sport: store a clean shell — no config injected.
+            // The organiser completes per-sport setup from the dashboard.
+            return {
+              name:             sl(e.sport_key),   // just "Football", "Cricket", etc.
+              sport_key:        e.sport_key,
+              format:           null,
+              participant_type: "individual",       // backend placeholder; overwritten during setup
+              sport_config:     null,
+              squad_size:       null,
+              team_size:        null,
+              substitutes:      null,
+            };
+          }
+          // Single-sport: send exactly what the wizard collected
           const sf      = getSubformat(e.sport_key, e.subformat_key);
           const evtName = e.name.trim() || `${sl(e.sport_key)}${sf ? " " + sf.label : ""}`;
           return {
             name:             evtName,
             sport_key:        e.sport_key,
-            format:           e.format || "direct_knockout",
+            format:           e.format,
             participant_type: normalizeParticipantType(e.participant_type),
             sport_config:     { ...(sf?.config || {}), ...e.sport_config },
             squad_size:       e.sport_config?.squad_size  || null,
@@ -710,7 +724,7 @@ export default function CreateTournament() {
                           </div>
                         </div>
                         <span style={{ fontSize: 11, color: c.muted, textAlign: "right", flexShrink: 0, marginLeft: 8 }}>
-                          {fl(ev.format)}
+                          {ev.format ? fl(ev.format) : "Setup after creation"}
                         </span>
                       </div>
                     );

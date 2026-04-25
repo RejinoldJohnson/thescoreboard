@@ -136,26 +136,37 @@ def create_tournament(
         except KeyError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        config = engine.get_default_config()
-        if ev_input.sport_config:
-            try:
-                config = engine.validate_config({**config, **ev_input.sport_config})
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
+        if data.is_multi_sport:
+            # Multi-sport: store a clean shell — no defaults injected.
+            # The organiser completes per-sport setup from the dashboard.
+            config        = None
+            is_configured = False
+            event_format  = None          # set during setup wizard
+        else:
+            # Single-sport: apply engine defaults + any provided overrides now.
+            config = engine.get_default_config()
+            if ev_input.sport_config:
+                try:
+                    config = engine.validate_config({**config, **ev_input.sport_config})
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+            is_configured = True
+            event_format  = ev_input.format  # validated non-null by creation wizard
 
         # Normalize doubles_pair → team before storing
-        participant_type = _normalize_participant_type(ev_input.participant_type)
+        participant_type = _normalize_participant_type(ev_input.participant_type or "individual")
 
         event = Event(
             tournament_id=tournament.tournament_id,
             name=ev_input.name,
             sport_key=ev_input.sport_key,
-            format=ev_input.format,
+            format=event_format,
             participant_type=participant_type,
             sport_config=config,
             squad_size=ev_input.squad_size,
             team_size=ev_input.team_size,
             substitutes=ev_input.substitutes,
+            is_configured=is_configured,
         )
         db.add(event)
 
@@ -286,6 +297,7 @@ def get_workspace(
             "participant_type": event.participant_type,
             "sport_config":    event.sport_config,
             "status":          event.status,
+            "is_configured":   event.is_configured,
             "squad_size":      event.squad_size,
             "team_size":       event.team_size,
             "substitutes":     event.substitutes,
@@ -444,6 +456,20 @@ def generate_fixtures(
     event = db.query(Event).filter(Event.event_id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    if not event.is_configured:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Sport configuration is incomplete. "
+                "Open this sport from the tournament dashboard and complete setup first."
+            ),
+        )
+    if not event.format:
+        raise HTTPException(
+            status_code=400,
+            detail="Event format is not set. Please complete sport setup first.",
+        )
 
     t = db.query(Tournament).filter(Tournament.tournament_id == event.tournament_id).first()
     _check_org_access(t.org_id, user, db)

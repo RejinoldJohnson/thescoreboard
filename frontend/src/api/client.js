@@ -45,6 +45,7 @@ export const transitionTournament = (tId, status) => request("POST", `/orgs/tour
 export const createEvent = (tId, d) => request("POST", `/tournaments/${tId}/events`, d);
 export const getEvents = (tId) => request("GET", `/tournaments/${tId}/events`);
 export const updateEvent = (eId, d) => request("PATCH", `/events/${eId}`, d);
+export const configureEvent = (eId, d) => request("POST", `/events/${eId}/configure`, d);
 export const generateFixtures = (eId) => request("POST", `/orgs/events/${eId}/generate-fixtures`);
 
 // Players

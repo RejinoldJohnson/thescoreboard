@@ -29,14 +29,18 @@ class Event(Base):
     # Values: table_tennis, badminton, cricket, football, etc.
     sport_key = Column(String(50), nullable=False, index=True)
 
-    # Format of the event
-    # Values: group_knockout, direct_knockout, round_robin
-    format = Column(String(50), nullable=False, default="group_knockout")
+    # Format of the event: group_knockout | direct_knockout | round_robin
+    # NULL for multi-sport events that have not yet been configured via setup wizard
+    format = Column(String(50), nullable=True, default=None)
 
     # Is this a team sport or individual?
     # individual: match_participants link to players directly
     # team: match_participants link to teams
     participant_type = Column(String(20), nullable=False, default="individual")  # individual | team
+
+    # False for multi-sport events until the organiser completes the sport setup wizard.
+    # True for all single-sport events and any event after setup is saved.
+    is_configured = Column(Boolean, default=True)
 
     # Sport-specific config stored as JSON
     # For TT: {"sets_to_win": 3, "points_per_set": 11, "win_margin": 2, "instant_win": {"score": 7, "opponent": 0}}

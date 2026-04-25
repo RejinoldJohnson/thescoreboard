@@ -4,11 +4,16 @@ from datetime import date, datetime
 
 
 class EventInput(BaseModel):
-    """Event to create as part of tournament creation wizard."""
+    """Event to create as part of tournament creation wizard.
+
+    For single-sport tournaments, format must be provided (non-null).
+    For multi-sport tournaments, format may be None — the event is stored as
+    unconfigured and the organiser completes setup from the dashboard.
+    """
     name: str
     sport_key: str
-    format: str = "group_knockout"
-    participant_type: str = "individual"   # individual | doubles_pair | team
+    format: Optional[str] = None          # None for multi-sport (setup later)
+    participant_type: Optional[str] = "individual"  # individual | doubles_pair | team
     sport_config: Optional[dict] = None
     squad_size:   Optional[int] = None    # cricket
     team_size:    Optional[int] = None    # football (players on field)
