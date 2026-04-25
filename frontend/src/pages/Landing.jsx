@@ -1,27 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { getHomepageData, isLoggedIn } from "../api/client";
+import TournamentCard from "../components/shared/TournamentCard";
 import { SPORT_LABELS, SPORT_ICONS } from "../components/shared/TournamentCard";
 
 const SPORTS_CONFIG = [
-  { key: "football",     url: "football" },
-  { key: "cricket",      url: "cricket" },
-  { key: "table_tennis", url: "table-tennis" },
-  { key: "badminton",    url: "badminton" },
+  { key: "football",     url: "football",     icon: "⚽" },
+  { key: "cricket",      url: "cricket",      icon: "🏏" },
+  { key: "table_tennis", url: "table-tennis", icon: "🏓" },
+  { key: "badminton",    url: "badminton",    icon: "🏸" },
 ];
 
 const POLL_INTERVAL = 10000;
 
 export default function Landing() {
   const navigate = useNavigate();
-  const [data, setData] = useState(null);
+  const [data,        setData]        = useState(null);
   const [searchInput, setSearchInput] = useState("");
-  const [searchQ, setSearchQ] = useState("");
-  
-  // Aligning theme initialization with your global Header.jsx
-  const [theme, setTheme] = useState(() => {
-    return localStorage.getItem("theme") || "light";
-  });
+  const [searchQ,     setSearchQ]     = useState("");
+  const [theme, setTheme] = useState(document.documentElement.getAttribute("data-theme") || "light");
 
   const fetchData = useCallback(() => {
     getHomepageData(searchQ || null).then(setData).catch(console.error);
@@ -40,199 +37,212 @@ export default function Landing() {
     localStorage.setItem("theme", newTheme);
   };
 
-  const sports = data?.sports || [];
-  const trending = data?.trending || [];
-  const totalLive = data?.total_live_matches || 0;
+  const sports     = data?.sports || [];
+  const trending   = data?.trending || [];
+  const totalLive  = data?.total_live_matches || 0;
   const sportStats = {};
-  
-  sports.forEach((s) => { sportStats[s.sport_key] = s; });
-
-  const dynamicTournamentCount = sports.reduce((acc, s) => acc + (s.tournament_count || 0), 0);
-  const displayTournamentCount = dynamicTournamentCount > 0 ? dynamicTournamentCount : "12,000+";
-
-  // Flatten active/trending tournaments for the Live Section grid
-  let allTournaments = [...trending];
-  sports.forEach(s => {
-    if (s.tournaments) allTournaments.push(...s.tournaments);
-  });
-  
-  // Deduplicate and grab top 6 for the landing page showcase
-  const seenIds = new Set();
-  const displayTournaments = allTournaments.filter(t => {
-    if (seenIds.has(t.tournament_id)) return false;
-    seenIds.add(t.tournament_id);
-    return true;
-  }).slice(0, 6);
+  sports.forEach(s => { sportStats[s.sport_key] = s; });
 
   return (
     <div className="app">
       {/* ── HEADER ── */}
-      <header className="landing-header">
-        <div className="landing-header-inner">
-          <div className="landing-logo" onClick={() => navigate("/")} style={{ cursor: "pointer" }}>
-            The<span className="accent">Score</span>Board
-          </div>
+      <header className="site-header" style={{ background: "var(--surface)", borderBottom: "1px solid var(--border)" }}>
+        <div className="header-row">
+          {/* Brand */}
+          <span className="header-brand" onClick={() => navigate("/")} style={{ color: "var(--ink)", cursor: "pointer", fontWeight: "bold" }}>
+            The<span className="accent" style={{ color: "var(--primary)" }}>Score</span>Board
+          </span>
 
-          <div className="landing-search-bar">
+          {/* Search */}
+          <div style={{ flex:1, maxWidth:440, position:"relative", display:"flex", alignItems:"center", margin:"0 20px" }} className="header-search">
+            <span style={{ position:"absolute", left:12, fontSize:14, opacity:.5, pointerEvents:"none", color: "var(--ink)" }}>🔍</span>
             <input
-              type="text"
-              className="landing-search-input"
-              placeholder="Search tournaments, cities, sports..."
-              value={searchInput}
-              onChange={(e) => {
-                setSearchInput(e.target.value);
-                setSearchQ(e.target.value);
+              style={{
+                width:"100%", background:"var(--input-bg)",
+                border:"1.5px solid var(--input-border)", borderRadius:8,
+                padding:"8px 34px 8px 36px", fontSize:13, fontFamily:"var(--font-body)",
+                color:"var(--ink)", outline:"none", transition:"all .2s",
               }}
+              placeholder="Search tournaments, cities…"
+              value={searchInput}
+              onChange={e => { setSearchInput(e.target.value); setSearchQ(e.target.value); }}
+              onFocus={e => { e.target.style.borderColor="var(--primary)"; }}
+              onBlur={e => { e.target.style.borderColor="var(--input-border)"; }}
             />
+            {searchInput && (
+              <button
+                onClick={() => { setSearchInput(""); setSearchQ(""); }}
+                style={{ position:"absolute", right:10, background:"none", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:14 }}>
+                ×
+              </button>
+            )}
           </div>
 
-          <div className="landing-header-actions">
-            <button className="landing-btn landing-btn-secondary" onClick={toggleTheme}>
+          {/* Right */}
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <button onClick={toggleTheme} style={{ background:"none", border:"none", cursor:"pointer", fontSize:18, color:"var(--ink)", marginRight: "10px" }}>
               {theme === "light" ? "🌙" : "☀️"}
             </button>
+            {totalLive > 0 && <div className="live-badge"><span className="live-dot"/>{totalLive} LIVE</div>}
             <button
-              className="landing-btn landing-btn-secondary"
+              className="btn btn-gradient btn-sm"
               onClick={() => navigate(isLoggedIn() ? "/organiser" : "/login")}
             >
-              Organize
+              {isLoggedIn() ? "Dashboard" : "Organise →"}
             </button>
-            <button className="landing-btn landing-btn-primary">Find Tournaments</button>
           </div>
         </div>
       </header>
 
-      {/* ── LIVE BANNER ── */}
-      {totalLive > 0 && (
-        <div className="landing-live-banner">
-          <span className="landing-live-dot"></span>
-          {totalLive} Match{totalLive !== 1 ? "es" : ""} Live Now
-        </div>
-      )}
-
-      {/* ── HERO ── */}
-      <section className="landing-hero">
-        <div className="landing-hero-content">
-          <h1>Discover <span className="highlight">Live Sports</span> Near You</h1>
-          <p>Follow local tournaments, register to play, and track live scores in real-time</p>
-        </div>
-      </section>
-
-      {/* ── STATS BAR ── */}
-      <div className="landing-stats-bar">
-        <div className="landing-stats-grid">
-          <div>
-            <div className="stat-num">{displayTournamentCount}</div>
-            <div className="stat-label">Tournaments</div>
-          </div>
-          <div>
-            <div className="stat-num">100,000+</div>
-            <div className="stat-label">Players</div>
-          </div>
-          <div>
-            <div className="stat-num">40+</div>
-            <div className="stat-label">Cities</div>
-          </div>
-          <div>
-            <div className="stat-num">{totalLive > 0 ? totalLive : "24"}</div>
-            <div className="stat-label">Live Now</div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── SPORTS GRID ── */}
-      <section className="landing-sports-section">
-        <h2 className="landing-section-title">Browse by Sport</h2>
-        <div className="landing-sports-grid">
-          {SPORTS_CONFIG.map((sport) => {
-            const stats = sportStats[sport.key];
-            const tournCount = stats?.tournament_count || 0;
-            
+      {/* ── SPORT CARDS STRIP ── */}
+      <div style={{
+        background: "var(--hero-bg)",
+        borderBottom: "2px solid var(--border)",
+        padding: "20px 0",
+      }}>
+        <div style={{
+          maxWidth:1200, margin:"0 auto", padding:"0 24px",
+          display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(140px, 1fr))", gap:12,
+        }}>
+          {SPORTS_CONFIG.map(sport => {
+            const stats     = sportStats[sport.key];
+            const liveCount = stats?.live_count || 0;
+            const tournCount= stats?.tournament_count || 0;
             return (
               <div
                 key={sport.key}
-                className="landing-sport-card"
                 onClick={() => navigate(`/${sport.url}`)}
+                style={{
+                  background:"var(--surface)",
+                  border:"1.5px solid var(--border)",
+                  borderRadius:12, padding:"20px 12px 16px",
+                  textAlign:"center", cursor:"pointer",
+                  transition:"all .2s", position:"relative", overflow:"hidden",
+                }}
+                onMouseOver={e => {
+                  e.currentTarget.style.background="var(--primary-dim)";
+                  e.currentTarget.style.borderColor="var(--primary)";
+                  e.currentTarget.style.transform="translateY(-3px)";
+                }}
+                onMouseOut={e => {
+                  e.currentTarget.style.background="var(--surface)";
+                  e.currentTarget.style.borderColor="var(--border)";
+                  e.currentTarget.style.transform="translateY(0)";
+                }}
               >
-               
-                <div className="sport-name">{SPORT_LABELS[sport.key] || sport.key}</div>
-                <div className="sport-count">
-                  {tournCount > 0 ? `${tournCount} tournaments` : "Coming soon"}
+                <div style={{ fontSize:36, marginBottom:8 }}>{sport.icon}</div>
+                <div style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:"var(--ink)" }}>
+                  {SPORT_LABELS[sport.key]}
                 </div>
+                <div style={{ fontSize:11, color:"var(--muted)", marginTop:4 }}>
+                  {tournCount > 0 ? `${tournCount} tournament${tournCount!==1?"s":""}` : "Coming soon"}
+                </div>
+                {liveCount > 0 && (
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:4, marginTop:8, fontSize:11, fontWeight:700, color:"var(--primary)" }}>
+                    <span className="live-dot" style={{ background:"var(--primary)", width:6, height:6 }}/>{liveCount} live
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
-      </section>
+      </div>
 
-      {/* ── LIVE & FEATURED TOURNAMENTS ── */}
-      <section className="landing-live-section">
-        <h2 className="landing-section-title">Live & Featured Tournaments</h2>
-        
+      {/* ── LIVE BAR ── */}
+      {totalLive > 0 && (
+        <div style={{
+          background:"var(--primary)", padding:"10px 24px",
+          display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+        }}>
+          <span className="live-dot" style={{ background:"#FFF" }}/>
+          <span style={{ fontFamily:"var(--font-display)", fontWeight:800, fontSize:12, letterSpacing:3, color:"#FFF", textTransform:"uppercase" }}>
+            {totalLive} Match{totalLive!==1?"es":""} Live Now
+          </span>
+        </div>
+      )}
+
+      {/* ── CONTENT ── */}
+      <div style={{ maxWidth:1200, margin:"0 auto", padding:"24px 24px" }}>
         {!data ? (
-          <div style={{ textAlign: "center", color: "var(--muted)", padding: "40px 0" }}>
-            Loading tournaments...
-          </div>
-        ) : displayTournaments.length === 0 ? (
-          <div style={{ textAlign: "center", color: "var(--muted)", padding: "40px 0" }}>
-            No active tournaments found. Be the first to organize one!
+          <div className="empty" style={{ color:"var(--muted)" }}>Loading…</div>
+        ) : sports.length === 0 && trending.length === 0 ? (
+          <div className="empty">
+            <div className="empty-icon">🏟️</div>
+            <div className="empty-title">No Tournaments Yet</div>
+            <p style={{ fontSize:13, color:"var(--muted)" }}>Be the first to organize one!</p>
           </div>
         ) : (
-          <div className="landing-tournaments-grid">
-            {displayTournaments.map((t) => {
-              const isLive = t.live_count > 0 || t.status?.toLowerCase() === 'live';
-              
+          <>
+            {SPORTS_CONFIG.map(sport => {
+              const sd = sportStats[sport.key];
+              if (!sd || !sd.tournaments?.length) return null;
               return (
-                <div
-                  key={t.tournament_id}
-                  className={`landing-tourney-card ${isLive ? "live" : ""}`}
-                  onClick={() => navigate(`/t/${t.slug}`)}
-                >
-                  <div className={`tournament-badge ${isLive ? "live" : "upcoming"}`}>
-                    {isLive && <span className="landing-live-dot"></span>}
-                    {isLive ? "LIVE" : "UPCOMING"}
+                <div key={sport.key} style={{ marginBottom:36 }}>
+                  {/* Section header */}
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, paddingBottom:10, borderBottom:"2px solid var(--border)" }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <span style={{ fontSize:22 }}>{sport.icon}</span>
+                      <span style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:900, textTransform:"uppercase", letterSpacing:-0.5, color:"var(--ink)" }}>
+                        {SPORT_LABELS[sport.key]}
+                      </span>
+                      {sd.live_count > 0 && (
+                        <div style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, fontWeight:700, color:"var(--primary)" }}>
+                          <span className="live-dot" style={{ background:"var(--primary)", width:7, height:7 }}/>{sd.live_count} live
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      style={{ background:"none", border:"none", color:"var(--primary)", fontFamily:"var(--font-display)", fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}
+                      onClick={() => navigate(`/${sport.url}`)}>
+                      View all →
+                    </button>
                   </div>
-                  <div className="tournament-name">{t.name}</div>
-                  <div className="tournament-meta">
-                    {t.city || "Location TBA"} · {isLive ? `${t.live_count} matches in progress` : "Registration Open"}<br />
-                    {t.participants_count || t.player_count || 0} participants
+
+                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:12 }} className="tournament-grid">
+                    {sd.tournaments.slice(0,3).map(t => (
+                      <TournamentCard key={t.tournament_id} tournament={t}
+                        onClick={() => navigate(`/${sport.url}/tournament/${t.slug}`)} />
+                    ))}
                   </div>
                 </div>
               );
             })}
-          </div>
-        )}
-      </section>
 
-      {/* ── FOOTER ── */}
-      <footer className="landing-footer">
-        <div className="landing-footer-content">
-          <div className="footer-col">
-            <h4>TheScoreBoard</h4>
-            <p>Live tournament scores for every sport. Built for communities, trusted by organizers.</p>
-          </div>
-          <div className="footer-col">
-            <h4>For Players</h4>
-            <a href="#">Find Tournaments</a>
-            <a href="#">Register to Play</a>
-            <a href="#">Track Scores</a>
-          </div>
-          <div className="footer-col">
-            <h4>For Organizers</h4>
-            <a onClick={() => navigate(isLoggedIn() ? "/organiser" : "/login")} style={{cursor: 'pointer'}}>Create Tournament</a>
-            <a href="#">Manage Events</a>
-            <a href="#">How It Works</a>
-          </div>
-          <div className="footer-col">
-            <h4>Sports</h4>
-            <a onClick={() => navigate("/football")} style={{cursor: 'pointer'}}>Football</a>
-            <a onClick={() => navigate("/cricket")} style={{cursor: 'pointer'}}>Cricket</a>
-            <a onClick={() => navigate("/table-tennis")} style={{cursor: 'pointer'}}>Table Tennis</a>
-            <a onClick={() => navigate("/badminton")} style={{cursor: 'pointer'}}>Badminton</a>
-          </div>
-        </div>
-        <div className="landing-footer-bottom">
-          © {new Date().getFullYear()} TheScoreBoard · Built for sports communities
-        </div>
+            {trending.length > 0 && sports.length === 0 && (
+              <div>
+                <div className="section-label">All Tournaments</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:12 }} className="tournament-grid">
+                  {trending.map(t => (
+                    <TournamentCard key={t.tournament_id} tournament={t} onClick={() => navigate(`/t/${t.slug}`)} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── FAB ── */}
+      <button
+        onClick={() => navigate(isLoggedIn() ? "/organiser" : "/register")}
+        style={{
+          position:"fixed", bottom:24, right:24, zIndex:200,
+          display:"flex", alignItems:"center", gap:8,
+          background:"var(--primary)", border:"none", borderRadius:50,
+          padding:"14px 22px", cursor:"pointer",
+          fontFamily:"var(--font-display)", fontSize:13, fontWeight:800,
+          textTransform:"uppercase", letterSpacing:1, color:"#FFF",
+          boxShadow:"0 4px 20px rgba(255,107,53,0.45)", transition:"all .2s",
+        }}
+        onMouseOver={e => { e.currentTarget.style.transform="scale(1.05)"; e.currentTarget.style.boxShadow="0 8px 28px rgba(255,107,53,0.6)"; }}
+        onMouseOut={e => { e.currentTarget.style.transform="scale(1)"; e.currentTarget.style.boxShadow="0 4px 20px rgba(255,107,53,0.45)"; }}
+      >
+        <span style={{ fontSize:18 }}>+</span>
+        <span>Organize</span>
+      </button>
+
+      <footer style={{ textAlign:"center", padding:"24px", color:"var(--muted)", fontSize:12, borderTop:"1px solid var(--border)", marginTop:32 }}>
+        TheScoreBoard — Live tournament scores for every sport
       </footer>
     </div>
   );
