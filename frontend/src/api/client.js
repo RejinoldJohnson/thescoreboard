@@ -99,3 +99,4 @@ export const publicRegisterTeam = (tournamentId, d) =>
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.status); }
     return r.json();
   });
+//

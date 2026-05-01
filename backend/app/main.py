@@ -38,9 +38,20 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(traceback.format_exc())
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
+# ── CORS Configuration ────────────────────────────────────────
+# Support comma-separated origins: "https://dev.thescoreboard.in,http://localhost:5173"
+allowed_origins = []
+if settings.FRONTEND_URL == "*":
+    allowed_origins = ["*"]
+else:
+    # Split by comma and strip whitespace
+    allowed_origins = [origin.strip() for origin in settings.FRONTEND_URL.split(",") if origin.strip()]
+
+logger.info(f"CORS allowed origins: {allowed_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL] if settings.FRONTEND_URL != "*" else ["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
