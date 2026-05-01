@@ -153,8 +153,7 @@ def create_tournament(
             is_configured = True
             event_format  = ev_input.format  # validated non-null by creation wizard
 
-        # Normalize doubles_pair → team before storing
-        participant_type = _normalize_participant_type(ev_input.participant_type or "individual")
+        participant_type = ev_input.participant_type or "individual"
 
         event = Event(
             tournament_id=tournament.tournament_id,

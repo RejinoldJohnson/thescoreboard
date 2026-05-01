@@ -86,7 +86,7 @@ def create_event(
     if data.format not in _VALID_FORMATS:
         raise HTTPException(status_code=400, detail=f"Format must be one of {_VALID_FORMATS}")
 
-    participant_type = _normalize_participant_type(data.participant_type)
+    participant_type = data.participant_type or "individual"
 
     event = Event(
         tournament_id=tournament_id,
@@ -140,8 +140,7 @@ def update_event(
 
     update_data = data.model_dump(exclude_unset=True)
 
-    if "participant_type" in update_data:
-        update_data["participant_type"] = _normalize_participant_type(update_data["participant_type"])
+    # participant_type is stored as-is ("individual", "doubles_pair", "team")
 
     for field, val in update_data.items():
         setattr(event, field, val)
@@ -190,8 +189,7 @@ def configure_event(
                     detail="Configuration cannot be changed after matches are completed.",
                 )
             # Fixtures exist but none finished — lock format + participant_type only
-            normalized_new_pt = _normalize_participant_type(data.participant_type)
-            if data.format != event.format or normalized_new_pt != event.participant_type:
+            if data.format != event.format or data.participant_type != event.participant_type:
                 raise HTTPException(
                     status_code=409,
                     detail=(
@@ -220,7 +218,7 @@ def configure_event(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid sport config: {e}")
 
-    participant_type = _normalize_participant_type(data.participant_type)
+    participant_type = data.participant_type or "individual"
 
     # ── Apply
     event.format           = data.format
