@@ -125,7 +125,7 @@ export function DoublesTab({ event, onAddPair, onRemovePair, pairs, flash }) {
         fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 700,
         textTransform: "uppercase", letterSpacing: 1, color: "var(--gold)",
       }}>
-        🏸 {isMixed ? "Mixed Doubles" : "Doubles"} — Enter both partners together
+        {isMixed ? "Mixed Doubles" : "Doubles"} — Enter both partners together
       </div>
 
       {/* Add pair form */}
@@ -170,7 +170,7 @@ export function DoublesTab({ event, onAddPair, onRemovePair, pairs, flash }) {
 
       {pairs.length === 0 ? (
         <div className="empty">
-          <div className="empty-icon">🏸</div>
+          <div className="empty-icon"></div>
           No pairs registered yet.
         </div>
       ) : (
@@ -336,7 +336,7 @@ export function TeamTab({ event, onAddTeam, onRemoveTeam, teams, flash }) {
 
       {teams.length === 0 ? (
         <div className="empty">
-          <div className="empty-icon">🏟️</div>
+          <div className="empty-icon"></div>
           No teams registered yet.
         </div>
       ) : teams.map((ep, i) => {

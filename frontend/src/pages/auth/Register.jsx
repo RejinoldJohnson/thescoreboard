@@ -27,7 +27,7 @@ export default function Register() {
       <div className="auth-card" style={{ background: "var(--surface)", padding: "40px", borderRadius: "12px", border: "1px solid var(--border)", width: "100%", maxWidth: "400px" }}>
         {/* Brand */}
         <div style={{ textAlign:"center", marginBottom:28 }}>
-          <div className="auth-logo" style={{ color: "var(--ink)", fontSize: "24px", fontWeight: "bold" }}>The<span className="accent" style={{ color: "var(--primary)" }}>Score</span>Board</div>
+          <div className="header-brand" style={{ color: "var(--ink)", display: "inline-block" }}>The<span className="accent" style={{ color: "var(--primary)" }}>Score</span>Board</div>
           <div style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:700, textTransform:"uppercase", letterSpacing:2, color:"var(--muted)", marginTop:6 }}>
             Create Your Account
           </div>

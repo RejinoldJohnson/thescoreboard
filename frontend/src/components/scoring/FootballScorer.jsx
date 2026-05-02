@@ -74,7 +74,7 @@ export default function FootballScorer({ match, config, onScore, onFinish, onClo
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:c.green, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
             <span style={{ width:7, height:7, borderRadius:"50%", background:c.bg, animation:"pulse 1.5s infinite", display:"inline-block" }}/>
-            ⚽ {isDone ? "Full Time" : `${half===1?"1st":"2nd"} Half · ${minute}'`}
+            {isDone ? "Full Time" : `${half===1?"1st":"2nd"} Half · ${minute}'`}
           </span>
         </div>
         <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
@@ -146,7 +146,7 @@ export default function FootballScorer({ match, config, onScore, onFinish, onClo
         {isDone && (
           <div style={{ textAlign:"center" }}>
             <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:20, fontWeight:900, textTransform:"uppercase", letterSpacing:-1, color:c.gold }}>
-              {goals1 === goals2 ? "Draw" : `🏆 ${goals1>goals2?p1?.name||"Team 1":p2?.name||"Team 2"} Win!`}
+              {goals1 === goals2 ? "Draw" : `${goals1>goals2?p1?.name||"Team 1":p2?.name||"Team 2"} Win!`}
             </div>
             <div style={{ fontSize:13, color:c.muted, marginTop:8 }}>Full Time</div>
           </div>

@@ -76,7 +76,7 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:c.blue, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
             <span style={{ width:7, height:7, borderRadius:"50%", background:c.bg, animation:"pulse 1.5s infinite", display:"inline-block" }}/>
-            🏸 {isDone ? "Final" : `Set ${currentSet?.set_number || 1}`}
+            {isDone ? "Final" : `Set ${currentSet?.set_number || 1}`}
           </span>
           <span style={{ fontSize:12, color:c.muted, fontWeight:600 }}>
             Sets: <strong style={{ color:c.blue }}>{setsWon1}</strong>
@@ -128,7 +128,7 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
             side ? (
               <div key={side.pos} style={{ flex:1, textAlign:"center" }}>
                 <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, textTransform:"uppercase", color: serving===side.pos&&!isDone?c.blue:c.muted, marginBottom:8 }}>
-                  {serving===side.pos&&!isDone&&"🏸 "}{side.name}
+                  {side.name}
                 </div>
                 <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:96, fontWeight:900, lineHeight:1, color:scoreColor(side.pos), transition:"color .3s" }}>
                   {side.score}
@@ -148,7 +148,7 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
         )}
         {matchWinner && (
           <div style={{ textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:16, fontWeight:900, textTransform:"uppercase", letterSpacing:2, color:c.gold }}>
-            🏆 {matchWinner===1?p1Name:p2Name} Wins!
+            {matchWinner===1?p1Name:p2Name} Wins!
           </div>
         )}
 

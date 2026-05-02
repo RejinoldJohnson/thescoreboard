@@ -6,10 +6,10 @@ import DatePicker from "../../components/shared/DatePicker";
 
 // ── Sport definitions ─────────────────────────────────────────
 const SPORTS = [
-  { key: "table_tennis", label: "Table Tennis", icon: "🏓" },
-  { key: "badminton",    label: "Badminton",    icon: "🏸" },
-  { key: "cricket",      label: "Cricket",      icon: "🏏" },
-  { key: "football",     label: "Football",     icon: "⚽" },
+  { key: "table_tennis", label: "Table Tennis", abbrev: "TT" },
+  { key: "badminton",    label: "Badminton",    abbrev: "BD" },
+  { key: "cricket",      label: "Cricket",      abbrev: "CR" },
+  { key: "football",     label: "Football",     abbrev: "FB" },
 ];
 
 const SPORT_SUBFORMATS = {
@@ -158,7 +158,7 @@ export default function CreateTournament() {
 
   // ── Sport helpers ────────────────────────────────────────────
   const sl = (k) => SPORTS.find(s => s.key === k)?.label || k;
-  const si = (k) => SPORTS.find(s => s.key === k)?.icon  || "🏅";
+  const si = (k) => SPORTS.find(s => s.key === k)?.abbrev || k.slice(0,2).toUpperCase();
   const fl = (v) => FORMATS.find(f => f.value === v)?.label || v;
   const getSubformat = (sportKey, sfKey) => SPORT_SUBFORMATS[sportKey]?.find(sf => sf.key === sfKey);
 
@@ -336,7 +336,7 @@ export default function CreateTournament() {
         /* ── ORG GATE ── */
         <div style={{ maxWidth: 480, margin: "48px auto", padding: "0 24px" }} className="create-content">
           <div className="card" style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 52, marginBottom: 12 }}>🏢</div>
+            <div style={{ width: 52, height: 52, borderRadius: 8, background: "var(--elevated)", margin: "0 auto 12px" }} />
             <div className="card-title" style={{ marginBottom: 8 }}>One Quick Step First</div>
             <p style={{ fontSize: 13, color: c.muted, marginBottom: 28 }}>
               Create an organisation before creating a tournament.
@@ -423,12 +423,12 @@ export default function CreateTournament() {
                 <div className="card-title">Step 1 — Tournament Type</div>
                 <p style={{ fontSize: 13, color: c.muted, marginBottom: 18 }}>Run one sport or combine multiple sports under one event.</p>
                 {[
-                  { multi: false, icon: "🎯", title: "Single Sport", sub: "One sport bracket — e.g. Football 5-a-side" },
-                  { multi: true,  icon: "🏟️", title: "Multi Sport",  sub: "Multiple sports — e.g. Football + Cricket + TT" },
-                ].map(({ multi, icon, title, sub }) => (
+                  { multi: false, label: "1", title: "Single Sport", sub: "One sport bracket — e.g. Football 5-a-side" },
+                  { multi: true,  label: "M", title: "Multi Sport",  sub: "Multiple sports — e.g. Football + Cricket + TT" },
+                ].map(({ multi, label, title, sub }) => (
                   <div key={String(multi)} style={selStyle(isMultiSport === multi)}
                     onClick={() => { setIsMultiSport(multi); setEvents([]); }}>
-                    <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
+                    <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 900, marginBottom: 6, color: isMultiSport === multi ? c.orange : c.muted }}>{label}</div>
                     <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 800, textTransform: "uppercase", letterSpacing: -0.5, color: isMultiSport === multi ? c.orange : c.ink }}>
                       {title}
                     </div>
@@ -465,9 +465,11 @@ export default function CreateTournament() {
                           width: 36, height: 36, borderRadius: 8, flexShrink: 0,
                           background: selected ? c.orange : c.surface,
                           border: `1px solid ${selected ? c.orange : c.border}`,
-                          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 900,
+                          color: selected ? "#fff" : c.ink,
                         }}>
-                          {sport.icon}
+                          {sport.abbrev}
                         </div>
                         <span style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: -0.5, color: selected ? c.orange : c.ink }}>
                           {sport.label}
@@ -645,13 +647,13 @@ export default function CreateTournament() {
                   <label>Visibility</label>
                   <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                     {[
-                      { value: false, icon: "🔒", label: "Private", sub: "Accessible via direct link only" },
-                      { value: true,  icon: "🌐", label: "Public",  sub: "Listed on tournament discovery" },
+                      { value: false, label: "Private", sub: "Accessible via direct link only" },
+                      { value: true,  label: "Public",  sub: "Listed on tournament discovery" },
                     ].map(opt => (
                       <div key={String(opt.value)}
                         style={{ ...selStyle(isPublished === opt.value), flex: 1, padding: "12px 14px", marginBottom: 0, textAlign: "center" }}
                         onClick={() => setIsPublished(opt.value)}>
-                        <div style={{ fontSize: 20, marginBottom: 4 }}>{opt.icon}</div>
+                        <div style={{ marginBottom: 4 }}></div>
                         <div style={{ fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: isPublished === opt.value ? c.orange : c.ink }}>
                           {opt.label}
                         </div>
@@ -700,7 +702,7 @@ export default function CreateTournament() {
                   ["Organisation", activeOrg?.name],
                   ["Name",         name],
                   ["Type",         isMultiSport ? "Multi-Sport" : "Single Sport"],
-                  ["Visibility",   isPublished ? "🌐 Public" : "🔒 Private"],
+                  ["Visibility",   isPublished ? "Public" : "Private"],
                   venue     && ["Venue",      venue],
                   city      && ["City",       `${city}, ${state}`],
                   startDate && ["Start Date", startDate],

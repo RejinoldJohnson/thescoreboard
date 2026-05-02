@@ -20,12 +20,6 @@ router = APIRouter()
 _VALID_FORMATS = ["group_knockout", "direct_knockout", "round_robin"]
 
 
-def _normalize_participant_type(pt: str) -> str:
-    """doubles_pair is a frontend UI concept — backend stores it as 'team'."""
-    if pt == "doubles_pair":
-        return "team"
-    return pt
-
 
 def _get_tournament_and_check(tournament_id: int, user: User, db: Session) -> Tournament:
     t = db.query(Tournament).filter(Tournament.tournament_id == tournament_id).first()

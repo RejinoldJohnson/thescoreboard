@@ -7,13 +7,13 @@ const API_BASE  = import.meta.env.VITE_API_URL || "/api";
 
 // ── Sport meta ────────────────────────────────────────────────
 const SPORT_META = {
-  table_tennis: { icon: "🏓", label: "Table Tennis" },
-  badminton:    { icon: "🏸", label: "Badminton"    },
-  cricket:      { icon: "🏏", label: "Cricket"      },
-  football:     { icon: "⚽", label: "Football"     },
+  table_tennis: { abbrev: "TT", label: "Table Tennis" },
+  badminton:    { abbrev: "BD", label: "Badminton"    },
+  cricket:      { abbrev: "CR", label: "Cricket"      },
+  football:     { abbrev: "FB", label: "Football"     },
 };
-const si = (k) => SPORT_META[k]?.icon  || "🏅";
-const sl = (k) => SPORT_META[k]?.label || k;
+const sa = (k) => SPORT_META[k]?.abbrev || k.slice(0, 2).toUpperCase();
+const sl = (k) => SPORT_META[k]?.label  || k;
 
 // ── Registration rule engine ──────────────────────────────────
 // Central mapping — no scattered if-else throughout the UI.
@@ -86,10 +86,10 @@ function PubHeader({ tournament }) {
         {(tournament.city || tournament.start_date || tournament.venue) && (
           <div style={{ display: "flex", gap: 14, marginTop: 8, flexWrap: "wrap", fontSize: 12, color: "var(--muted)" }}>
             {tournament.city && (
-              <span>📍 {tournament.city}{tournament.state ? `, ${tournament.state}` : ""}</span>
+              <span>{tournament.city}{tournament.state ? `, ${tournament.state}` : ""}</span>
             )}
-            {tournament.start_date && <span>📅 {tournament.start_date}</span>}
-            {tournament.venue && <span>🏟️ {tournament.venue}</span>}
+            {tournament.start_date && <span>{tournament.start_date}</span>}
+            {tournament.venue && <span>{tournament.venue}</span>}
           </div>
         )}
       </div>
@@ -125,7 +125,11 @@ function FormHeader({ event, subtitle, onBack }) {
         onClick={onBack}
         style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", fontSize: 22, padding: "0 2px", lineHeight: 1 }}
       >←</button>
-      <div style={{ fontSize: 28, lineHeight: 1 }}>{si(event.sport_key)}</div>
+      <div style={{
+        width: 32, height: 32, borderRadius: 6, background: "var(--primary-dim)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 900, color: "var(--primary)",
+      }}>{sa(event.sport_key)}</div>
       <div>
         <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900, textTransform: "uppercase", letterSpacing: -0.5, color: "var(--ink)" }}>
           {event.name}
@@ -276,7 +280,12 @@ function TeamInfo({ event, onBack }) {
     <div>
       <FormHeader event={event} subtitle="Team Sport" onBack={onBack} />
       <div style={{ textAlign: "center", padding: "28px 0" }}>
-        <div style={{ fontSize: 52, marginBottom: 14 }}>{si(event.sport_key)}</div>
+        <div style={{
+          width: 56, height: 56, borderRadius: 10, background: "var(--elevated)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 900, color: "var(--muted)",
+          margin: "0 auto 14px",
+        }}>{sa(event.sport_key)}</div>
         <h3 style={{ fontFamily: "var(--font-display)", fontSize: 17, fontWeight: 900, textTransform: "uppercase", letterSpacing: -0.5, marginBottom: 10 }}>
           Team Registration
         </h3>
@@ -284,7 +293,7 @@ function TeamInfo({ event, onBack }) {
           Team registrations for <strong style={{ color: "var(--ink)" }}>{sl(event.sport_key)}</strong> are managed by the organiser. Contact them to register your team.
         </p>
         <div style={{ background: "var(--elevated)", border: "1px solid var(--border)", borderRadius: 8, padding: "12px 18px", display: "inline-block", fontSize: 13, color: "var(--muted)" }}>
-          📋 Contact the organiser to register your team
+          Contact the organiser to register your team
         </div>
       </div>
     </div>
@@ -295,7 +304,7 @@ function TeamInfo({ event, onBack }) {
 function SuccessView({ name, event, onBack }) {
   return (
     <div style={{ textAlign: "center", padding: "36px 0" }}>
-      <div style={{ fontSize: 52, marginBottom: 16 }}>🎉</div>
+      <div style={{ width: 56, height: 56, borderRadius: "50%", background: "var(--primary-dim)", border: "2px solid rgba(255,107,53,0.3)", margin: "0 auto 16px" }} />
       <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 900, textTransform: "uppercase", letterSpacing: -1, color: "var(--primary)", marginBottom: 10 }}>
         You're In!
       </div>
@@ -304,7 +313,7 @@ function SuccessView({ name, event, onBack }) {
         <strong style={{ color: "var(--ink)" }}>{event?.name}</strong>.
       </p>
       <div style={{ background: "var(--primary-dim)", border: "1px solid rgba(255,107,53,0.3)", borderRadius: 8, padding: "12px 18px", marginBottom: 20, fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: "var(--primary)" }}>
-        📲 Share this page with other participants!
+        Share this page with other participants!
       </div>
       <button className="btn btn-outline" onClick={onBack}>← Register Someone Else</button>
     </div>
@@ -324,9 +333,9 @@ function EventCard({ event, onClick }) {
           width: 52, height: 52, borderRadius: 12,
           background: "var(--primary-dim)", border: "1px solid rgba(255,107,53,.2)",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 26, flexShrink: 0,
+          flexShrink: 0, fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900, color: "var(--primary)",
         }}>
-          {si(event.sport_key)}
+          {sa(event.sport_key)}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900, textTransform: "uppercase", letterSpacing: -0.5, color: "var(--ink)", marginBottom: 6 }}>
@@ -375,7 +384,7 @@ function RegistrationHub({ events, tournament }) {
   if (open.length === 0) {
     return (
       <div className="empty">
-        <div className="empty-icon">📋</div>
+        <div className="empty-icon"></div>
         <div className="empty-title">Registration Not Open</div>
         <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>
           No events are currently open for registration.
@@ -418,7 +427,7 @@ function MatchRow({ match: m }) {
         {/* Players + score */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
           <span className={`match-pname${m.player_1?.is_winner ? " winner" : ""}`}>
-            {m.current_server === 1 && isLive ? "🏓 " : ""}{m.player_1?.name || m.team1_name || "TBD"}
+            {m.player_1?.name || m.team1_name || "TBD"}
           </span>
           <span className={`match-score ${isLive ? "live-score" : isDone ? "done-score" : "vs-score"}`}>
             {isLive || isDone
@@ -426,7 +435,7 @@ function MatchRow({ match: m }) {
               : "vs"}
           </span>
           <span className={`match-pname right${m.player_2?.is_winner ? " winner" : ""}`}>
-            {m.player_2?.name || m.team2_name || "TBD"}{m.current_server === 2 && isLive ? " 🏓" : ""}
+            {m.player_2?.name || m.team2_name || "TBD"}
           </span>
         </div>
 
@@ -464,7 +473,7 @@ function MatchesView({ events }) {
   if (allMatches.length === 0) {
     return (
       <div className="empty">
-        <div className="empty-icon">🎯</div>
+        <div className="empty-icon"></div>
         <div className="empty-title">No Fixtures Yet</div>
         <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 8 }}>Fixtures will appear once the tournament starts.</p>
       </div>
@@ -495,10 +504,10 @@ function MatchesView({ events }) {
           <div key={ev.event_id} style={{ marginBottom: 28 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, paddingBottom: 8, borderBottom: "2px solid var(--border)" }}>
               <span style={{ fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 900, textTransform: "uppercase", letterSpacing: -0.5, color: "var(--ink)" }}>
-                {si(ev.sport_key)} {ev.name}
+                {ev.name}
               </span>
               {ev.live_matches?.length > 0 && (
-                <span className="pill pill-orange">🔴 {ev.live_matches.length} Live</span>
+                <span className="pill pill-orange">{ev.live_matches.length} Live</span>
               )}
               <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: "auto" }}>
                 {ev.completed_matches ?? doneCt}/{ev.total_matches ?? matches.length} done
@@ -625,7 +634,7 @@ export default function TournamentPublic() {
       )}
 
       {/* Tab content */}
-      <div style={{ maxWidth: 680, margin: "0 auto", padding: "24px 20px" }}>
+      <div className="pub-content" style={{ maxWidth: 680, margin: "0 auto", padding: "24px 20px" }}>
         {activeTab === "register" && (
           <RegistrationHub events={events} tournament={t} />
         )}

@@ -47,6 +47,10 @@
      --org-surface:       #FFFFFF;
      --org-border:        #E5E5E5;
    
+     /* Inputs */
+     --input-bg:     var(--elevated);
+     --input-border: var(--border-mid);
+
      /* Typography */
      --font-display: 'Unbounded', sans-serif;
      --font-body:    'Space Grotesk', sans-serif;
@@ -135,9 +139,17 @@
      from { opacity: 0; transform: translateY(8px); }
      to   { opacity: 1; transform: translateY(0); }
    }
+   @keyframes fadeUp {
+     from { opacity: 0; transform: translateY(16px); }
+     to   { opacity: 1; transform: translateY(0); }
+   }
    @keyframes slideDown {
      from { opacity: 0; transform: translateY(-12px); }
      to   { opacity: 1; transform: translateY(0); }
+   }
+   @keyframes shimmer {
+     0%   { background-position: -400px 0; }
+     100% { background-position: 400px 0; }
    }
    
    /* ── Typography ───────────────────────────────────────────── */
@@ -204,7 +216,7 @@
    
    .header-brand {
      font-family: var(--font-display);
-     font-size: 18px;
+     font-size: 17px;
      font-weight: 900;
      color: var(--ink);
      text-transform: uppercase;
@@ -493,10 +505,20 @@
    }
    
    .pill-orange  { background: var(--primary-dim); color: var(--primary); border: 1px solid rgba(255,107,53,0.3); }
-   .pill-gold    { background: var(--gold-dim);    color: var(--gold);    border: 1px solid rgba(255,204,0,0.3); }
-   .pill-green   { background: var(--green-dim);   color: var(--green);   border: 1px solid rgba(34,197,94,0.3); }
+   .pill-gold    { background: var(--gold-dim);    color: #92700A;        border: 1px solid rgba(255,204,0,0.3); }
+   .pill-green   { background: var(--green-dim);   color: #15803d;        border: 1px solid rgba(34,197,94,0.3); }
    .pill-red     { background: var(--red-dim);     color: var(--red);     border: 1px solid rgba(229,62,62,0.3); }
    .pill-gray    { background: var(--elevated);    color: var(--muted);   border: 1px solid var(--border); }
+   [data-theme="dark"] .pill-gold  { color: var(--gold); }
+   [data-theme="dark"] .pill-green { color: var(--green); }
+
+   /* ── Skeleton loader ──────────────────────────────────────── */
+   .skeleton {
+     background: linear-gradient(90deg, var(--elevated) 25%, var(--border) 50%, var(--elevated) 75%);
+     background-size: 400px 100%;
+     animation: shimmer 1.4s infinite;
+     border-radius: var(--radius-md);
+   }
    
    /* ── Live badge ───────────────────────────────────────────── */
    .live-badge {
@@ -1175,57 +1197,15 @@
    
      /* ── OrgHeader Mobile ─────────────────────────────────── */
      .site-header.org-header .header-row {
-       flex-wrap: wrap !important;
-       gap: 0 !important;
-       padding: 10px 16px !important;
-       min-height: auto !important;
-       align-items: center !important;
+       padding: 0 14px !important;
      }
-   
-     .site-header.org-header .org-header-brand {
-       width: 100% !important;
-       flex: 0 0 100% !important;
-       margin-bottom: 10px !important;
-       text-align: center !important;
-     }
-   
-     .site-header.org-header .header-brand {
-       font-size: 15px !important;
-     }
-   
-     .site-header.org-header .org-header-right {
-       width: 100% !important;
-       flex: 0 0 100% !important;
-       display: flex !important;
-       justify-content: space-between !important;
-       align-items: center !important;
-       gap: 12px !important;
-       padding-top: 8px !important;
-       border-top: 1px solid var(--border) !important;
-     }
-   
-     .site-header.org-header .theme-toggle-btn {
-       order: 1 !important;
-       display: block !important;
-       flex-shrink: 0 !important;
-     }
-   
-     .site-header.org-header .user-name-desktop {
-       display: none !important;
-     }
-   
+     .user-name-desktop { display: none !important; }
      .site-header.org-header .org-logout-btn {
-       order: 3 !important;
-       display: inline-flex !important;
-       padding: 6px 14px !important;
+       padding: 5px 12px !important;
        font-size: 11px !important;
-       white-space: nowrap !important;
-       flex-shrink: 0 !important;
-       margin-left: auto !important;
      }
-   
      .site-header.org-header .breadcrumb-row {
-       padding: 8px 16px !important;
+       padding: 8px 14px !important;
        overflow-x: auto;
        white-space: nowrap;
      }
@@ -1247,7 +1227,7 @@
      }
    
      .dashboard-stats {
-       grid-template-columns: 1fr !important;
+       grid-template-columns: repeat(2, 1fr) !important;
        gap: 10px !important;
      }
    
@@ -1353,16 +1333,8 @@
      .sport-selector-grid { grid-template-columns: 1fr !important; }
    
      /* ── OrgHeader Extra Small ────────────────────────────── */
-     .site-header.org-header .header-brand {
-       font-size: 14px !important;
-     }
-   
-     .site-header.org-header .org-header-right {
-       gap: 10px !important;
-     }
-   
      .site-header.org-header .org-logout-btn {
-       padding: 5px 12px !important;
+       padding: 5px 10px !important;
        font-size: 10px !important;
      }
    
@@ -1388,23 +1360,6 @@
        font-size: 10px !important;
      }
    }
-
-   .site-header.org-header .theme-toggle-btn {
-    order: 1 !important;
-    display: block !important;
-    flex-shrink: 0 !important;
-    visibility: visible !important; /* ADD THIS */
-    opacity: 1 !important; /* ADD THIS */
-  }
-  
-  .site-header.org-header .org-logout-btn {
-    order: 3 !important;
-    display: inline-flex !important;
-    visibility: visible !important; /* ADD THIS */
-    opacity: 1 !important; /* ADD THIS */
-    flex-shrink: 0 !important;
-    margin-left: auto !important;
-  }
 
   /* ── pill-gold readability fix ────────────────────────────── */
   .pill-gold { color: #92700A; }
@@ -1552,7 +1507,6 @@
 .landing-hero {
   padding: 60px 24px 40px;
   background: var(--surface);
-  border-bottom: 2px solid var(--border);
 }
 .landing-hero-content { max-width: 800px; margin: 0 auto; text-align: center; }
 .landing-hero h1 {
@@ -1632,7 +1586,8 @@
 [data-theme="dark"] .landing-tourney-card.live { background: linear-gradient(135deg, #1a0a05 0%, var(--elevated) 100%); }
 .tournament-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-size: 10px; font-weight: 800; font-family: var(--font-display); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
 .tournament-badge.live { background: var(--primary); color: white; }
-.tournament-badge.upcoming { background: var(--gold-dim); color: var(--gold); border: 1px solid var(--gold); }
+.tournament-badge.upcoming { background: var(--gold-dim); color: #92700A; border: 1px solid rgba(255,204,0,0.4); }
+[data-theme="dark"] .tournament-badge.upcoming { color: var(--gold); }
 .landing-tourney-card .tournament-name { font-family: var(--font-display); font-size: 16px; font-weight: 800; color: var(--ink); margin-bottom: 8px; }
 .landing-tourney-card .tournament-meta { font-size: 13px; color: var(--muted); line-height: 1.6; }
 
@@ -1650,15 +1605,283 @@
 .footer-col a:hover { color: var(--primary); }
 .landing-footer-bottom { max-width: 1000px; margin: 0 auto; padding-top: 24px; border-top: 1px solid var(--border); text-align: center; color: var(--muted); font-size: 13px; }
 
+/* ── Landing stats override (takes priority over global .stat-num) */
+.landing-stats-grid .stat-num { color: var(--ink); font-size: clamp(22px, 3vw, 32px); }
+
+/* ── FAB: hide on desktop, show on mobile ─────────────────── */
+.fab-hide-desktop { display: none; }
+
+/* ── Hero search — hide on desktop (header search already shown) */
+@media (min-width: 769px) {
+  .hero-search-wrap { display: none; }
+}
+
 /* Responsive */
 @media (max-width: 968px) {
-  .landing-search-bar { order: 3; flex-basis: 100%; max-width: none; margin-top: 12px; }
-  .landing-header-inner { flex-wrap: wrap; height: auto; padding: 12px 0; }
-  .landing-stats-grid, .landing-sports-grid, .landing-tournaments-grid { grid-template-columns: repeat(2, 1fr); }
   .landing-footer-content { grid-template-columns: 1fr; gap: 32px; }
-  .landing-hero h1 { font-size: 32px; }
+  .landing-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .fab-hide-desktop { display: flex; }
+  .header-search { display: none !important; }
+  .hero-search-wrap { display: block; }
+  .landing-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  /* Landing hero responsive */
+  .landing-hero { padding: 40px 16px 28px !important; }
+  .landing-hero h1 { font-size: 28px !important; }
+  .landing-hero p { font-size: 15px !important; }
 }
 @media (max-width: 640px) {
-  .landing-stats-grid, .landing-sports-grid, .landing-tournaments-grid { grid-template-columns: 1fr; }
-  .landing-header-actions { width: 100%; justify-content: space-between; }
+  .landing-stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ══════════════════════════════════════════════════��═══════
+   ADDITIONAL MOBILE RESPONSIVE — PAGE-LEVEL
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Page container utility ──────────────────────────────── */
+.page-container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 24px;
+}
+
+@media (max-width: 768px) {
+  .page-container { padding: 20px 16px; }
+}
+
+/* ── Sport Page ───────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Sport hero strip — reduce padding, tighten identity row */
+  .sport-hero-strip {
+    padding: 14px 16px !important;
+  }
+  .sport-hero-strip .sport-identity {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+  .sport-hero-strip .sport-icon-box {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: 20px !important;
+  }
+  .sport-hero-strip .sport-title {
+    font-size: 18px !important;
+  }
+  .sport-hero-strip .back-btn { font-size: 11px !important; padding: 6px 10px !important; }
+
+  /* Filter pills — wrap naturally, consistent sizing */
+  .sport-filter-pills {
+    gap: 6px !important;
+    flex-wrap: wrap !important;
+  }
+  .sport-filter-pills button { font-size: 11px !important; padding: 5px 10px !important; }
+  .sport-filter-pills select { font-size: 11px !important; padding: 5px 8px 5px 24px !important; }
+
+  /* Tournament section label */
+  .sport-section-label { font-size: 11px !important; }
+
+  /* Tournament grid — single column on mobile */
+  .sport-tournament-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+}
+
+/* ── Public Tournament Page ───────────────────────────────── */
+@media (max-width: 768px) {
+  /* Tab content area */
+  .pub-content { padding: 16px 16px !important; }
+
+  /* Match rows on mobile */
+  .match-row { flex-direction: column !important; }
+
+  /* PubHeader */
+  .pub-header-inner { padding: 14px 16px 12px !important; }
+  .pub-header-inner h1 { font-size: 17px !important; }
+
+  /* Registration forms */
+  .pub-event-card { padding: 14px 16px !important; }
+  .pub-event-card h3 { font-size: 14px !important; }
+}
+
+/* ── Tournament Overview (organiser) ─────────────────────── */
+@media (max-width: 768px) {
+  /* Main content padding */
+  .tournament-overview-content { padding: 20px 16px !important; }
+
+  /* Phase lifecycle stepper — scrollable on mobile */
+  .lifecycle-stepper {
+    overflow-x: auto !important;
+    padding-bottom: 8px !important;
+  }
+  .lifecycle-stepper > div {
+    min-width: 340px !important;
+  }
+
+  /* Share link card */
+  .share-link-card {
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+  .share-link-card > div:first-child {
+    word-break: break-all;
+    font-size: 12px !important;
+  }
+  .share-link-card .btn { width: 100% !important; }
+
+  /* Events grid — 1 col */
+  .events-grid { grid-template-columns: 1fr !important; }
+}
+
+/* ── Event Workspace (organiser) ─────────────────────────── */
+@media (max-width: 768px) {
+  .workspace-content { padding: 16px 14px !important; }
+
+  /* Overview card */
+  .event-overview-card { padding: 14px 16px !important; }
+
+  /* Fixtures match cards */
+  .match-row { padding: 10px 12px !important; }
+
+  /* Action buttons */
+  .event-actions { flex-direction: column !important; gap: 10px !important; }
+  .event-actions .btn { width: 100% !important; }
+
+  /* Stat grid in event overview */
+  .stats-grid { grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+/* ── Dashboard (organiser) — mobile org bar ──────────────── */
+.mobile-org-bar {
+  display: none;
+  background: var(--elevated);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.mobile-org-bar-name {
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--primary);
+  background: var(--primary-dim);
+  border: 1px solid rgba(255,107,53,0.25);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+.mobile-org-bar-link {
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mobile-org-bar-link:hover { color: var(--primary); }
+
+.dashboard-stats { grid-template-columns: repeat(4, 1fr); }
+
+@media (max-width: 768px) {
+  .mobile-org-bar { display: flex; }
+  .dashboard-main { padding: 20px 16px 80px !important; }
+
+  /* Make dashboard title smaller on mobile */
+  .dashboard-title { font-size: 20px !important; }
+
+  /* Stats grid 2-col on mobile */
+  .dashboard-stats { grid-template-columns: repeat(2, 1fr) !important; }
+
+  /* Ensure tournament card text wraps properly */
+  .dashboard-tournament-name {
+    font-size: 14px !important;
+    white-space: normal !important;
+    overflow: visible !important;
+  }
+}
+
+/* ── TournamentCard (shared) ─────────────────────────────── */
+@media (max-width: 480px) {
+  /* Cards: reduce internal padding */
+  .card { padding: 12px 14px !important; }
+  .card-title { font-size: 11px !important; }
+
+  /* Stats strip at bottom of tournament cards */
+  .stat-strip > div > div:first-child { font-size: 15px !important; }
+
+  /* Empty state */
+  .empty { padding: 40px 16px !important; }
+  .empty-icon { font-size: 40px !important; }
+  .empty-title { font-size: 15px !important; }
+}
+
+/* ── Tabs — scrollable on small screens ─────────────────── */
+@media (max-width: 480px) {
+  .tabs { overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+  .tab { font-size: 11px !important; padding: 10px 12px !important; }
+}
+
+/* ── Overlay / Modal ─────────────────────────────────────── */
+@media (max-width: 480px) {
+  .overlay > div {
+    max-width: 95vw !important;
+    max-height: 90vh !important;
+    overflow-y: auto !important;
+    padding: 20px 18px !important;
+  }
+}
+
+/* ── SportSetupModal on mobile ───────────────────────────── */
+@media (max-width: 480px) {
+  .overlay > div[style*="maxWidth: 520"] {
+    max-width: 95vw !important;
+    padding: 20px 16px !important;
+  }
+}
+
+/* ── Breadcrumb row ─────────────────────────────────────── */
+@media (max-width: 480px) {
+  .breadcrumb-row { overflow-x: auto; white-space: nowrap; font-size: 11px !important; }
+  .breadcrumb-item { font-size: 11px !important; }
+}
+
+/* ── Flash messages ─────────────────────────────────────── */
+@media (max-width: 768px) {
+  .flash { font-size: 12px !important; padding: 10px 16px !important; margin: 0 16px 10px !important; }
+}
+
+/* ── Scorers (TTScorer, BadmintonScorer, etc.) ───────────── */
+@media (max-width: 480px) {
+  .scorer-overlay {
+    padding: 16px !important;
+    border-radius: 12px !important;
+  }
+  .scorer-score-display { font-size: 52px !important; }
+}
+
+/* ── Form utility ────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .field { margin-bottom: 14px !important; }
+  .field label { font-size: 10px !important; }
+  .input { font-size: 14px !important; padding: 9px 12px !important; }
+  .btn-lg { padding: 13px 20px !important; font-size: 13px !important; }
+}
+
+/* ── Landing hero CTA buttons ────────────────────────────── */
+@media (max-width: 480px) {
+  .hero-cta-row { flex-direction: column !important; gap: 10px !important; align-items: stretch !important; }
+  .hero-cta-row button { width: 100% !important; }
+}
+
+/* ── Landing header: hide live chip on small screens (live ticker already shows it) */
+@media (max-width: 480px) {
+  .landing-live-chip { display: none !important; }
 }

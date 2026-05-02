@@ -13,11 +13,10 @@ const FORMATS = [
 
 const SPORT_SETUP = {
   table_tennis: {
-    icon: "🏓",
     label: "Table Tennis",
     subformats: [
-      { key: "singles",      label: "Singles",  icon: "👤", participant_type: "individual",   desc: "1 vs 1 — individual players" },
-      { key: "doubles",      label: "Doubles",  icon: "👥", participant_type: "doubles_pair", desc: "2 vs 2 — pairs compete" },
+      { key: "singles",      label: "Singles",  participant_type: "individual",   desc: "1 vs 1 — individual players" },
+      { key: "doubles",      label: "Doubles",  participant_type: "doubles_pair", desc: "2 vs 2 — pairs compete" },
     ],
     teamConfig: null,
     scoring: [
@@ -31,12 +30,11 @@ const SPORT_SETUP = {
   },
 
   badminton: {
-    icon: "🏸",
     label: "Badminton",
     subformats: [
-      { key: "singles",       label: "Singles",        icon: "👤", participant_type: "individual",   desc: "1 vs 1" },
-      { key: "doubles",       label: "Doubles",        icon: "👥", participant_type: "doubles_pair", desc: "2 vs 2 — same gender pairs" },
-      { key: "mixed_doubles", label: "Mixed Doubles",  icon: "👫", participant_type: "doubles_pair", desc: "2 vs 2 — mixed gender" },
+      { key: "singles",       label: "Singles",       participant_type: "individual",   desc: "1 vs 1" },
+      { key: "doubles",       label: "Doubles",       participant_type: "doubles_pair", desc: "2 vs 2 — same gender pairs" },
+      { key: "mixed_doubles", label: "Mixed Doubles", participant_type: "doubles_pair", desc: "2 vs 2 — mixed gender" },
     ],
     teamConfig: null,
     scoring: [
@@ -48,7 +46,6 @@ const SPORT_SETUP = {
   },
 
   cricket: {
-    icon: "🏏",
     label: "Cricket",
     subformats: null,             // Cricket is always team vs team
     teamConfig: [
@@ -67,7 +64,6 @@ const SPORT_SETUP = {
   },
 
   football: {
-    icon: "⚽",
     label: "Football",
     subformats: null,             // Football is always team vs team
     teamConfig: [
@@ -86,7 +82,7 @@ const SPORT_SETUP = {
   },
 };
 
-const SPORT_ICONS = { table_tennis: "🏓", badminton: "🏸", cricket: "🏏", football: "⚽" };
+const SPORT_ABBREV = { table_tennis: "TT", badminton: "BD", cricket: "CR", football: "FB" };
 const SPORT_LABELS = { table_tennis: "Table Tennis", badminton: "Badminton", cricket: "Cricket", football: "Football" };
 
 function buildInitialForm(spec) {
@@ -113,7 +109,7 @@ export default function SportSetupModal({ event, onClose, onSetupComplete }) {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState("");
 
-  const sportIcon  = SPORT_ICONS[event.sport_key]  || "🏅";
+  const sportAbbrev = SPORT_ABBREV[event.sport_key] || event.sport_key?.slice(0,2).toUpperCase() || "?";
   const sportLabel = SPORT_LABELS[event.sport_key] || event.sport_key;
 
   // ── Derived values ────────────────────────────────────────────
@@ -211,8 +207,8 @@ export default function SportSetupModal({ event, onClose, onSetupComplete }) {
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 24 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <div style={{ width: 48, height: 48, borderRadius: 12, background: c.dim, border: `1px solid rgba(255,107,53,.2)`,
-              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0 }}>
-              {sportIcon}
+              display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 900, color: c.orange, flexShrink: 0 }}>
+              {sportAbbrev}
             </div>
             <div>
               <div style={{ fontFamily: "var(--font-display)", fontSize: 9, fontWeight: 800, textTransform: "uppercase",
@@ -244,7 +240,7 @@ export default function SportSetupModal({ event, onClose, onSetupComplete }) {
               <div key={sf.key} style={selStyle(form.subformat === sf.key)}
                 onClick={() => setForm(f => ({ ...f, subformat: sf.key }))}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 22 }}>{sf.icon}</span>
+                  <span style={{ fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 900, color: form.subformat === sf.key ? c.orange : c.muted }}>{sf.key === "singles" ? "1v1" : sf.key === "doubles" ? "2v2" : sf.key === "mixed_doubles" ? "Mix" : sf.label.slice(0,3).toUpperCase()}</span>
                   <div>
                     <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800,
                       textTransform: "uppercase", letterSpacing: -0.5,

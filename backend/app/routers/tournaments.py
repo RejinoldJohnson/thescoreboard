@@ -39,12 +39,6 @@ def _check_tournament_access(tournament_id: int, user: User, db: Session) -> Tou
     return t
 
 
-def _normalize_participant_type(pt: str) -> str:
-    """doubles_pair is a frontend concept — backend stores it as 'team'."""
-    if pt == "doubles_pair":
-        return "team"
-    return pt
-
 
 def _serialize_match(m: Match) -> dict:
     parts = sorted(m.participants, key=lambda p: p.position)
