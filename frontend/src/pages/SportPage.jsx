@@ -2,30 +2,30 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getSportPageData } from "../api/client";
 import Header from "../components/shared/Header";
-import TournamentCard from "../components/shared/TournamentCard";
-import { SPORT_LABELS } from "../components/shared/TournamentCard";
+import TournamentCard, { SPORT_LABELS, SPORT_ICONS } from "../components/shared/TournamentCard";
+
+const SPORT_ABBREV = { table_tennis: "TT", badminton: "BD", cricket: "CR", football: "FB" };
 
 const SPORT_URL_TO_KEY = {
-  football:      "football",
-  cricket:       "cricket",
-  "table-tennis":"table_tennis",
-  badminton:     "badminton",
+  football:       "football",
+  cricket:        "cricket",
+  "table-tennis": "table_tennis",
+  badminton:      "badminton",
 };
 
-const SPORT_ICONS = {
-  football:     "⚽",
-  cricket:      "🏏",
-  table_tennis: "🏓",
-  badminton:    "🏸",
-};
-
-// Per-sport accent color for the hero strip
-const SPORT_ACCENT = {
+const SPORT_COLOR = {
   football:     "#22c55e",
-  cricket:      "#FFCC00",
+  cricket:      "#D97706",
   table_tennis: "#FF6B35",
   badminton:    "#38bdf8",
 };
+
+const STATUS_FILTERS = [
+  { key: "",          label: "All"       },
+  { key: "live",      label: "Live"      },
+  { key: "upcoming",  label: "Upcoming"  },
+  { key: "completed", label: "Completed" },
+];
 
 const POLL_INTERVAL = 8000;
 
@@ -33,11 +33,13 @@ export default function SportPage() {
   const location = useLocation();
   const sportUrl = location.pathname.replace("/", "");
   const navigate = useNavigate();
-  const [data,       setData]       = useState(null);
-  const [filterCity, setFilterCity] = useState("");
-  const [searchQ,    setSearchQ]    = useState("");
+  const [data,        setData]        = useState(null);
+  const [filterCity,  setFilterCity]  = useState("");
+  const [filterStatus,setFilterStatus]= useState("");
+  const [searchQ,     setSearchQ]     = useState("");
 
   const sportKey = SPORT_URL_TO_KEY[sportUrl];
+  const accent   = SPORT_COLOR[sportKey] || "var(--primary)";
 
   const fetchData = useCallback(() => {
     if (!sportUrl) return;
@@ -51,13 +53,28 @@ export default function SportPage() {
     return () => clearInterval(id);
   }, [fetchData]);
 
-  const tournaments      = data?.tournaments || [];
-  const cities           = data?.cities || [];
-  const liveTournaments  = tournaments.filter(t => t.status === "live");
-  const upcoming         = tournaments.filter(t => t.status === "upcoming");
-  const completed        = tournaments.filter(t => t.status === "completed");
-  const totalLive        = tournaments.reduce((s, t) => s + (t.live_count || 0), 0);
-  const accent           = SPORT_ACCENT[sportKey] || "var(--primary)";
+  const allTournaments = data?.tournaments || [];
+  const cities         = data?.cities || [];
+  const totalLive      = allTournaments.reduce((s, t) => s + (t.live_count || 0), 0);
+
+  // Client-side status filter
+  const tournaments = filterStatus
+    ? allTournaments.filter(t => t.status === filterStatus)
+    : allTournaments;
+
+  const liveTournaments = tournaments.filter(t => t.status === "live");
+  const upcoming        = tournaments.filter(t => t.status === "upcoming");
+  const completed       = tournaments.filter(t => t.status === "completed");
+
+  const pillStyle = (active) => ({
+    display: "inline-flex", alignItems: "center", gap: 4,
+    padding: "6px 14px", borderRadius: 6, cursor: "pointer",
+    fontSize: 12, fontWeight: 700, transition: "all 0.15s",
+    border: active ? "1.5px solid var(--primary)" : "1.5px solid var(--border)",
+    background: active ? "var(--primary-dim)" : "var(--surface)",
+    color: active ? "var(--primary)" : "var(--muted)",
+    whiteSpace: "nowrap",
+  });
 
   return (
     <div className="app">
@@ -68,105 +85,219 @@ export default function SportPage() {
       />
 
       {/* ── SPORT HERO STRIP ── */}
-      <div style={{
-        background: `linear-gradient(135deg, var(--bg) 0%, ${accent}15 50%, var(--bg) 100%)`,
-        borderBottom: `2px solid ${accent}44`,
+      <div className="sport-hero-strip" style={{
+        background: `linear-gradient(135deg, var(--surface) 0%, ${accent}10 100%)`,
+        borderBottom: `2px solid ${accent}33`,
         padding: "20px 24px",
-        position: "sticky",
-        top: 56,
-        zIndex: 90,
+        position: "sticky", top: 56, zIndex: 90,
       }}>
-        <div style={{ maxWidth:1100, margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"space-between", gap:16, flexWrap:"wrap",className:"sport-hero" }}>
-          {/* Left: sport info */}
-          <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-            <div style={{
-              width:56, height:56, borderRadius:12, flexShrink:0,
-              background:`${accent}18`, border:`2px solid ${accent}44`,
-              display:"flex", alignItems:"center", justifyContent:"center", fontSize:28,
-            }}>
-              {SPORT_ICONS[sportKey] || "🏅"}
-            </div>
-            <div>
-              <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:900, textTransform:"uppercase", letterSpacing:-1, color:"var(--ink)", lineHeight:1 }}>
-                {SPORT_LABELS[sportKey] || sportUrl}
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+          {/* Sport identity row */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{
+                width: 52, height: 52, borderRadius: 12, flexShrink: 0,
+                background: `${accent}18`, border: `2px solid ${accent}44`,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 900, color: accent,
+              }}>
+                {SPORT_ABBREV[sportKey] || sportKey.slice(0,2).toUpperCase()}
               </div>
-              <div style={{ fontSize:12, color:"var(--muted)", marginTop:4, display:"flex", alignItems:"center", gap:10 }}>
-                <span>{tournaments.length} tournament{tournaments.length!==1?"s":""}</span>
-                {totalLive > 0 && (
-                  <span style={{ display:"flex", alignItems:"center", gap:5, color:"var(--primary)", fontWeight:700 }}>
-                    <span className="live-dot" style={{ background:"var(--primary)", width:7, height:7 }}/>
-                    {totalLive} live now
-                  </span>
-                )}
+              <div>
+                <div style={{
+                  fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 900,
+                  textTransform: "uppercase", letterSpacing: -1, color: "var(--ink)", lineHeight: 1,
+                }}>
+                  {SPORT_LABELS[sportKey] || sportUrl}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 10 }}>
+                  <span>{allTournaments.length} tournament{allTournaments.length !== 1 ? "s" : ""}</span>
+                  {totalLive > 0 && (
+                    <span style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--primary)", fontWeight: 700 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--primary)", animation: "pulse 1.5s infinite", display: "inline-block" }}/>
+                      {totalLive} live
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
+            <button
+              onClick={() => navigate("/")}
+              style={{
+                background: "none", border: "1px solid var(--border)",
+                color: "var(--muted)", borderRadius: 6, padding: "7px 14px",
+                fontSize: 12, fontWeight: 700, cursor: "pointer",
+                fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: 1,
+                transition: "all 0.15s", flexShrink: 0,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--primary)"; e.currentTarget.style.color = "var(--primary)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.color = "var(--muted)"; }}
+            >
+              ← All Sports
+            </button>
           </div>
 
-          {/* Right: filters */}
-          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-            <button className="filter-pill active" onClick={() => navigate("/")} style={{ background: "var(--surface)", color: "var(--ink)", border: "1px solid var(--border)" }}>← All Sports</button>
+          {/* Filter pills row */}
+          <div className="sport-filter-pills" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {STATUS_FILTERS.map(f => (
+              <button
+                key={f.key}
+                style={pillStyle(filterStatus === f.key)}
+                onClick={() => setFilterStatus(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+
             {cities.length > 0 && (
-              <select
-                value={filterCity}
-                onChange={e => setFilterCity(e.target.value)}
+              <div style={{ position: "relative", marginLeft: 4 }}>
+                <svg style={{
+                  position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
+                  color: "var(--muted)", pointerEvents: "none",
+                }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/>
+                  <circle cx="12" cy="9" r="2.5"/>
+                </svg>
+                <select
+                  value={filterCity}
+                  onChange={e => setFilterCity(e.target.value)}
+                  style={{
+                    background: filterCity ? "var(--primary-dim)" : "var(--surface)",
+                    border: filterCity ? "1.5px solid var(--primary)" : "1.5px solid var(--border)",
+                    color: filterCity ? "var(--primary)" : "var(--muted)",
+                    fontSize: 12, fontWeight: 700,
+                    padding: "6px 10px 6px 28px",
+                    borderRadius: 6, cursor: "pointer", outline: "none",
+                    fontFamily: "var(--font-body)", appearance: "none",
+                    WebkitAppearance: "none",
+                  }}
+                >
+                  <option value="">All Cities</option>
+                  {cities.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Clear filters */}
+            {(filterCity || filterStatus) && (
+              <button
+                onClick={() => { setFilterCity(""); setFilterStatus(""); }}
                 style={{
-                  background:"var(--surface)", border:"1px solid var(--border-mid)",
-                  color:"var(--ink)", fontSize:11, fontWeight:700,
-                  textTransform:"uppercase", letterSpacing:1,
-                  padding:"5px 12px", borderRadius:4, cursor:"pointer", outline:"none",
-                  fontFamily:"var(--font-body)",
+                  background: "none", border: "1px solid var(--border)",
+                  color: "var(--muted)", borderRadius: 6, padding: "6px 12px",
+                  fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "var(--font-body)", letterSpacing: 0.5,
                 }}
               >
-                <option value="">All Cities</option>
-                {cities.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+                Clear ×
+              </button>
             )}
           </div>
         </div>
       </div>
 
       {/* ── CONTENT ── */}
-      <div style={{ maxWidth:1100, margin:"0 auto", padding:"24px 24px" }}>
+      <div className="page-container">
         {!data ? (
-          <div className="empty">
-            <div style={{ fontFamily:"var(--font-display)", fontSize:14, textTransform:"uppercase", letterSpacing:2, color:"var(--muted)" }}>Loading…</div>
+          /* Skeleton */
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 16 }}>
+            {[1, 2, 3, 4, 5, 6].map(i => (
+              <div key={i} style={{ borderRadius: 12, border: "2px solid var(--border)", overflow: "hidden" }}>
+                <div className="skeleton" style={{ height: 4 }}/>
+                <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div className="skeleton" style={{ height: 12, width: "40%" }}/>
+                  <div className="skeleton" style={{ height: 18, width: "70%" }}/>
+                  <div className="skeleton" style={{ height: 12, width: "55%" }}/>
+                  <div className="skeleton" style={{ height: 12, width: "45%", marginTop: 4 }}/>
+                </div>
+              </div>
+            ))}
           </div>
         ) : tournaments.length === 0 ? (
           <div className="empty">
-            <div className="empty-icon">{SPORT_ICONS[sportKey] || "🏆"}</div>
-            <div className="empty-title">No {SPORT_LABELS[sportKey]} Tournaments Yet</div>
-            <p style={{ fontSize:13, color:"var(--muted)", marginTop:4 }}>Check back soon or organize one!</p>
+            <div className="empty-icon" style={{ opacity: 0.25, fontFamily: "var(--font-display)", fontSize: 28, fontWeight: 900, color: accent }}>{SPORT_ABBREV[sportKey] || "?"}</div>
+            <div className="empty-title">
+              {filterStatus || filterCity
+                ? "No Matching Tournaments"
+                : `No ${SPORT_LABELS[sportKey]} Tournaments Yet`}
+            </div>
+            <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 6 }}>
+              {filterStatus || filterCity
+                ? "Try clearing your filters."
+                : "Check back soon or organize one!"}
+            </p>
+            {(filterStatus || filterCity) && (
+              <button
+                onClick={() => { setFilterCity(""); setFilterStatus(""); }}
+                className="btn btn-outline"
+                style={{ marginTop: 16, fontSize: 12 }}
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
         ) : (
           <>
-            {liveTournaments.length > 0 && (
-              <Section label="🔴 Live Now" tournaments={liveTournaments} sportUrl={sportUrl} navigate={navigate} accent={accent} />
+            {!filterStatus && liveTournaments.length > 0 && (
+              <Section label="Live Now" tournaments={liveTournaments} sportUrl={sportUrl} navigate={navigate} accent={accent} badge />
             )}
-            {upcoming.length > 0 && (
+            {!filterStatus && upcoming.length > 0 && (
               <Section label="Upcoming" tournaments={upcoming} sportUrl={sportUrl} navigate={navigate} accent={accent} />
             )}
-            {completed.length > 0 && (
+            {!filterStatus && completed.length > 0 && (
               <Section label="Completed" tournaments={completed} sportUrl={sportUrl} navigate={navigate} accent={accent} />
+            )}
+            {filterStatus && (
+              <Section label={STATUS_FILTERS.find(f => f.key === filterStatus)?.label || filterStatus}
+                tournaments={tournaments} sportUrl={sportUrl} navigate={navigate} accent={accent} />
             )}
           </>
         )}
       </div>
 
-      <footer style={{ textAlign:"center", padding:"20px 24px", color:"var(--muted)", fontSize:12, borderTop:"1px solid var(--border)" }}>
-        TheScoreBoard — {SPORT_LABELS[sportKey]} tournaments
+      <footer style={{ textAlign: "center", padding: "20px 24px", color: "var(--muted)", fontSize: 12, borderTop: "1px solid var(--border)", marginTop: 8 }}>
+        TheScoreBoard · {SPORT_LABELS[sportKey]} Tournaments
       </footer>
     </div>
   );
 }
 
-function Section({ label, tournaments, sportUrl, navigate, accent }) {
+function Section({ label, tournaments, sportUrl, navigate, accent, badge }) {
   return (
-    <div style={{ marginBottom:36 }}>
-      <div className="section-label" style={{ color: "var(--ink)", fontWeight: "bold", borderBottom: "1px solid var(--border)", paddingBottom: "8px", marginBottom: "16px" }}>{label}</div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:12 }}>
+    <div style={{ marginBottom: 40 }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10, marginBottom: 16,
+        paddingBottom: 10, borderBottom: "2px solid var(--border)",
+      }}>
+        {badge && (
+          <span style={{
+            display: "flex", alignItems: "center", gap: 5,
+            background: "var(--primary)", color: "#fff",
+            padding: "3px 10px", borderRadius: 4,
+            fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800,
+            textTransform: "uppercase", letterSpacing: 1.5,
+          }}>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#fff", animation: "pulse 1.5s infinite", display: "inline-block" }}/>
+            Live
+          </span>
+        )}
+        <span style={{
+          fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 900,
+          textTransform: "uppercase", letterSpacing: 1, color: "var(--ink)",
+        }}>
+          {badge ? "" : label}
+        </span>
+        <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: 2 }}>
+          ({tournaments.length})
+        </span>
+      </div>
+      <div className="sport-tournament-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 14 }}>
         {tournaments.map(t => (
-          <TournamentCard key={t.tournament_id} tournament={t}
-            onClick={() => navigate(`/${sportUrl}/tournament/${t.slug}`)} />
+          <TournamentCard
+            key={t.tournament_id}
+            tournament={t}
+            onClick={() => navigate(`/${sportUrl}/tournament/${t.slug}`)}
+          />
         ))}
       </div>
     </div>

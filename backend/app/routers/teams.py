@@ -215,14 +215,20 @@ def get_event_teams(event_id: int, db: Session = Depends(get_db)):
     ]
 
 
-# ── Public team registration ──────────────────────────────────
+# ── Public team / doubles-pair registration ───────────────────
 
 class PublicTeamRegistration(BaseModel):
-    team_name:     str
-    contact_name:  str
-    contact_phone: str
+    # Doubles form sends: name, event_id (singular), contact_phone, members
+    # Team form sends:    team_name, event_ids (list), contact_name, contact_phone, members
+    # Both are accepted — fields normalised in the handler below.
+    name:          Optional[str] = None   # doubles pair name
+    team_name:     Optional[str] = None   # full-team name (legacy)
+    contact_name:  Optional[str] = ""
+    contact_phone: Optional[str] = ""
+    sport_key:     Optional[str] = None
+    event_id:      Optional[int] = None   # singular — doubles form
+    event_ids:     List[int]     = []     # plural   — team form
     members:       List[TeamMemberIn]
-    event_ids:     List[int] = []
 
 
 @router.post("/public/tournaments/{tournament_id}/register-team")
@@ -232,9 +238,8 @@ def public_register_team(
     db: Session = Depends(get_db),
 ):
     """
-    Public team registration — no auth required.
-    Creates a team with its roster and enrolls in the specified events.
-    Tournament must be in 'registration' status.
+    Public registration for teams (cricket/football) and doubles pairs (TT/badminton).
+    No auth required. Tournament must be in 'registration' status.
     """
     tournament = db.query(Tournament).filter(
         Tournament.tournament_id == tournament_id,
@@ -245,41 +250,24 @@ def public_register_team(
     if tournament.status != "registration":
         raise HTTPException(status_code=400, detail="Tournament is not accepting registrations")
 
+    # ── Normalise name (doubles sends "name", teams send "team_name")
+    team_display_name = (data.name or data.team_name or "").strip()
+    if not team_display_name:
+        raise HTTPException(status_code=422, detail="Pair or team name is required")
+
+    # ── Normalise event IDs (doubles sends event_id int, teams send event_ids list)
+    all_event_ids: List[int] = list(data.event_ids)
+    if data.event_id and data.event_id not in all_event_ids:
+        all_event_ids.append(data.event_id)
+
     if len(data.members) < 1:
-        raise HTTPException(status_code=400, detail="Team must have at least 1 member")
+        raise HTTPException(status_code=400, detail="At least one member is required")
 
-    # Deduplicate: check if team with same name + contact phone already exists
-    existing = db.query(Team).filter(
-        Team.org_id == tournament.org_id,
-        Team.name == data.team_name.strip(),
-        Team.contact_phone == data.contact_phone.strip(),
-    ).first()
-
-    if existing:
-        team = existing
-    else:
-        team = Team(
-            org_id=tournament.org_id,
-            name=data.team_name.strip(),
-            contact_name=data.contact_name.strip(),
-            contact_phone=data.contact_phone.strip(),
-        )
-        db.add(team)
-        db.flush()
-
-        for i, m in enumerate(data.members):
-            db.add(TeamMember(
-                team_id=team.team_id,
-                name=m.name.strip(),
-                role=m.role if m.role else ("captain" if i == 0 else "player"),
-                jersey_number=m.jersey_number,
-            ))
-
-    # Resolve which events to enroll in
-    if data.event_ids:
+    # ── Resolve target events
+    if all_event_ids:
         target_events = db.query(Event).filter(
             Event.tournament_id == tournament_id,
-            Event.event_id.in_(data.event_ids),
+            Event.event_id.in_(all_event_ids),
             Event.is_active == True,
             Event.participant_type.in_(["team", "doubles_pair"]),
         ).all()
@@ -291,8 +279,45 @@ def public_register_team(
         ).all()
 
     if not target_events:
-        raise HTTPException(status_code=400, detail="No team events found in this tournament")
+        raise HTTPException(status_code=400, detail="No matching events found in this tournament")
 
+    # ── Doubles-specific validation: exactly 2 members per pair
+    doubles_events = [e for e in target_events if e.participant_type == "doubles_pair"]
+    if doubles_events and len(data.members) != 2:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Doubles pair registration requires exactly 2 players (got {len(data.members)})"
+        )
+
+    # ── Deduplicate: reuse existing team/pair with same name + phone
+    contact_phone = (data.contact_phone or "").strip()
+    existing = db.query(Team).filter(
+        Team.org_id == tournament.org_id,
+        Team.name == team_display_name,
+        Team.contact_phone == contact_phone,
+    ).first()
+
+    if existing:
+        team = existing
+    else:
+        team = Team(
+            org_id=tournament.org_id,
+            name=team_display_name,
+            contact_name=(data.contact_name or "").strip(),
+            contact_phone=contact_phone,
+        )
+        db.add(team)
+        db.flush()
+
+        for i, m in enumerate(data.members):
+            db.add(TeamMember(
+                team_id=team.team_id,
+                name=m.name.strip(),
+                role=m.role if m.role else ("player1" if i == 0 else "player2"),
+                jersey_number=m.jersey_number,
+            ))
+
+    # ── Enrol in target events
     enrolled = []
     for event in target_events:
         already = db.query(EventParticipant).filter(
@@ -305,11 +330,17 @@ def public_register_team(
         enrolled.append(event.event_id)
 
     db.commit()
+
+    is_doubles = bool(doubles_events)
     return {
         "ok":              True,
         "team_id":         team.team_id,
         "team_name":       team.name,
         "member_count":    len(data.members),
         "enrolled_events": enrolled,
-        "message":         f"Team '{team.name}' registered for {tournament.name}",
+        "message": (
+            f"Pair '{team.name}' registered for {tournament.name}"
+            if is_doubles else
+            f"Team '{team.name}' registered for {tournament.name}"
+        ),
     }

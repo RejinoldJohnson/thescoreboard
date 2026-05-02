@@ -15,10 +15,10 @@ import OrgHeader       from "../../../components/shared/OrgHeader";
 import { IndividualTab, DoublesTab, TeamTab } from "../../../components/shared/ParticipantsTab";
 
 const SPORT_META = {
-  table_tennis: { icon: "🏓", label: "Table Tennis" },
-  badminton:    { icon: "🏸", label: "Badminton"    },
-  cricket:      { icon: "🏏", label: "Cricket"      },
-  football:     { icon: "⚽", label: "Football"     },
+  table_tennis: { abbrev: "TT", label: "Table Tennis" },
+  badminton:    { abbrev: "BD", label: "Badminton"    },
+  cricket:      { abbrev: "CR", label: "Cricket"      },
+  football:     { abbrev: "FB", label: "Football"     },
 };
 
 const API = import.meta.env.VITE_API_URL || "/api";
@@ -104,7 +104,7 @@ export default function EventWorkspace() {
     </div>
   );
 
-  const sm         = SPORT_META[currentEvent.sport_key] || { icon: "🏅", label: currentEvent.sport_key };
+  const sm         = SPORT_META[currentEvent.sport_key] || { abbrev: currentEvent.sport_key?.slice(0,2).toUpperCase() || "?", label: currentEvent.sport_key };
   const pType      = currentEvent.participant_type;       // "individual" | "doubles_pair" | "team"
   const isIndividual = pType === "individual";
   const isDoubles    = pType === "doubles_pair";
@@ -231,7 +231,7 @@ export default function EventWorkspace() {
         crumbs={[
           { label: "My Tournaments", path: "/organiser" },
           { label: t.name, path: `/organiser/tournament/${tournamentId}` },
-          { label: `${sm.icon} ${currentEvent.name}` },
+          { label: currentEvent.name },
         ]}
         right={liveCount > 0 ? (
           <div className="live-badge"><span className="live-dot" /> {liveCount} LIVE</div>
@@ -250,15 +250,15 @@ export default function EventWorkspace() {
         ))}
       </div>
 
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 24px" }}>
+      <div className="workspace-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 24px" }}>
 
         {/* ══ OVERVIEW ══════════════════════════════════════════ */}
         {tab === "overview" && (
           <div>
             <div className="card" style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-                <div style={{ width: 52, height: 52, borderRadius: 10, background: "var(--primary-dim)", border: "1px solid rgba(255,107,53,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>
-                  {sm.icon}
+                <div style={{ width: 52, height: 52, borderRadius: 10, background: "var(--primary-dim)", border: "1px solid rgba(255,107,53,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900, color: "var(--primary)", flexShrink: 0 }}>
+                  {sm.abbrev}
                 </div>
                 <div>
                   <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 900, textTransform: "uppercase", letterSpacing: -0.5, color: "var(--ink)" }}>
@@ -295,7 +295,7 @@ export default function EventWorkspace() {
               </button>
               <button className="btn btn-outline" onClick={() => setTab("fixtures")}>Fixtures</button>
               {liveCount > 0 && (
-                <button className="btn btn-danger" onClick={() => setTab("live")}>🔴 Score Live</button>
+                <button className="btn btn-danger" onClick={() => setTab("live")}>Score Live</button>
               )}
             </div>
           </div>
@@ -342,11 +342,11 @@ export default function EventWorkspace() {
               <span style={{ fontFamily: "var(--font-display)", fontSize: 13, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
                 {currentEvent.match_count} matches
               </span>
-              <button className="btn btn-primary" onClick={handleGenerateFixtures}>⚡ Generate Fixtures</button>
+              <button className="btn btn-primary" onClick={handleGenerateFixtures}>Generate Fixtures</button>
             </div>
             {!currentEvent.matches?.length ? (
               <div className="empty">
-                <div className="empty-icon">🗓️</div>
+                <div className="empty-icon"></div>
                 {isTeam || isDoubles
                   ? `Add ${isDoubles ? "pairs" : "teams"}, then generate fixtures.`
                   : "Add players to groups, then generate fixtures."}
@@ -469,7 +469,7 @@ function MatchCard({ match: m, onAction, sportKey }) {
 
       {isDone && (
         <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "var(--font-display)", textTransform: "uppercase", letterSpacing: 0.5, color: "var(--gold)" }}>
-          🏆 {m.player_1?.is_winner ? m.player_1.name : m.player_2?.is_winner ? m.player_2.name : "Draw"}
+          {m.player_1?.is_winner ? m.player_1.name : m.player_2?.is_winner ? m.player_2.name : "Draw"}
         </div>
       )}
 

@@ -10,10 +10,10 @@ const LIFECYCLE_LABELS = {
 };
 
 const SPORT_META = {
-  table_tennis: { icon: "🏓", label: "Table Tennis", type: "individual" },
-  badminton:    { icon: "🏸", label: "Badminton",    type: "individual" },
-  cricket:      { icon: "🏏", label: "Cricket",      type: "team"       },
-  football:     { icon: "⚽", label: "Football",     type: "team"       },
+  table_tennis: { abbrev: "TT", label: "Table Tennis", type: "individual" },
+  badminton:    { abbrev: "BD", label: "Badminton",    type: "individual" },
+  cricket:      { abbrev: "CR", label: "Cricket",      type: "team"       },
+  football:     { abbrev: "FB", label: "Football",     type: "team"       },
 };
 
 const STATUS_PILL = {
@@ -95,7 +95,7 @@ export default function TournamentOverview() {
 
       {msg && <div className="flash success">{msg}</div>}
 
-      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "28px 24px" }}>
+      <div className="tournament-overview-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "28px 24px" }}>
 
         {/* ── TITLE ── */}
         <div style={{ marginBottom: 28 }}>
@@ -105,8 +105,8 @@ export default function TournamentOverview() {
           </h1>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 13,
             color: "var(--muted)", alignItems: "center" }}>
-            {t.venue && <span>📍 {t.venue}{t.city ? `, ${t.city}` : ""}</span>}
-            {t.start_date && <span>📅 {t.start_date}</span>}
+            {t.venue && <span>{t.venue}{t.city ? `, ${t.city}` : ""}</span>}
+            {t.start_date && <span>{t.start_date}</span>}
             <span className={`pill ${STATUS_PILL[t.status] || "pill-gray"}`}
               style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
               {t.status === "live" && <span className="live-dot" style={{ width: 6, height: 6 }}/>}
@@ -125,7 +125,7 @@ export default function TournamentOverview() {
             borderRadius: 10, padding: "14px 18px", marginBottom: 20,
             display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
           }}>
-            <span style={{ fontSize: 20 }}>⚙</span>
+            <span style={{ fontSize: 11, fontFamily: "var(--font-display)", fontWeight: 800, letterSpacing: 1, color: "var(--gold)" }}>SETUP</span>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 800,
                 textTransform: "uppercase", letterSpacing: 0.5, color: "var(--ink)", marginBottom: 2 }}>
@@ -158,7 +158,7 @@ export default function TournamentOverview() {
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-title">Tournament Phase</div>
 
-          <div style={{ display: "flex", alignItems: "center", marginBottom: 16 }}>
+          <div className="lifecycle-stepper" style={{ display: "flex", alignItems: "center", marginBottom: 16, overflowX: "auto" }}>
             {LIFECYCLE.map((phase, i) => {
               const state = i < currentIdx ? "done" : i === currentIdx ? "active" : "pending";
               return (
@@ -239,7 +239,7 @@ export default function TournamentOverview() {
 
         {events.length === 0 ? (
           <div className="card" style={{ textAlign: "center", padding: "40px 20px" }}>
-            <div style={{ fontSize: 32, marginBottom: 10, opacity: .3 }}>🏅</div>
+            <div style={{ width: 40, height: 40, borderRadius: 8, background: "var(--elevated)", margin: "0 auto 10px", opacity: .3 }} />
             <div style={{ fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 900,
               textTransform: "uppercase", letterSpacing: -0.5, color: "var(--ink)", marginBottom: 6 }}>
               No Events Yet
@@ -252,7 +252,7 @@ export default function TournamentOverview() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px,1fr))", gap: 12 }}
             className="events-grid">
             {events.map(ev => {
-              const sm = SPORT_META[ev.sport_key] || { icon: "🏅", label: ev.sport_key, type: "individual" };
+              const sm = SPORT_META[ev.sport_key] || { abbrev: ev.sport_key?.slice(0,2).toUpperCase() || "?", label: ev.sport_key, type: "individual" };
               const needsSetup = ev.is_configured === false;
 
               return (
@@ -279,7 +279,7 @@ export default function TournamentOverview() {
                       textTransform: "uppercase", letterSpacing: 1,
                       display: "flex", alignItems: "center", gap: 4,
                     }}>
-                      ⚙ Setup Required
+                      Setup Required
                     </div>
                   )}
 
@@ -292,7 +292,7 @@ export default function TournamentOverview() {
                       border: `1px solid ${needsSetup ? "rgba(255,204,0,0.3)" : "rgba(255,107,53,0.2)"}`,
                       display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
                     }}>
-                      {sm.icon}
+                      {sm.abbrev}
                     </div>
                     <div>
                       <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 900,
@@ -341,7 +341,7 @@ export default function TournamentOverview() {
                   <div style={{ marginTop: 10, textAlign: "right", fontFamily: "var(--font-display)",
                     fontSize: 11, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase",
                     color: needsSetup ? "var(--gold)" : "var(--primary)" }}>
-                    {needsSetup ? "⚙ Configure →" : "Manage →"}
+                    {needsSetup ? "Configure →" : "Manage →"}
                   </div>
                 </div>
               );

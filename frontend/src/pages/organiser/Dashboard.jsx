@@ -15,8 +15,8 @@ const STATUS_META = {
   completed:    { label: "Completed",    pill: "pill-green"  },
 };
 
-const SPORT_ICONS = { table_tennis:"🏓", badminton:"🏸", cricket:"🏏", football:"⚽" };
-const sportIcons  = (events=[]) => [...new Set(events.map(e=>e.sport_key))].map(k=>SPORT_ICONS[k]||"🏅").join(" ");
+const SPORT_ABBREV = { table_tennis:"TT", badminton:"BD", cricket:"CR", football:"FB" };
+const sportAbbrevs = (events=[]) => [...new Set(events.map(e=>e.sport_key))].map(k=>SPORT_ABBREV[k]||k.slice(0,2).toUpperCase()).join(" ");
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -105,6 +105,14 @@ export default function Dashboard() {
 
       {msg && <div className="flash success">{msg}</div>}
 
+      {/* ── MOBILE ORG BAR (shown only on small screens) ── */}
+      {activeOrg && (
+        <div className="mobile-org-bar">
+          <span className="mobile-org-bar-name">{activeOrg.name}</span>
+          <span className="mobile-org-bar-link" onClick={() => navigate("/")}>← Public Site</span>
+        </div>
+      )}
+
       <div className="sidebar-layout">
         {/* ── SIDEBAR ── */}
         <aside className="sidebar">
@@ -149,23 +157,22 @@ export default function Dashboard() {
         </aside>
 
         {/* ── MAIN ── */}
-        <main style={{ flex:1, padding:"28px 32px", maxWidth:900 }}>
-          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:24 }} className="dashboard-header">
+        <main className="dashboard-main" style={{ flex:1, padding:"28px 32px", minWidth:0, overflow:"hidden" }}>
+          <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:24, gap:16 }} className="dashboard-header">
             <div>
-              <div style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:900, textTransform:"uppercase", letterSpacing:"-1px", color:"var(--ink)" }}>
-                Tournaments
+              <div style={{ fontFamily:"var(--font-display)", fontSize:24, fontWeight:900, textTransform:"uppercase", letterSpacing:"-1px", color:"var(--ink)", lineHeight:1 }}>
+                My Tournaments
               </div>
-              <div style={{ fontSize:13, color:"var(--muted)", marginTop:3 }}>
+              <div style={{ fontSize:13, color:"var(--muted)", marginTop:4 }}>
                 {activeOrg
-                  ? `${activeOrg.name} · ${tournaments.length} tournament${tournaments.length!==1?"s":""}`
+                  ? <span>{activeOrg.name} <span style={{ color:"var(--border-mid)" }}>·</span> {tournaments.length} tournament{tournaments.length!==1?"s":""}</span>
                   : "No organization yet"}
               </div>
             </div>
             <button
-              className="btn btn-gradient btn-lg"
-              style={{ borderRadius:8, fontSize:13 }}
+              className="btn btn-gradient"
+              style={{ borderRadius:8, fontSize:12, flexShrink:0 }}
               onClick={() => navigate("/organiser/create")}
-              title="Create Tournament"
             >
               + New Tournament
             </button>
@@ -173,21 +180,21 @@ export default function Dashboard() {
 
           {/* Stats */}
           {tournaments.length > 0 && (
-            <div className="stats-grid dashboard-stats">
-              <div className="stat-card">
-                <div className="stat-num">{tournaments.length}</div>
-                <div className="stat-label">Total</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-num" style={{ color:"var(--red)" }}>{liveCount}</div>
-                <div className="stat-label">Live Now</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-num" style={{ color:"var(--green)" }}>
-                  {tournaments.filter(t=>t.status==="completed").length}
+            <div style={{ display:"grid", gap:10, marginBottom:24 }} className="dashboard-stats">
+              {[
+                { num: tournaments.length,                                       label:"Total",       color:"var(--ink)"    },
+                { num: liveCount,                                                 label:"Live Now",    color:"var(--primary)" },
+                { num: tournaments.filter(t=>t.status==="registration").length,  label:"Registration",color:"#92700A"       },
+                { num: tournaments.filter(t=>t.status==="completed").length,     label:"Completed",   color:"var(--green)"  },
+              ].map(s => (
+                <div key={s.label} style={{
+                  background:"var(--surface)", border:"2px solid var(--border)",
+                  borderRadius:"var(--radius-lg)", padding:"14px 16px", textAlign:"center",
+                }}>
+                  <div style={{ fontFamily:"var(--font-display)", fontSize:28, fontWeight:900, color:s.color, lineHeight:1, marginBottom:4 }}>{s.num}</div>
+                  <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:"var(--muted)" }}>{s.label}</div>
                 </div>
-                <div className="stat-label">Completed</div>
-              </div>
+              ))}
             </div>
           )}
 
@@ -195,14 +202,14 @@ export default function Dashboard() {
 
           {!activeOrg ? (
             <div className="empty">
-              <div className="empty-icon">🏢</div>
+              <div className="empty-icon"></div>
               <div className="empty-title">No Organization Yet</div>
               <p style={{ fontSize:13 }}>Create an organization first to run tournaments.</p>
               <button className="btn btn-primary" style={{ marginTop:16 }} onClick={() => setOnboarding(true)}>Get Started</button>
             </div>
           ) : sorted.length === 0 ? (
             <div className="empty">
-              <div className="empty-icon">🏆</div>
+              <div className="empty-icon"></div>
               <div className="empty-title">No Tournaments Yet</div>
               <p style={{ fontSize:13 }}>Hit <strong>+ New Tournament</strong> to get started.</p>
             </div>
@@ -277,7 +284,7 @@ export default function Dashboard() {
       {showDeleteOrgModal && activeOrg && (
         <div className="overlay" onClick={() => setShowDeleteOrgModal(false)}>
           <div className="danger-box" onClick={e=>e.stopPropagation()}>
-            <div className="danger-icon">⚠</div>
+            <div className="danger-icon">!</div>
             <div className="danger-title">Delete Organization</div>
             <div className="danger-body">You're deleting <strong>{activeOrg.name}</strong> and all <strong>{tournaments.length} tournament{tournaments.length!==1?"s":""}</strong> inside it.</div>
             <div className="danger-warn">This action cannot be undone.</div>
@@ -293,7 +300,7 @@ export default function Dashboard() {
       {showDeleteModal && (
         <div className="overlay" onClick={() => setShowDeleteModal(null)}>
           <div className="danger-box" onClick={e=>e.stopPropagation()}>
-            <div className="danger-icon">⚠</div>
+            <div className="danger-icon">!</div>
             <div className="danger-title">Delete Tournament</div>
             <div className="danger-body">Permanently delete <strong>{showDeleteModal.name}</strong>. All events, matches, and player data will be removed.</div>
             <div className="danger-warn">This action cannot be undone.</div>
@@ -309,30 +316,72 @@ export default function Dashboard() {
 }
 
 function TournamentCard({ tournament:t, showKebab, onKebabToggle, onManage, onDelete, onCopy }) {
-  const events = t.events||[];
-  const icons  = sportIcons(events);
-  const sm     = STATUS_META[t.status]||STATUS_META.draft;
+  const events  = t.events || [];
+  const icons   = sportAbbrevs(events);
+  const sm      = STATUS_META[t.status] || STATUS_META.draft;
+  const isLive  = t.status === "live";
   return (
-    <div className="tournament-card" onClick={onManage} style={{ marginBottom:8 }}>
+    <div
+      onClick={onManage}
+      style={{
+        background: "var(--surface)",
+        border: `2px solid ${isLive ? "var(--primary)" : "var(--border)"}`,
+        borderRadius: "var(--radius-lg)",
+        padding: "14px 16px",
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        gap: 12, marginBottom: 8, cursor: "pointer", transition: "all 0.15s",
+        position: "relative",
+      }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--primary)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(255,107,53,0.10)"; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = isLive ? "var(--primary)" : "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}
+    >
       <div style={{ display:"flex", alignItems:"center", gap:12, flex:1, minWidth:0 }}>
-        <div className="tournament-card-icon">{icons||"🏅"}</div>
+        <div style={{
+          width: 42, height: 42, borderRadius: "var(--radius-md)",
+          background: "var(--primary-dim)", border: "1px solid rgba(255,107,53,0.2)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 900,
+          color: "var(--primary)", flexShrink: 0, letterSpacing: -0.5,
+        }}>{icons || "??"}</div>
         <div style={{ minWidth:0 }}>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, textTransform:"uppercase", letterSpacing:-0.5, color:"var(--ink)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{t.name}</div>
-          <div style={{ fontSize:12, color:"var(--muted)", marginTop:1 }}>{[t.venue,t.city].filter(Boolean).join(" · ")||"No venue"}</div>
-          <div style={{ display:"flex", gap:6, marginTop:5, flexWrap:"wrap", alignItems:"center" }}>
-            <span className={`pill ${sm.pill}`}>
-              {t.status==="live" && <span className="live-dot" style={{ width:6, height:6 }}/>}
+          <div style={{
+            fontFamily:"var(--font-display)", fontSize:14, fontWeight:900,
+            textTransform:"uppercase", letterSpacing:-0.5, color:"var(--ink)",
+            whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis",
+          }}>{t.name}</div>
+          <div style={{ fontSize:12, color:"var(--muted)", marginTop:1 }}>
+            {[t.venue, t.city].filter(Boolean).join(" · ") || "No venue set"}
+          </div>
+          <div style={{ display:"flex", gap:6, marginTop:6, flexWrap:"wrap", alignItems:"center" }}>
+            <span style={{
+              display:"inline-flex", alignItems:"center", gap:4,
+              fontSize:10, fontWeight:800, letterSpacing:1.5, textTransform:"uppercase",
+              fontFamily:"var(--font-display)", padding:"3px 8px", borderRadius:4,
+              background:sm.pill==="pill-red"?"var(--red-dim)":sm.pill==="pill-gold"?"var(--gold-dim)":sm.pill==="pill-green"?"var(--green-dim)":"var(--elevated)",
+              color:sm.pill==="pill-red"?"var(--red)":sm.pill==="pill-gold"?"#92700A":sm.pill==="pill-green"?"#15803d":"var(--muted)",
+            }}>
+              {isLive && <span style={{ width:5, height:5, borderRadius:"50%", background:"var(--primary)", animation:"pulse 1.5s infinite", display:"inline-block" }}/>}
               {sm.label}
             </span>
-            {events.length>0 && <span className="pill pill-gray">{events.length} event{events.length!==1?"s":""}</span>}
-            <span style={{ fontSize:11, fontFamily:"monospace", color:"var(--subtle)" }}>/t/{t.slug}</span>
+            {events.length > 0 && (
+              <span style={{ fontSize:11, color:"var(--muted)", fontWeight:600 }}>
+                {events.length} event{events.length!==1?"s":""}
+              </span>
+            )}
+            <span style={{ fontSize:10, fontFamily:"monospace", color:"var(--subtle)", background:"var(--elevated)", padding:"2px 6px", borderRadius:3 }}>
+              /t/{t.slug}
+            </span>
           </div>
         </div>
       </div>
       <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }} onClick={e=>e.stopPropagation()}>
-        <button className="btn btn-primary btn-sm" onClick={onManage}>Manage</button>
+        <button className="btn btn-primary btn-sm" onClick={onManage} style={{ fontSize:11 }}>Manage</button>
         <div style={{ position:"relative" }}>
-          <button className="btn btn-ghost btn-sm" style={{ width:32, padding:0 }} onClick={onKebabToggle}>⋯</button>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ width:32, padding:0, fontSize:18, letterSpacing:1 }}
+            onClick={onKebabToggle}
+          >⋯</button>
           {showKebab && (
             <div className="kebab-menu" onClick={e=>e.stopPropagation()}>
               <button className="kebab-item" onClick={onManage}>✏ Edit / Manage</button>

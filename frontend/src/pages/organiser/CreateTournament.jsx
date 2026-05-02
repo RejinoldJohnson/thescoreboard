@@ -6,29 +6,33 @@ import DatePicker from "../../components/shared/DatePicker";
 
 // ── Sport definitions ─────────────────────────────────────────
 const SPORTS = [
-  { key: "table_tennis", label: "Table Tennis", icon: "🏓" },
-  { key: "badminton",    label: "Badminton",    icon: "🏸" },
-  { key: "cricket",      label: "Cricket",      icon: "🏏" },
-  { key: "football",     label: "Football",     icon: "⚽" },
+  { key: "table_tennis", label: "Table Tennis", abbrev: "TT" },
+  { key: "badminton",    label: "Badminton",    abbrev: "BD" },
+  { key: "cricket",      label: "Cricket",      abbrev: "CR" },
+  { key: "football",     label: "Football",     abbrev: "FB" },
 ];
 
 const SPORT_SUBFORMATS = {
   table_tennis: [
-    { key: "singles",      label: "Singles",       sub: "1 vs 1 — individual players compete",      participant_type: "individual",   config: {} },
-    { key: "doubles",      label: "Doubles",        sub: "2 vs 2 — pairs compete together",           participant_type: "doubles_pair", config: {} },
+    { key: "singles", label: "Singles", sub: "1 vs 1 — individual players compete", participant_type: "individual", config: {} },
+    { key: "doubles", label: "Doubles", sub: "2 vs 2 — pairs compete together",     participant_type: "doubles_pair", config: {} },
   ],
   badminton: [
-    { key: "singles",      label: "Singles",        sub: "1 vs 1 — individual players compete",      participant_type: "individual",   config: {} },
-    { key: "doubles",      label: "Doubles",        sub: "2 vs 2 — pairs compete together",           participant_type: "doubles_pair", config: {} },
-    { key: "mixed_doubles",label: "Mixed Doubles",  sub: "2 vs 2 — one male, one female per pair",    participant_type: "doubles_pair", config: { mixed: true } },
+    { key: "singles",       label: "Singles",       sub: "1 vs 1 — individual players compete",       participant_type: "individual",   config: {} },
+    { key: "doubles",       label: "Doubles",        sub: "2 vs 2 — pairs compete together",            participant_type: "doubles_pair", config: {} },
+    { key: "mixed_doubles", label: "Mixed Doubles",  sub: "2 vs 2 — one male, one female per pair",     participant_type: "doubles_pair", config: { mixed: true } },
   ],
   cricket: [
     {
       key: "standard", label: "Standard", sub: "Full team cricket — configure squad size below",
       participant_type: "team", config: { squad_size: 11 },
       configFields: [
-        { key: "squad_size", label: "Squad Size", type: "number", min: 6, max: 15, default: 11,
-          hint: "Total players per team including subs (e.g. 11 = playing XI)" },
+        {
+          key: "squad_size", label: "Squad Size", type: "stepper",
+          min: 6, max: 15, default: 11,
+          quickPicks: [7, 9, 11, 15],
+          hint: "Total players per team including substitutes",
+        },
       ],
     },
   ],
@@ -36,17 +40,17 @@ const SPORT_SUBFORMATS = {
     {
       key: "11_a_side", label: "11-a-side", sub: "Standard football — 11 players per team",
       participant_type: "team", config: { team_size: 11, substitutes: 5 },
-      configFields: [{ key: "substitutes", label: "Substitutes on bench", type: "number", min: 0, max: 7, default: 5 }],
+      configFields: [{ key: "substitutes", label: "Substitutes on bench", type: "stepper", min: 0, max: 7, default: 5, quickPicks: [0, 3, 5, 7] }],
     },
     {
       key: "7_a_side",  label: "7-a-side",  sub: "7 players per team on the field",
       participant_type: "team", config: { team_size: 7, substitutes: 3 },
-      configFields: [{ key: "substitutes", label: "Substitutes on bench", type: "number", min: 0, max: 5, default: 3 }],
+      configFields: [{ key: "substitutes", label: "Substitutes on bench", type: "stepper", min: 0, max: 5, default: 3, quickPicks: [0, 2, 3, 5] }],
     },
     {
       key: "5_a_side",  label: "5-a-side",  sub: "5 players per team — futsal / small-sided",
       participant_type: "team", config: { team_size: 5, substitutes: 2 },
-      configFields: [{ key: "substitutes", label: "Substitutes on bench", type: "number", min: 0, max: 3, default: 2 }],
+      configFields: [{ key: "substitutes", label: "Substitutes on bench", type: "stepper", min: 0, max: 3, default: 2, quickPicks: [0, 1, 2, 3] }],
     },
   ],
 };
@@ -57,12 +61,53 @@ const FORMATS = [
   { value: "round_robin",     label: "Round Robin",            sub: "Everyone plays everyone"        },
 ];
 
-// Step labels per tournament type
 const STEPS_SINGLE = ["Type", "Sport & Format", "Structure", "Details", "Review"];
 const STEPS_MULTI  = ["Type", "Sports",          "Details",   "Review"];
-
-// Maps internal step number → display step index (1-based) for multi-sport
 const MULTI_DISPLAY = { 1: 1, 2: 2, 4: 3, 5: 4 };
+
+// ── Stepper component ─────────────────────────────────────────
+function Stepper({ value, onChange, min, max, quickPicks }) {
+  const dec = () => onChange(Math.max(min, value - 1));
+  const inc = () => onChange(Math.min(max, value + 1));
+  const btnBase = {
+    width: 40, height: 40, border: "none", borderRadius: 0,
+    fontSize: 20, fontWeight: 700, lineHeight: 1, transition: "background .12s",
+  };
+  return (
+    <div>
+      <div style={{ display: "inline-flex", alignItems: "center", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+        <button type="button" onClick={dec} disabled={value <= min}
+          style={{ ...btnBase, background: value <= min ? "var(--elevated)" : "var(--surface)", color: value <= min ? "var(--subtle)" : "var(--ink)", cursor: value <= min ? "not-allowed" : "pointer" }}>
+          −
+        </button>
+        <div style={{ minWidth: 56, textAlign: "center", fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 900, color: "var(--ink)", padding: "0 12px", borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)", lineHeight: "40px" }}>
+          {value}
+        </div>
+        <button type="button" onClick={inc} disabled={value >= max}
+          style={{ ...btnBase, background: value >= max ? "var(--elevated)" : "var(--surface)", color: value >= max ? "var(--subtle)" : "var(--ink)", cursor: value >= max ? "not-allowed" : "pointer" }}>
+          +
+        </button>
+      </div>
+      {quickPicks?.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {quickPicks.map(v => (
+            <button key={v} type="button" onClick={() => onChange(v)}
+              style={{
+                padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                fontFamily: "var(--font-display)",
+                border: `1.5px solid ${value === v ? "var(--primary)" : "var(--border)"}`,
+                background: value === v ? "var(--primary-dim)" : "transparent",
+                color: value === v ? "var(--primary)" : "var(--muted)",
+                cursor: "pointer", transition: "all .12s",
+              }}>
+              {v}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CreateTournament() {
   const navigate = useNavigate();
@@ -81,7 +126,6 @@ export default function CreateTournament() {
   const [isMultiSport, setIsMultiSport] = useState(false);
   const [isPublished,  setIsPublished]  = useState(false);
 
-  // events array — each entry: { sport_key, subformat_key, participant_type, format, name, sport_config }
   const [events, setEvents] = useState([]);
 
   // ── Tournament details ───────────────────────────────────────
@@ -98,11 +142,9 @@ export default function CreateTournament() {
       .finally(() => setLoadingOrgs(false));
   }, []);
 
-  // ── Org gate handler ─────────────────────────────────────────
   const handleCreateOrgFromGate = async () => {
     if (!orgGateForm.name.trim()) return setOrgGateError("Organisation name is required.");
-    setOrgGateLoading(true);
-    setOrgGateError("");
+    setOrgGateLoading(true); setOrgGateError("");
     try {
       const autoState = CITY_STATE_MAP[orgGateForm.city] || "";
       const org = await createOrg({ name: orgGateForm.name.trim(), city: orgGateForm.city, state: autoState });
@@ -116,9 +158,8 @@ export default function CreateTournament() {
 
   // ── Sport helpers ────────────────────────────────────────────
   const sl = (k) => SPORTS.find(s => s.key === k)?.label || k;
-  const si = (k) => SPORTS.find(s => s.key === k)?.icon  || "🏅";
+  const si = (k) => SPORTS.find(s => s.key === k)?.abbrev || k.slice(0,2).toUpperCase();
   const fl = (v) => FORMATS.find(f => f.value === v)?.label || v;
-
   const getSubformat = (sportKey, sfKey) => SPORT_SUBFORMATS[sportKey]?.find(sf => sf.key === sfKey);
 
   const addSportEvent = (sportKey) => {
@@ -180,12 +221,8 @@ export default function CreateTournament() {
   const next = () => {
     if (!canAdvance()) return;
     setError("");
-    if (isMultiSport && step === 2) {
-      // Multi-sport: leave format as null — setup wizard fills it per sport
-      setStep(4);
-    } else {
-      setStep(s => Math.min(s + 1, 5));
-    }
+    if (isMultiSport && step === 2) setStep(4);
+    else setStep(s => Math.min(s + 1, 5));
   };
 
   const back = () => {
@@ -193,15 +230,12 @@ export default function CreateTournament() {
     else setStep(s => Math.max(s - 1, 1));
   };
 
-  // City selection auto-fills state
   const handleCityChange = (c) => {
     setCity(c);
     setState(c ? (CITY_STATE_MAP[c] || "") : "");
   };
 
   // ── Create tournament ────────────────────────────────────────
-  const normalizeParticipantType = (pt) => pt === "doubles_pair" ? "team" : pt;
-
   const handleCreate = async () => {
     if (!activeOrg)     return setError("No organisation found.");
     if (!name.trim())   return setError("Tournament name is required.");
@@ -219,27 +253,27 @@ export default function CreateTournament() {
         is_published:   isPublished,
         events: events.map(e => {
           if (isMultiSport) {
-            // Multi-sport: store a clean shell — no config injected.
-            // The organiser completes per-sport setup from the dashboard.
             return {
-              name:             sl(e.sport_key),   // just "Football", "Cricket", etc.
+              name:             sl(e.sport_key),
               sport_key:        e.sport_key,
               format:           null,
-              participant_type: "individual",       // backend placeholder; overwritten during setup
+              participant_type: "individual",
               sport_config:     null,
               squad_size:       null,
               team_size:        null,
               substitutes:      null,
             };
           }
-          // Single-sport: send exactly what the wizard collected
+          // Single-sport: send exactly what the wizard collected.
+          // participant_type is sent as-is — "doubles_pair" is a valid value
+          // and must NOT be normalized to "team".
           const sf      = getSubformat(e.sport_key, e.subformat_key);
           const evtName = e.name.trim() || `${sl(e.sport_key)}${sf ? " " + sf.label : ""}`;
           return {
             name:             evtName,
             sport_key:        e.sport_key,
             format:           e.format,
-            participant_type: normalizeParticipantType(e.participant_type),
+            participant_type: e.participant_type,
             sport_config:     { ...(sf?.config || {}), ...e.sport_config },
             squad_size:       e.sport_config?.squad_size  || null,
             team_size:        e.sport_config?.team_size   || null,
@@ -263,20 +297,18 @@ export default function CreateTournament() {
   };
 
   const selStyle = (selected) => ({
-    border:     `2px solid ${selected ? c.orange : c.border}`,
+    border:       `2px solid ${selected ? c.orange : c.border}`,
     borderRadius: 8,
-    background: selected ? c.dim : c.surface,
-    cursor:     "pointer",
-    transition: "all .15s",
-    padding:    "14px 16px",
+    background:   selected ? c.dim : c.surface,
+    cursor:       "pointer",
+    transition:   "all .15s",
+    padding:      "14px 16px",
     marginBottom: 8,
   });
 
-  // ── Progress bar ─────────────────────────────────────────────
   const displaySteps = isMultiSport ? STEPS_MULTI : STEPS_SINGLE;
   const displayStep  = isMultiSport ? (MULTI_DISPLAY[step] || 1) : step;
 
-  // ── Loading orgs ─────────────────────────────────────────────
   if (loadingOrgs) {
     return (
       <div style={{ minHeight: "100vh", background: c.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -288,7 +320,6 @@ export default function CreateTournament() {
   return (
     <div style={{ minHeight: "100vh", background: c.bg, fontFamily: "var(--font-body)" }}>
 
-      {/* ── NAV ── */}
       <header className="site-header">
         <div className="header-row">
           <div>
@@ -301,41 +332,30 @@ export default function CreateTournament() {
         </div>
       </header>
 
-      {/* ── ORG GATE — shown when user has no organisation ── */}
       {!activeOrg ? (
+        /* ── ORG GATE ── */
         <div style={{ maxWidth: 480, margin: "48px auto", padding: "0 24px" }} className="create-content">
           <div className="card" style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 52, marginBottom: 12 }}>🏢</div>
+            <div style={{ width: 52, height: 52, borderRadius: 8, background: "var(--elevated)", margin: "0 auto 12px" }} />
             <div className="card-title" style={{ marginBottom: 8 }}>One Quick Step First</div>
             <p style={{ fontSize: 13, color: c.muted, marginBottom: 28 }}>
-              First create an organisation to create a tournament.
+              Create an organisation before creating a tournament.
             </p>
-
             {orgGateError && (
               <div style={{ background: "var(--red-dim)", border: "1px solid rgba(229,62,62,0.3)", borderRadius: 6, padding: "10px 14px", marginBottom: 16, fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: .5, color: "var(--red)", textAlign: "left" }}>
                 {orgGateError}
               </div>
             )}
-
             <div className="field" style={{ textAlign: "left" }}>
               <label>Organisation Name *</label>
-              <input
-                className="input"
-                autoFocus
-                placeholder="e.g. Tenx Sports Club"
+              <input className="input" autoFocus placeholder="e.g. Tenx Sports Club"
                 value={orgGateForm.name}
                 onChange={e => setOrgGateForm(f => ({ ...f, name: e.target.value }))}
-                onKeyDown={e => e.key === "Enter" && handleCreateOrgFromGate()}
-              />
+                onKeyDown={e => e.key === "Enter" && handleCreateOrgFromGate()} />
             </div>
-
             <div style={{ textAlign: "left" }}>
-              <CitySelect
-                city={orgGateForm.city}
-                onChange={city => setOrgGateForm(f => ({ ...f, city }))}
-              />
+              <CitySelect city={orgGateForm.city} onChange={city => setOrgGateForm(f => ({ ...f, city }))} />
             </div>
-
             {orgGateForm.city && (
               <div className="field" style={{ textAlign: "left" }}>
                 <label>State</label>
@@ -343,16 +363,10 @@ export default function CreateTournament() {
                   style={{ color: c.muted, cursor: "default", background: "var(--elevated)" }} />
               </div>
             )}
-
-            <button
-              className="btn btn-gradient btn-lg"
-              style={{ width: "100%", marginTop: 8, fontSize: 13 }}
-              onClick={handleCreateOrgFromGate}
-              disabled={orgGateLoading}
-            >
+            <button className="btn btn-gradient btn-lg" style={{ width: "100%", marginTop: 8, fontSize: 13 }}
+              onClick={handleCreateOrgFromGate} disabled={orgGateLoading}>
               {orgGateLoading ? "Creating…" : "Create Organisation →"}
             </button>
-
             <div style={{ fontSize: 12, color: c.muted, marginTop: 16, cursor: "pointer" }}
               onClick={() => navigate("/organiser")}>
               ← Back to dashboard
@@ -366,7 +380,7 @@ export default function CreateTournament() {
             <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 24px" }} className="progress-container">
               <div style={{ display: "flex", alignItems: "flex-start" }}>
                 {displaySteps.map((label, i) => {
-                  const n     = i + 1;
+                  const n      = i + 1;
                   const pState = n < displayStep ? "done" : n === displayStep ? "active" : "pending";
                   return (
                     <div key={label} style={{ display: "flex", alignItems: "flex-start", flex: 1 }}>
@@ -409,12 +423,12 @@ export default function CreateTournament() {
                 <div className="card-title">Step 1 — Tournament Type</div>
                 <p style={{ fontSize: 13, color: c.muted, marginBottom: 18 }}>Run one sport or combine multiple sports under one event.</p>
                 {[
-                  { multi: false, icon: "🎯", title: "Single Sport", sub: "One sport bracket — e.g. Football 5-a-side" },
-                  { multi: true,  icon: "🏟️", title: "Multi Sport",  sub: "Multiple sports — e.g. Football + Cricket + TT" },
-                ].map(({ multi, icon, title, sub }) => (
+                  { multi: false, label: "1", title: "Single Sport", sub: "One sport bracket — e.g. Football 5-a-side" },
+                  { multi: true,  label: "M", title: "Multi Sport",  sub: "Multiple sports — e.g. Football + Cricket + TT" },
+                ].map(({ multi, label, title, sub }) => (
                   <div key={String(multi)} style={selStyle(isMultiSport === multi)}
                     onClick={() => { setIsMultiSport(multi); setEvents([]); }}>
-                    <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
+                    <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 900, marginBottom: 6, color: isMultiSport === multi ? c.orange : c.muted }}>{label}</div>
                     <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 800, textTransform: "uppercase", letterSpacing: -0.5, color: isMultiSport === multi ? c.orange : c.ink }}>
                       {title}
                     </div>
@@ -427,10 +441,7 @@ export default function CreateTournament() {
               </div>
             )}
 
-            {/* ── STEP 2: Sport selection ──
-                Single sport: full format/subformat/config selection
-                Multi sport:  sport grid only — no subformat, no config, no format
-            ── */}
+            {/* ── STEP 2: Sport selection ── */}
             {step === 2 && (
               <div className="card">
                 <div className="card-title">
@@ -438,11 +449,11 @@ export default function CreateTournament() {
                 </div>
                 <p style={{ fontSize: 13, color: c.muted, marginBottom: 18 }}>
                   {isMultiSport
-                    ? "Choose all sports for this tournament. Format and detailed settings can be configured after creation."
+                    ? "Choose all sports for this tournament. Formats and detailed settings are configured after creation."
                     : "Pick your sport and format."}
                 </p>
 
-                {/* Sport selection grid */}
+                {/* Sport grid */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }} className="sport-selector-grid">
                   {SPORTS.map(sport => {
                     const selected = events.some(e => e.sport_key === sport.key);
@@ -454,9 +465,11 @@ export default function CreateTournament() {
                           width: 36, height: 36, borderRadius: 8, flexShrink: 0,
                           background: selected ? c.orange : c.surface,
                           border: `1px solid ${selected ? c.orange : c.border}`,
-                          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 900,
+                          color: selected ? "#fff" : c.ink,
                         }}>
-                          {sport.icon}
+                          {sport.abbrev}
                         </div>
                         <span style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: -0.5, color: selected ? c.orange : c.ink }}>
                           {sport.label}
@@ -466,7 +479,7 @@ export default function CreateTournament() {
                   })}
                 </div>
 
-                {/* Single sport only: subformat + config pickers */}
+                {/* Single sport: subformat + config */}
                 {!isMultiSport && events.map((ev, i) => {
                   const subformats = SPORT_SUBFORMATS[ev.sport_key] || [];
                   return (
@@ -511,16 +524,17 @@ export default function CreateTournament() {
                             </div>
                             {sf.configFields.map(field => (
                               <div key={field.key} style={{ marginBottom: 10 }}>
-                                <label style={{ display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: c.muted, marginBottom: 6 }}>
+                                <label style={{ display: "block", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: c.muted, marginBottom: 8 }}>
                                   {field.label}
                                 </label>
-                                <input
-                                  type={field.type} min={field.min} max={field.max}
+                                <Stepper
                                   value={ev.sport_config?.[field.key] ?? field.default}
-                                  onChange={e => updateEventConfig(i, field.key, parseInt(e.target.value) || field.default)}
-                                  className="input" style={{ width: 100 }}
+                                  onChange={v => updateEventConfig(i, field.key, v)}
+                                  min={field.min}
+                                  max={field.max}
+                                  quickPicks={field.quickPicks}
                                 />
-                                {field.hint && <div style={{ fontSize: 11, color: c.muted, marginTop: 4 }}>{field.hint}</div>}
+                                {field.hint && <div style={{ fontSize: 11, color: c.muted, marginTop: 6 }}>{field.hint}</div>}
                               </div>
                             ))}
                           </div>
@@ -530,7 +544,7 @@ export default function CreateTournament() {
                   );
                 })}
 
-                {/* Multi-sport: show selected sport summary */}
+                {/* Multi-sport: selected sports summary */}
                 {isMultiSport && events.length > 0 && (
                   <div style={{ background: "var(--elevated)", border: `1px solid ${c.border}`, borderRadius: 8, padding: "12px 16px", marginBottom: 16 }}>
                     <div style={{ fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: c.muted, marginBottom: 8 }}>
@@ -544,7 +558,7 @@ export default function CreateTournament() {
                       ))}
                     </div>
                     <div style={{ fontSize: 11, color: c.muted, marginTop: 10 }}>
-                      Sport formats and match structure can be configured from the tournament dashboard after creation.
+                      Formats and detailed settings are configured from the tournament dashboard after creation.
                     </div>
                   </div>
                 )}
@@ -597,7 +611,9 @@ export default function CreateTournament() {
             {/* ── STEP 4: Details ── */}
             {step === 4 && (
               <div className="card">
-                <div className="card-title">Step 4 — Tournament Details</div>
+                <div className="card-title">
+                  {isMultiSport ? "Step 3 — Tournament Details" : "Step 4 — Tournament Details"}
+                </div>
                 <p style={{ fontSize: 13, color: c.muted, marginBottom: 18 }}>Name your tournament and add location info.</p>
 
                 <div className="field">
@@ -627,18 +643,17 @@ export default function CreateTournament() {
                   <DatePicker label="Start Date" value={startDate} onChange={setStartDate} placeholder="Pick tournament start date" />
                 </div>
 
-                {/* Visibility */}
                 <div className="field">
                   <label>Visibility</label>
                   <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                     {[
-                      { value: false, icon: "🔒", label: "Private", sub: "Accessible via direct link only" },
-                      { value: true,  icon: "🌐", label: "Public",  sub: "Listed on tournament discovery" },
+                      { value: false, label: "Private", sub: "Accessible via direct link only" },
+                      { value: true,  label: "Public",  sub: "Listed on tournament discovery" },
                     ].map(opt => (
                       <div key={String(opt.value)}
                         style={{ ...selStyle(isPublished === opt.value), flex: 1, padding: "12px 14px", marginBottom: 0, textAlign: "center" }}
                         onClick={() => setIsPublished(opt.value)}>
-                        <div style={{ fontSize: 20, marginBottom: 4 }}>{opt.icon}</div>
+                        <div style={{ marginBottom: 4 }}></div>
                         <div style={{ fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: isPublished === opt.value ? c.orange : c.ink }}>
                           {opt.label}
                         </div>
@@ -678,14 +693,16 @@ export default function CreateTournament() {
             {/* ── STEP 5: Review ── */}
             {step === 5 && (
               <div className="card">
-                <div className="card-title">Step 5 — Review & Create</div>
+                <div className="card-title">
+                  {isMultiSport ? "Step 4 — Review & Create" : "Step 5 — Review & Create"}
+                </div>
                 <p style={{ fontSize: 13, color: c.muted, marginBottom: 20 }}>Double-check everything before creating.</p>
 
                 {[
                   ["Organisation", activeOrg?.name],
                   ["Name",         name],
                   ["Type",         isMultiSport ? "Multi-Sport" : "Single Sport"],
-                  ["Visibility",   isPublished ? "🌐 Public" : "🔒 Private"],
+                  ["Visibility",   isPublished ? "Public" : "Private"],
                   venue     && ["Venue",      venue],
                   city      && ["City",       `${city}, ${state}`],
                   startDate && ["Start Date", startDate],
@@ -700,7 +717,23 @@ export default function CreateTournament() {
                   <div style={{ fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: c.orange, marginBottom: 12 }}>
                     Events ({events.length})
                   </div>
+
                   {events.map((ev, i) => {
+                    if (isMultiSport) {
+                      // Multi-sport: organiser hasn't configured anything yet.
+                      // Don't show participant type or format — it's all "setup after creation".
+                      return (
+                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: i < events.length - 1 ? `1px solid ${c.border}` : "none" }}>
+                          <span style={{ fontSize: 22 }}>{si(ev.sport_key)}</span>
+                          <span style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: -0.5, color: c.ink, flex: 1 }}>
+                            {sl(ev.sport_key)}
+                          </span>
+                          <span className="pill pill-gray">Setup after creation</span>
+                        </div>
+                      );
+                    }
+
+                    // Single-sport: show full configured details
                     const sf        = getSubformat(ev.sport_key, ev.subformat_key);
                     const evName    = ev.name.trim() || `${sl(ev.sport_key)} ${sf?.label || ""}`.trim();
                     const pType     = sf?.participant_type || ev.participant_type;
@@ -724,14 +757,15 @@ export default function CreateTournament() {
                           </div>
                         </div>
                         <span style={{ fontSize: 11, color: c.muted, textAlign: "right", flexShrink: 0, marginLeft: 8 }}>
-                          {ev.format ? fl(ev.format) : "Setup after creation"}
+                          {ev.format ? fl(ev.format) : "—"}
                         </span>
                       </div>
                     );
                   })}
+
                   {isMultiSport && (
                     <div style={{ fontSize: 11, color: c.muted, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${c.border}` }}>
-                      Sport formats and detailed settings can be configured from the tournament dashboard.
+                      ℹ️ Sport formats and participant settings are configured from the tournament dashboard after creation.
                     </div>
                   )}
                 </div>

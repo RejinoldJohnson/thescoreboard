@@ -14,8 +14,19 @@ from app.routers import auth, organizations, tournaments, events, players, match
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Dev convenience — Alembic handles migrations in prod
-Base.metadata.create_all(bind=engine)
+# Run alembic migrations on startup (handles prod deploys automatically)
+try:
+    from alembic.config import Config
+    from alembic import command as alembic_command
+    import os
+    alembic_cfg = Config(os.path.join(os.path.dirname(__file__), "..", "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", os.path.join(os.path.dirname(__file__), "..", "alembic"))
+    alembic_command.upgrade(alembic_cfg, "head")
+    logger.info("Alembic migrations applied.")
+except Exception as _mig_err:
+    logger.warning(f"Alembic migration skipped: {_mig_err}")
+    # Fall back to create_all for local dev without a DB URL
+    Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title=f"{settings.APP_NAME} API", version=settings.VERSION)
 

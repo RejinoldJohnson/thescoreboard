@@ -160,7 +160,7 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
                 border:     serving === pos ? `2px solid ${c.orange}` : `2px solid ${c.border}`,
                 transition:"all .15s",
               }}>
-                {serving === pos && "🏓 "}{pos === 1 ? p1Name : p2Name}
+                {pos === 1 ? p1Name : p2Name}
               </button>
             ))}
           </div>
@@ -180,7 +180,7 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
                   color: serving === side.pos && !isDone ? c.orange : c.muted,
                   marginBottom:8, transition:"color .15s",
                 }}>
-                  {serving === side.pos && !isDone && "🏓 "}{side.name}
+                  {side.name}
                 </div>
                 <div style={{
                   fontFamily:"'Unbounded',sans-serif",
@@ -211,7 +211,7 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
         )}
         {matchWinner && (
           <div style={{ textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:16, fontWeight:900, textTransform:"uppercase", letterSpacing:2, color:c.gold }}>
-            🏆 {matchWinner === 1 ? p1Name : p2Name} Wins!
+            {matchWinner === 1 ? p1Name : p2Name} Wins!
           </div>
         )}
 
