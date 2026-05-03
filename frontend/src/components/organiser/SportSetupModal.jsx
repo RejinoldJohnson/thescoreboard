@@ -21,7 +21,11 @@ const SPORT_SETUP = {
     teamConfig: null,
     scoring: [
       { key: "sets_to_win",     label: "Sets to Win",    type: "select",
-        options: [{ v: 2, label: "Best of 3 (first to 2)" }, { v: 3, label: "Best of 5 (first to 3)" }],
+        options: [
+          { v: 1, label: "1 set"  },
+          { v: 2, label: "3 sets (first to 2)"  },
+          { v: 3, label: "5 sets (first to 3)"  },
+        ],
         default: 2 },
       { key: "points_per_set", label: "Points per Set",  type: "select",
         options: [{ v: 11, label: "11 points (standard)" }, { v: 21, label: "21 points" }],
@@ -39,7 +43,11 @@ const SPORT_SETUP = {
     teamConfig: null,
     scoring: [
       { key: "sets_to_win",     label: "Sets to Win",   type: "select",
-        options: [{ v: 2, label: "Best of 3 (first to 2)" }, { v: 3, label: "Best of 5 (first to 3)" }],
+        options: [
+          { v: 1, label: "Best of 1 (single set)" },
+          { v: 2, label: "Best of 3 (first to 2)" },
+          { v: 3, label: "Best of 5 (first to 3)" },
+        ],
         default: 2 },
       { key: "points_per_set", label: "Points per Set", type: "number", default: 21, min: 11, max: 30 },
     ],

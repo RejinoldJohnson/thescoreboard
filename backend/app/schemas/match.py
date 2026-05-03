@@ -69,3 +69,4 @@ class ScoreUpdate(BaseModel):
 class MatchStatusUpdate(BaseModel):
     status: str  # scheduled | live | done
     table_number: Optional[int] = None
+    sets_to_win: Optional[int] = None

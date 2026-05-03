@@ -46,7 +46,9 @@ export const createEvent = (tId, d) => request("POST", `/tournaments/${tId}/even
 export const getEvents = (tId) => request("GET", `/tournaments/${tId}/events`);
 export const updateEvent = (eId, d) => request("PATCH", `/events/${eId}`, d);
 export const configureEvent = (eId, d) => request("POST", `/events/${eId}/configure`, d);
-export const generateFixtures = (eId) => request("POST", `/orgs/events/${eId}/generate-fixtures`);
+export const generateFixtures = (eId, thirdPlace = false) =>
+  request("POST", `/orgs/events/${eId}/generate-fixtures${thirdPlace ? "?third_place=true" : ""}`);
+export const getStandings = (eId) => request("GET", `/orgs/events/${eId}/standings`);
 
 // Players
 export const createPlayer = (d, orgId) => request("POST", `/players/${orgId ? `?org_id=${orgId}` : ""}`, d);
@@ -58,6 +60,8 @@ export const addPlayerToEvent = (eId, pId, gId, seed) => {
 };
 export const getEventParticipants = (eId) => request("GET", `/players/events/${eId}/participants`);
 export const removePlayerFromEvent = (eId, pId) => request("DELETE", `/players/events/${eId}/participants/${pId}`);
+export const assignPlayerGroup = (eId, pId, gId) =>
+  request("PATCH", `/players/events/${eId}/participants/${pId}${gId != null ? `?group_id=${gId}` : ""}`);
 export const createGroup = (eId, name) => request("POST", `/players/events/${eId}/groups?name=${encodeURIComponent(name)}`);
 
 // Matches

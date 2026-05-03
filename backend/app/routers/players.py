@@ -175,6 +175,32 @@ def get_event_participants(event_id: int, db: Session = Depends(get_db)):
     return result
 
 
+@router.patch("/events/{event_id}/participants/{player_id}")
+def assign_player_group(
+    event_id: int,
+    player_id: int,
+    group_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Set (or clear) a participant's group assignment."""
+    ep = db.query(EventParticipant).filter(
+        EventParticipant.event_id == event_id,
+        EventParticipant.player_id == player_id,
+    ).first()
+    if not ep:
+        raise HTTPException(status_code=404, detail="Player not in this event")
+    if group_id is not None:
+        group = db.query(Group).filter(
+            Group.group_id == group_id, Group.event_id == event_id
+        ).first()
+        if not group:
+            raise HTTPException(status_code=404, detail="Group not found in this event")
+    ep.group_id = group_id
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/events/{event_id}/participants/{player_id}")
 def remove_player_from_event(
     event_id: int,

@@ -192,6 +192,10 @@ def update_match_status(
     match.status = data.status
     if data.table_number is not None:
         match.table_number = data.table_number
+    if data.sets_to_win is not None:
+        ls = dict(match.live_state or {})
+        ls["sets_to_win"] = data.sets_to_win
+        match.live_state = ls
     if data.status == "live" and not match.started_at:
         match.started_at = datetime.now(timezone.utc)
     elif data.status == "done" and not match.finished_at:
@@ -210,7 +214,10 @@ def update_score(
     match = _load_match(match_id, db)
     event  = db.query(Event).filter(Event.event_id == match.event_id).first()
     engine = get_sport_engine(event.sport_key)
-    config = event.sport_config or engine.get_default_config()
+    config = dict(event.sport_config or engine.get_default_config())
+    # Per-match sets_to_win overrides event-wide default (set during fixture generation)
+    if match.live_state and "sets_to_win" in match.live_state:
+        config["sets_to_win"] = match.live_state["sets_to_win"]
 
     sport = event.sport_key
 
@@ -229,30 +236,27 @@ def update_score(
         current_set.score_p1 = data.score_p1
         current_set.score_p2 = data.score_p2
 
-        # Check instant win (table tennis only)
-        instant_winner = None
-        if hasattr(engine, "check_instant_win"):
-            instant_winner = engine.check_instant_win(data.score_p1, data.score_p2, config)
+        # A set can be won either by reaching the normal point target (e.g. 11)
+        # or by the 7-0 early-win rule.  Both are treated identically: the SET
+        # is marked complete and we check whether enough sets have been won to
+        # decide the match.  The 7-0 rule NEVER ends the match on its own.
+        set_winner = engine.check_set_winner(data.score_p1, data.score_p2, config)
+        if not set_winner and hasattr(engine, "check_instant_win"):
+            set_winner = engine.check_instant_win(data.score_p1, data.score_p2, config)
 
-        if instant_winner:
+        if set_winner:
             current_set.is_complete     = True
-            current_set.winner_position = instant_winner
-            _finish_match(match, instant_winner)
-        else:
-            set_winner = engine.check_set_winner(data.score_p1, data.score_p2, config)
-            if set_winner:
-                current_set.is_complete     = True
-                current_set.winner_position = set_winner
-                sets_won = {1: 0, 2: 0}
-                for s in match.sets:
-                    if s.is_complete and s.winner_position:
-                        sets_won[s.winner_position] += 1
-                match_winner = engine.check_match_winner(sets_won[1], sets_won[2], config)
-                if match_winner:
-                    _finish_match(match, match_winner)
-                else:
-                    next_num = max(s.set_number for s in match.sets) + 1
-                    db.add(MatchSet(match_id=match.match_id, set_number=next_num))
+            current_set.winner_position = set_winner
+            sets_won = {1: 0, 2: 0}
+            for s in match.sets:
+                if s.is_complete and s.winner_position:
+                    sets_won[s.winner_position] += 1
+            match_winner = engine.check_match_winner(sets_won[1], sets_won[2], config)
+            if match_winner:
+                _finish_match(match, match_winner)
+            else:
+                next_num = max(s.set_number for s in match.sets) + 1
+                db.add(MatchSet(match_id=match.match_id, set_number=next_num))
 
         # Update aggregate scores (sets won)
         parts = sorted(match.participants, key=lambda p: p.position)
@@ -463,11 +467,12 @@ def rematch(
     user: User = Depends(get_current_user),
 ):
     match = _load_match(match_id, db)
+    preserved_sets = (match.live_state or {}).get("sets_to_win")
     match.status         = "scheduled"
     match.started_at     = None
     match.finished_at    = None
     match.current_server = None
-    match.live_state     = None
+    match.live_state     = {"sets_to_win": preserved_sets} if preserved_sets else None
     for p in match.participants:
         p.score     = 0
         p.is_winner = False
