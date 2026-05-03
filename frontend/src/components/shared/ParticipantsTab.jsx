@@ -12,14 +12,16 @@
 import { useState } from "react";
 
 // ── Individual Players ────────────────────────────────────────
-export function IndividualTab({ event, onAddPlayer, onCreateGroup, flash }) {
-  const [pForm,     setPForm]     = useState({ name: "", age: "", gender: "Male" });
+export function IndividualTab({ event, onAddPlayer, onCreateGroup, onAssignGroup, onRemovePlayer, flash }) {
+  const isGroupKnockout = event.format === "group_knockout";
+
+  const [pForm,     setPForm]     = useState({ name: "", age: "", gender: "Male", group_id: "" });
   const [groupName, setGroupName] = useState("");
 
   const handleAdd = () => {
     if (!pForm.name.trim()) return flash("Name required.");
-    onAddPlayer(pForm);
-    setPForm({ name: "", age: "", gender: "Male" });
+    onAddPlayer({ ...pForm, group_id: pForm.group_id || null });
+    setPForm({ name: "", age: "", gender: "Male", group_id: "" });
   };
 
   const handleGroup = () => {
@@ -27,6 +29,10 @@ export function IndividualTab({ event, onAddPlayer, onCreateGroup, flash }) {
     onCreateGroup(groupName.trim());
     setGroupName("");
   };
+
+  // All enrolled players (grouped + ungrouped)
+  const allGrouped = (event.groups || []).flatMap(g => (g.players || []));
+  const ungrouped  = event.ungrouped_players || [];
 
   return (
     <div>
@@ -37,58 +43,116 @@ export function IndividualTab({ event, onAddPlayer, onCreateGroup, flash }) {
           <input className="input" placeholder="Player name" style={{ flex: 2, minWidth: 140 }}
             value={pForm.name} onChange={e => setPForm(f => ({ ...f, name: e.target.value }))}
             onKeyDown={e => e.key === "Enter" && handleAdd()} />
-          <input className="input" placeholder="Age" type="number" style={{ width: 80 }}
+          <input className="input" placeholder="Age" type="number" style={{ width: 72 }}
             value={pForm.age} onChange={e => setPForm(f => ({ ...f, age: e.target.value }))} />
-          <select className="input" style={{ width: 110 }} value={pForm.gender}
+          <select className="input" style={{ width: 100 }} value={pForm.gender}
             onChange={e => setPForm(f => ({ ...f, gender: e.target.value }))}>
             <option>Male</option><option>Female</option>
           </select>
+          {isGroupKnockout && (event.groups || []).length > 0 && (
+            <select className="input" style={{ width: 130 }} value={pForm.group_id}
+              onChange={e => setPForm(f => ({ ...f, group_id: e.target.value }))}>
+              <option value="">No group</option>
+              {event.groups.map(g => <option key={g.group_id} value={g.group_id}>{g.name}</option>)}
+            </select>
+          )}
           <button className="btn btn-primary" onClick={handleAdd}>Add</button>
         </div>
       </div>
 
-      {/* Groups */}
-      <div className="card">
-        <div className="card-title">Groups</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <input className="input" placeholder="Group name (e.g. Group A)" style={{ flex: 1 }}
-            value={groupName} onChange={e => setGroupName(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handleGroup()} />
-          <button className="btn btn-primary" onClick={handleGroup}>Create</button>
-        </div>
-
-        {event.groups?.map(g => (
-          <div key={g.group_id} className="group-box">
-            <div className="group-title">
-              {g.name}
-              <span style={{ fontWeight: 400, fontSize: 11, color: "var(--muted)", textTransform: "none", marginLeft: 6 }}>
-                ({g.players?.length || 0} players)
-              </span>
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap" }}>
-              {(g.players || []).map(p => (
-                <span key={p.player_id} className="player-chip">{p.name}</span>
-              ))}
-            </div>
+      {/* Groups — only shown for group_knockout */}
+      {isGroupKnockout && (
+        <div className="card">
+          <div className="card-title">Groups</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+            <input className="input" placeholder="Group name (e.g. Group A)" style={{ flex: 1 }}
+              value={groupName} onChange={e => setGroupName(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleGroup()} />
+            <button className="btn btn-primary" onClick={handleGroup}>Create Group</button>
           </div>
-        ))}
 
-        {event.ungrouped_players?.length > 0 && (
-          <div className="group-box" style={{ marginTop: 8 }}>
-            <div className="group-title" style={{ color: "var(--muted)" }}>
-              Ungrouped ({event.ungrouped_players.length})
+          {(event.groups || []).length === 0 && (
+            <div style={{ fontSize: 13, color: "var(--muted)", padding: "8px 0" }}>
+              Create groups first, then assign players to them.
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap" }}>
-              {event.ungrouped_players.map(p => (
-                <span key={p.player_id} className="player-chip"
-                  style={{ background: "var(--gold-dim)", color: "var(--gold)", borderColor: "rgba(255,204,0,0.25)" }}>
+          )}
+
+          {(event.groups || []).map(g => (
+            <div key={g.group_id} className="group-box" style={{ marginBottom: 10 }}>
+              <div className="group-title">
+                {g.name}
+                <span style={{ fontWeight: 400, fontSize: 11, color: "var(--muted)", textTransform: "none", marginLeft: 6 }}>
+                  ({(g.players || []).length} players)
+                </span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {(g.players || []).map(p => (
+                  <span key={p.player_id} className="player-chip" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    {p.name}
+                    <button onClick={() => onAssignGroup(p.player_id, null)}
+                      style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
+                  </span>
+                ))}
+                {(g.players || []).length === 0 && (
+                  <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>Empty</span>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {ungrouped.length > 0 && (
+            <div className="group-box" style={{ marginTop: 8, borderColor: "rgba(255,204,0,0.25)", background: "var(--gold-dim)" }}>
+              <div className="group-title" style={{ color: "var(--gold)" }}>
+                Unassigned Players ({ungrouped.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {ungrouped.map(p => (
+                  <div key={p.player_id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", minWidth: 100 }}>{p.name}</span>
+                    {(event.groups || []).length > 0 ? (
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {event.groups.map(g => (
+                          <button key={g.group_id} className="btn btn-sm btn-outline"
+                            style={{ fontSize: 11, padding: "3px 10px" }}
+                            onClick={() => onAssignGroup(p.player_id, g.group_id)}>
+                            → {g.name}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 11, color: "var(--muted)" }}>Create a group to assign</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Player list — for non-group formats */}
+      {!isGroupKnockout && (
+        <div className="card">
+          <div className="card-title">
+            Players ({allGrouped.length + ungrouped.length})
+          </div>
+          {allGrouped.length === 0 && ungrouped.length === 0 ? (
+            <div style={{ fontSize: 13, color: "var(--muted)" }}>No players added yet.</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {[...allGrouped, ...ungrouped].map(p => (
+                <span key={p.player_id} className="player-chip" style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   {p.name}
+                  {onRemovePlayer && (
+                    <button onClick={() => onRemovePlayer(p.player_id)}
+                      style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
+                  )}
                 </span>
               ))}
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

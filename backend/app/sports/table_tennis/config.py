@@ -9,11 +9,11 @@ DEFAULT_CONFIG = {
     "deuce_starts_at": 10,   # deuce kicks in when both reach 10
     "serve_interval": 2,     # serve switches every 2 points
     "serve_interval_deuce": 1,  # every 1 point at deuce
-    "instant_win": {          # 7-0 instant match win (skip remaining sets)
+    "instant_win": {          # 7-0 wins the SET early (does not skip remaining sets)
         "enabled": True,
         "score": 7,
         "opponent_score": 0,
     },
 }
 
-VALID_SETS_TO_WIN = [2, 3]  # best of 3 or best of 5
+VALID_SETS_TO_WIN = [1, 2, 3]  # BO1, BO3, BO5  (sets_to_win = sets needed to win)
