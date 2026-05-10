@@ -42,14 +42,16 @@ export default function EventWorkspace() {
   const { tournamentId, eventId } = useParams();
   const navigate = useNavigate();
 
-  const [data,        setData]        = useState(null);
-  const [user,        setUser]        = useState(null);
-  const [tab,         setTab]         = useState("overview");
-  const [msg,         setMsg]         = useState("");
-  const [activeMatch, setActiveMatch] = useState(null);
-  const [eventTeams,  setEventTeams]  = useState([]);
-  const [standings,   setStandings]   = useState(null);
-  const [thirdPlace,  setThirdPlace]  = useState(false);
+  const [data,               setData]               = useState(null);
+  const [user,               setUser]               = useState(null);
+  const [tab,                setTab]                = useState("overview");
+  const [msg,                setMsg]                = useState("");
+  const [activeMatch,        setActiveMatch]        = useState(null);
+  const [eventTeams,         setEventTeams]         = useState([]);
+  const [standings,          setStandings]          = useState(null);
+  const [thirdPlace,         setThirdPlace]         = useState(false);
+  const [numGroups,          setNumGroups]          = useState(4);
+  const [qualifiersPerGroup, setQualifiersPerGroup] = useState(2);
 
   const flash = (txt) => { setMsg(txt); setTimeout(() => setMsg(""), 3000); };
 
@@ -216,6 +218,26 @@ export default function EventWorkspace() {
     catch (e) { flash("Error: " + e.message); }
   };
 
+  const handleGenerateGroups = async () => {
+    try {
+      const r = await apiFetch(`/events/${currentEvent.event_id}/generate-groups?num_groups=${numGroups}`, { method: "POST" });
+      loadData();
+      flash(`${r.groups_created} groups created, ${r.matches_created} matches generated!`);
+    } catch (e) { flash("Error: " + e.message); }
+  };
+
+  const handleGenerateKnockout = async () => {
+    try {
+      const r = await apiFetch(
+        `/events/${currentEvent.event_id}/generate-knockout-from-groups?qualifiers_per_group=${qualifiersPerGroup}&third_place=${thirdPlace}`,
+        { method: "POST" }
+      );
+      loadData();
+      const warn = r.warning ? ` ⚠ ${r.warning}` : "";
+      flash(`Knockout bracket created — ${r.matches_created} matches, ${r.qualifiers} qualifiers.${warn}`);
+    } catch (e) { flash("Error: " + e.message); }
+  };
+
   const handleMatchAction = async (matchId, action) => {
     try {
       if      (action === "start")   { await updateMatchStatus(matchId, { status: "live" }); setActiveMatch(matchId); }
@@ -366,46 +388,66 @@ export default function EventWorkspace() {
         {/* ══ FIXTURES ══════════════════════════════════════════ */}
         {tab === "fixtures" && (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-              <span style={{ fontFamily: "var(--font-display)", fontSize: 13, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
-                {currentEvent.match_count} matches
-              </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                {currentEvent.format === "direct_knockout" && (
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}>
-                    <input type="checkbox" checked={thirdPlace} onChange={e => setThirdPlace(e.target.checked)} style={{ cursor: "pointer" }} />
-                    3rd place match
-                  </label>
-                )}
-                <button className="btn btn-primary" onClick={handleGenerateFixtures}>Generate Fixtures</button>
-              </div>
-            </div>
-            {!currentEvent.matches?.length ? (
-              <div className="empty">
-                <div className="empty-icon"></div>
-                {currentEvent.format === "group_knockout"
-                  ? "Assign players to groups first, then generate fixtures."
-                  : isTeam || isDoubles
-                  ? `Add ${isDoubles ? "pairs" : "teams"}, then generate fixtures.`
-                  : "Add players, then generate fixtures."}
-              </div>
-            ) : currentEvent.format === "direct_knockout" ? (
-              <KnockoutBracket matches={currentEvent.matches} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />
+            {currentEvent.format === "group_knockout" ? (
+              <GroupKnockoutFixtures
+                event={currentEvent}
+                numGroups={numGroups}
+                setNumGroups={setNumGroups}
+                qualifiersPerGroup={qualifiersPerGroup}
+                setQualifiersPerGroup={setQualifiersPerGroup}
+                thirdPlace={thirdPlace}
+                setThirdPlace={setThirdPlace}
+                onGenerateGroups={handleGenerateGroups}
+                onGenerateKnockout={handleGenerateKnockout}
+                onAction={handleMatchAction}
+                onSetConfig={handleSetConfig}
+                sportKey={currentEvent.sport_key}
+              />
             ) : (
               <>
-                {currentEvent.groups?.map(g => {
-                  const gm = currentEvent.matches.filter(m => m.group_id === g.group_id);
-                  if (!gm.length) return null;
-                  return (
-                    <div key={g.group_id} style={{ marginBottom: 20 }}>
-                      <div className="section-label">{g.name} · {gm.length} matches</div>
-                      {gm.map(m => <MatchCard key={m.match_id} match={m} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />)}
-                    </div>
-                  );
-                })}
-                {currentEvent.matches.filter(m => !m.group_id).map(m => (
-                  <MatchCard key={m.match_id} match={m} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />
-                ))}
+                {/* ── Control bar (non-group_knockout) ── */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+                  <span style={{ fontFamily: "var(--font-display)", fontSize: 13, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+                    {currentEvent.match_count} matches
+                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    {currentEvent.format === "direct_knockout" && (
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}>
+                        <input type="checkbox" checked={thirdPlace} onChange={e => setThirdPlace(e.target.checked)} style={{ cursor: "pointer" }} />
+                        3rd place match
+                      </label>
+                    )}
+                    <button className="btn btn-primary" onClick={handleGenerateFixtures}>Generate Fixtures</button>
+                  </div>
+                </div>
+
+                {/* ── Match display ── */}
+                {!currentEvent.matches?.length ? (
+                  <div className="empty">
+                    <div className="empty-icon"></div>
+                    {isTeam || isDoubles
+                      ? `Add ${isDoubles ? "pairs" : "teams"}, then generate fixtures.`
+                      : "Add players, then generate fixtures."}
+                  </div>
+                ) : currentEvent.format === "direct_knockout" ? (
+                  <KnockoutBracket matches={currentEvent.matches} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />
+                ) : (
+                  <>
+                    {currentEvent.groups?.map(g => {
+                      const gm = currentEvent.matches.filter(m => m.group_id === g.group_id);
+                      if (!gm.length) return null;
+                      return (
+                        <div key={g.group_id} style={{ marginBottom: 20 }}>
+                          <div className="section-label">{g.name} · {gm.length} matches</div>
+                          {gm.map(m => <MatchCard key={m.match_id} match={m} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />)}
+                        </div>
+                      );
+                    })}
+                    {currentEvent.matches.filter(m => !m.group_id).map(m => (
+                      <MatchCard key={m.match_id} match={m} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />
+                    ))}
+                  </>
+                )}
               </>
             )}
           </div>
@@ -487,7 +529,7 @@ export default function EventWorkspace() {
         <TTScorer match={activeMatchData} config={currentEvent.sport_config || {}}
           onScore={(s1, s2, srv) => handleScore(activeMatch, s1, s2, srv)}
           onUndoSet={() => { undoSet(activeMatch).then(loadData); }}
-          onClose={() => { setActiveMatch(null); loadData(); if (showStandings) loadStandings(); }} />
+          onClose={() => { setActiveMatch(null); loadData(); loadStandings(); }} />
       )}
       {activeMatch && activeMatchData && currentEvent.sport_key === "badminton" && (
         <BadmintonScorer match={activeMatchData} config={currentEvent.sport_config || {}}
@@ -511,18 +553,226 @@ export default function EventWorkspace() {
   );
 }
 
+// ── GroupKnockoutFixtures ─────────────────────────────────────
+// Step-by-step UI for the group + knockout format.
+// Group stage = single-elimination bracket per group (with byes).
+// Championship stage = knockout bracket seeded from group winners/runners-up.
+function GroupKnockoutFixtures({
+  event, numGroups, setNumGroups, qualifiersPerGroup, setQualifiersPerGroup,
+  thirdPlace, setThirdPlace, onGenerateGroups, onGenerateKnockout,
+  onAction, onSetConfig, sportKey,
+}) {
+  const allMatches      = event.matches || [];
+  const groupMatches    = allMatches.filter(m => m.group_id);
+  const knockoutMatches = allMatches.filter(m => !m.group_id);
+  const hasGroups       = groupMatches.length > 0;
+  const hasKnockout     = knockoutMatches.length > 0;
+
+  // "Group stage complete" = every group has a DONE final match
+  const allGroupFinalsDone = (event.groups?.length > 0) && event.groups.every(g =>
+    groupMatches.some(m => m.group_id === g.group_id && m.stage === "final" && m.status === "done")
+  );
+
+  const doneGroup  = groupMatches.filter(m => m.status === "done").length;
+  const doneKnock  = knockoutMatches.filter(m => m.status === "done").length;
+
+  const NumInput = ({ label, value, setter, min, max }) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: "var(--muted)" }}>{label}</span>
+      <input
+        type="number" value={value} min={min} max={max}
+        onChange={e => setter(Math.max(min, Math.min(max, parseInt(e.target.value) || min)))}
+        style={{ width: 52, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)", fontSize: 14, fontWeight: 700, textAlign: "center" }}
+      />
+    </div>
+  );
+
+  // ── Step 1: no groups yet ─────────────────────────────────
+  if (!hasGroups) {
+    return (
+      <div>
+        <div className="card" style={{ marginBottom: 20, padding: 20 }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, color: "var(--primary)", marginBottom: 4 }}>
+            Step 1 — Set up Groups
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>
+            Players are divided randomly into groups. Each group plays a single-elimination bracket (with byes if needed). Group winner and runner-up advance to the championship bracket.
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+            <NumInput label="Number of groups" value={numGroups} setter={setNumGroups} min={2} max={16} />
+            <button className="btn btn-primary" style={{ height: 34 }} onClick={onGenerateGroups}>
+              Generate Groups
+            </button>
+          </div>
+        </div>
+        <div className="empty"><div className="empty-icon"></div>Add players first, then generate groups.</div>
+      </div>
+    );
+  }
+
+  // ── Step 2: groups exist ──────────────────────────────────
+  return (
+    <div>
+      {/* Status banner */}
+      <div className="card" style={{ marginBottom: 20, padding: 16 }}>
+        {!hasKnockout ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, color: allGroupFinalsDone ? "var(--green,#22c55e)" : "var(--primary)", marginBottom: 4 }}>
+                {allGroupFinalsDone ? "✓ All Group Finals Done" : "Group Stage in Progress"}
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                {doneGroup}/{groupMatches.length} group matches played
+                {allGroupFinalsDone ? " — ready to seed the championship bracket." : ". Complete each group's final to advance."}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+              {allGroupFinalsDone && (
+                <>
+                  <NumInput label="Qualifiers/group" value={qualifiersPerGroup} setter={setQualifiersPerGroup} min={1} max={2} />
+                  <label style={{ display: "flex", flexDirection: "column", gap: 3, cursor: "pointer" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: "var(--muted)" }}>3rd Place</span>
+                    <div style={{ height: 34, display: "flex", alignItems: "center", gap: 6 }}>
+                      <input type="checkbox" checked={thirdPlace} onChange={e => setThirdPlace(e.target.checked)} style={{ cursor: "pointer", width: 16, height: 16 }} />
+                      <span style={{ fontSize: 12 }}>Match</span>
+                    </div>
+                  </label>
+                  <button className="btn btn-primary" style={{ height: 34 }} onClick={onGenerateKnockout}>
+                    Generate Championship →
+                  </button>
+                </>
+              )}
+              <button className="btn btn-outline" style={{ height: 34, fontSize: 11, color: "var(--muted)" }} onClick={onGenerateGroups}>
+                Reset Groups
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, color: "var(--green,#22c55e)", marginBottom: 4 }}>
+                ✓ Tournament Running
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                Groups: {doneGroup}/{groupMatches.length} · Championship: {doneKnock}/{knockoutMatches.length}
+              </div>
+            </div>
+            <button className="btn btn-outline" style={{ fontSize: 11, color: "var(--muted)" }} onClick={onGenerateKnockout}>
+              Regenerate Championship
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Group brackets — one KnockoutBracket per group */}
+      {event.groups?.map(g => {
+        const gm = groupMatches.filter(m => m.group_id === g.group_id);
+        if (!gm.length) return null;
+        const finalDone = gm.some(m => m.stage === "final" && m.status === "done");
+        return (
+          <div key={g.group_id} style={{ marginBottom: 28 }}>
+            <div className="section-label" style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              {g.name}
+              {finalDone
+                ? <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 10, background: "rgba(34,197,94,0.15)", color: "var(--green,#22c55e)" }}>✓ DONE</span>
+                : <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 400 }}>{gm.filter(m => m.status === "done").length}/{gm.length} done</span>
+              }
+            </div>
+            <KnockoutBracket matches={gm} onAction={onAction} onSetConfig={onSetConfig} sportKey={sportKey} isGroup={true} />
+          </div>
+        );
+      })}
+
+      {/* Championship bracket */}
+      {hasKnockout && (
+        <div style={{ marginTop: 8 }}>
+          <div className="section-label" style={{ marginBottom: 12 }}>
+            Championship Bracket
+            <span style={{ fontWeight: 400, color: "var(--muted)", marginLeft: 8, fontSize: 11 }}>
+              {doneKnock}/{knockoutMatches.length} done
+            </span>
+          </div>
+          <KnockoutBracket matches={knockoutMatches} onAction={onAction} onSetConfig={onSetConfig} sportKey={sportKey} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── KnockoutBracket ──────────────────────────────────────────
 // Road to Finals: groups matches by stage and shows bracket columns
-const STAGE_ORDER = ["knockout", "quarter", "semi", "third_place", "final"];
+const STAGE_ORDER = ["preliminary", "round_of_32", "round_of_16", "knockout", "quarter", "semi", "third_place", "final"];
 const STAGE_LABEL = {
-  knockout:    "Round 1",
+  preliminary: "Preliminary",
+  round_of_32: "Round of 32",
+  round_of_16: "Round of 16",
+  knockout:    "Round of 16",   // legacy label for old records
   quarter:     "Quarter Finals",
   semi:        "Semi Finals",
   third_place: "3rd Place",
   final:       "Final",
 };
 
-function KnockoutBracket({ matches, onAction, onSetConfig, sportKey }) {
+function KnockoutBracket({ matches, onAction, onSetConfig, sportKey, isGroup = false }) {
+  const CARD_W  = 172;
+  const CARD_GAP = 10;
+
+  // ── Group bracket: label columns as "Round 1", "Round 2", … ──
+  if (isGroup) {
+    const byRound = {};
+    for (const m of matches) {
+      const r = m.round || 1;
+      if (!byRound[r]) byRound[r] = [];
+      byRound[r].push(m);
+    }
+    const rounds = Object.keys(byRound).map(Number).sort((a, b) => a - b);
+    if (!rounds.length) return null;
+    const lastRound = rounds[rounds.length - 1];
+
+    return (
+      <div>
+        {rounds.length > 2 && (
+          <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 4 }}>
+            <span>←</span>
+            <span style={{ textTransform: "uppercase", letterSpacing: 1 }}>Swipe to see all rounds</span>
+            <span>→</span>
+          </div>
+        )}
+        <div style={{ overflowX: "auto", paddingBottom: 10, WebkitOverflowScrolling: "touch" }}>
+          <div style={{
+            display: "flex", gap: CARD_GAP, alignItems: "flex-start",
+            minWidth: rounds.length * (CARD_W + CARD_GAP),
+            paddingRight: 4,
+          }}>
+            {rounds.map(r => (
+              <div key={r} style={{ flex: `0 0 ${CARD_W}px` }}>
+                <div style={{
+                  fontFamily: "var(--font-display)", fontSize: 9, fontWeight: 800,
+                  textTransform: "uppercase", letterSpacing: 2, color: "var(--primary)",
+                  marginBottom: 8, paddingBottom: 5,
+                  borderBottom: `2px solid ${r === lastRound ? "var(--primary)" : "var(--border)"}`,
+                  whiteSpace: "nowrap",
+                }}>
+                  {r === lastRound ? "Group Final" : `Round ${r}`}
+                  <span style={{ color: "var(--muted)", fontWeight: 400, marginLeft: 4, letterSpacing: 0, textTransform: "none" }}>
+                    ({byRound[r].length})
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {byRound[r].map(m => (
+                    <BracketCard key={m.match_id} match={m} onAction={onAction} onSetConfig={onSetConfig}
+                      sportKey={sportKey} isFinal={r === lastRound} />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Championship / direct knockout: label by stage name ──────
   const byStage = {};
   for (const m of matches) {
     const s = m.stage || "knockout";
@@ -533,12 +783,8 @@ function KnockoutBracket({ matches, onAction, onSetConfig, sportKey }) {
   const stages = STAGE_ORDER.filter(s => byStage[s]?.length > 0);
   if (!stages.length) return null;
 
-  const CARD_W  = 172;
-  const CARD_GAP = 10;
-
   return (
     <div>
-      {/* Scroll hint — only shown when there are more stages than fit */}
       {stages.length > 2 && (
         <div style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600, marginBottom: 6, display: "flex", alignItems: "center", gap: 4 }}>
           <span>←</span>
@@ -546,8 +792,6 @@ function KnockoutBracket({ matches, onAction, onSetConfig, sportKey }) {
           <span>→</span>
         </div>
       )}
-
-      {/* Horizontally scrollable bracket */}
       <div style={{ overflowX: "auto", paddingBottom: 10, WebkitOverflowScrolling: "touch" }}>
         <div style={{
           display: "flex", gap: CARD_GAP, alignItems: "flex-start",
@@ -556,7 +800,6 @@ function KnockoutBracket({ matches, onAction, onSetConfig, sportKey }) {
         }}>
           {stages.map(stage => (
             <div key={stage} style={{ flex: `0 0 ${CARD_W}px` }}>
-              {/* Stage header */}
               <div style={{
                 fontFamily: "var(--font-display)", fontSize: 9, fontWeight: 800,
                 textTransform: "uppercase", letterSpacing: 2, color: "var(--primary)",
@@ -583,13 +826,21 @@ function KnockoutBracket({ matches, onAction, onSetConfig, sportKey }) {
   );
 }
 
+// Group stage + quarter → best of 3 (sets_to_win=2); semi/final/3rd → best of 5 (sets_to_win=3)
+function defaultSetsToWin(match) {
+  if (match.group_id) return 2;  // any match inside a group bracket
+  if (["semi", "final", "third_place"].includes(match.stage)) return 3;
+  return 2;  // quarter, round_of_16, round_of_32, preliminary
+}
+
 function BracketCard({ match: m, onAction, onSetConfig, sportKey, isFinal }) {
   const isLive     = m.status === "live";
   const isDone     = m.status === "done";
   const p1Won      = m.player_1?.is_winner;
   const p2Won      = m.player_2?.is_winner;
   const isSetBased = ["table_tennis", "badminton"].includes(sportKey);
-  const curSets    = m.live_state?.sets_to_win ?? 2;
+  const ls         = typeof m.live_state === "string" ? JSON.parse(m.live_state) : (m.live_state || {});
+  const curSets    = ls.sets_to_win ?? defaultSetsToWin(m);
   const sets       = (m.sets || []).filter(s => s.is_complete);
 
   const nameStyle = (won) => ({
@@ -701,9 +952,9 @@ function MatchCard({ match: m, onAction, onSetConfig, sportKey }) {
   const isLive     = m.status === "live";
   const isDone     = m.status === "done";
   const sets       = m.sets || [];
-  const ls         = m.live_state || {};
+  const ls         = typeof m.live_state === "string" ? JSON.parse(m.live_state) : (m.live_state || {});
   const isSetBased = ["table_tennis", "badminton"].includes(sportKey);
-  const curSets    = ls.sets_to_win ?? 2;
+  const curSets    = ls.sets_to_win ?? defaultSetsToWin(m);
 
   return (
     <div className={`match-row${isLive ? " live" : ""}`} style={{ flexDirection: "column", gap: 10 }}>

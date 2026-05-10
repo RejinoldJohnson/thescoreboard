@@ -1,44 +1,59 @@
 """
-Direct-knockout bracket generator for Table Tennis.
+Direct-knockout bracket generator — power-of-2 with at-most-1-bye guarantee.
 
-Handles every player count correctly:
+Core rule
+─────────
+Every participant receives AT MOST ONE bye across the entire tournament.
+After a bye, that participant MUST compete in the very next round.
+This is achieved by padding the bracket to the next power of 2 and giving
+all byes exclusively in round 1 (the "preliminary" round).  From round 2
+onward the bracket is a perfect power of 2 — no further byes are ever needed.
 
-  n=2  → Final
-  n=3  → Semi + Final
-  n=4  → 2×Semi + Final
-  n=5  → 1×Quarter + 2×Semi + Final
-  n=6  → 2×Quarter + 2×Semi + Final
-  n=7  → 3×Quarter + 2×Semi + Final
-  n=8  → 4×Quarter + 2×Semi + Final
-  n=9  → 1×Knockout + 4×Quarter + 2×Semi + Final
-  n=12 → 4×Knockout + 4×Quarter + 2×Semi + Final
-  …
+How it works
+────────────
+Given n players:
+  1.  Compute the next power-of-2 bracket size B = 2^⌈log₂(n)⌉.
+  2.  The "main bracket" starts at B/2 players (half_bracket).
+  3.  Preliminary matches needed = n − half_bracket.
+      Bye players             = half_bracket − preliminary_matches.
+  4.  Round 1: preliminary_matches real matches are played.
+      The remaining bye_players skip round 1 and enter the main bracket directly.
+  5.  Round 2+: always half_bracket players, always a clean power of 2 — no byes.
 
-Rules:
-  • Byes happen ONLY in round 1 to balance the bracket to the next power-of-2.
-  • From round 2 onward every slot produces a match (participants may be TBD).
-  • Stage label is determined by the number of participants in THAT round:
-      2  → "final"
-      4  → "semi"
-      8  → "quarter"
-      16+ → "knockout"
-  • Round-1 matches are labeled by the size of round 2 (same rule applied to
-    half_bracket), so they always flow into the correctly-named next stage.
+Round-1 stage label
+───────────────────
+  • If bye_count > 0  →  "preliminary"   (some slots are skipped; not a full round)
+  • If bye_count == 0 →  stage_for_size(n)  (everyone plays; this IS the named round)
+
+Example outputs
+───────────────
+  n=2  →  1 final
+  n=3  →  1 preliminary  + 1 final            (1 bye → plays final)
+  n=4  →  2 semi         + 1 final            (no byes)
+  n=5  →  1 preliminary  + 2 semi  + 1 final  (3 byes → play semi)
+  n=8  →  4 quarter      + 2 semi  + 1 final  (no byes)
+  n=9  →  1 preliminary  + 4 quarter + 2 semi + 1 final  (7 byes → play quarter)
+  n=12 →  4 preliminary  + 4 quarter + 2 semi + 1 final  (4 byes → play quarter)
+  n=16 →  8 round_of_16  + 4 quarter + 2 semi + 1 final  (no byes)
 """
 import math
 import random
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 
-# ── Public helpers ────────────────────────────────────────────
+# ── Stage naming ─────────────────────────────────────────────
 
 def stage_for_size(n: int) -> str:
-    """Map the number of participants in a round to its stage name."""
-    if n <= 2: return "final"
-    if n <= 4: return "semi"
-    if n <= 8: return "quarter"
-    return "knockout"
+    """Map player count entering a round to its stage name."""
+    if n <= 2:  return "final"
+    if n <= 4:  return "semi"
+    if n <= 8:  return "quarter"
+    if n <= 16: return "round_of_16"
+    if n <= 32: return "round_of_32"
+    return "preliminary"
 
+
+# ── Bracket builder ───────────────────────────────────────────
 
 def build_bracket(
     player_ids: List,
@@ -47,79 +62,82 @@ def build_bracket(
     third_place: bool = False,
 ) -> List[dict]:
     """
-    Return an ordered list of match-specs for a direct-knockout tournament.
+    Return an ordered list of match-specs for a single-elimination tournament.
 
-    Each spec is a dict:
-        pid1   : player/team ID or None (= TBD placeholder)
-        pid2   : player/team ID or None (= TBD placeholder)
-        stage  : "knockout" | "quarter" | "semi" | "final" | "third_place"
+    Each spec:
+        pid1   : player/team ID  or  None (TBD — to be filled by winner propagation)
+        pid2   : player/team ID  or  None
+        stage  : stage name string
         round  : 1-based integer
 
-    Matches are ordered chronologically (earlier rounds first).
+    Guarantee: every participant receives at most ONE bye.
+    Round 1 may be a "preliminary" round (if the count is not a power of 2).
+    Rounds 2+ form a clean power-of-2 bracket with zero byes.
     """
     ids = list(player_ids)
-    if len(ids) < 2:
+    n   = len(ids)
+    if n < 2:
         return []
 
     if shuffle:
         random.shuffle(ids)
 
-    n = len(ids)
+    # ── Bracket sizing ────────────────────────────────────────
     bracket_size = 2 ** math.ceil(math.log2(n)) if n > 1 else 2
-    half_bracket = bracket_size // 2          # participants in round 2
+    half_bracket = bracket_size // 2          # players entering round 2 (power of 2)
 
-    # How many players play a real match in round 1 vs get a bye
-    r1_match_count = n - half_bracket         # e.g. n=12 → 4 matches
-    bye_count      = half_bracket - r1_match_count  # e.g. n=12 → 4 byes
+    prelim_count = n - half_bracket           # real matches in round 1
+    bye_count    = half_bracket - prelim_count # players who skip round 1
 
-    bye_players = ids[:bye_count]              # advance directly to round 2
-    r1_players  = ids[bye_count:]              # play in round 1
+    bye_players  = ids[:bye_count]            # advance directly to round 2
+    r1_players   = ids[bye_count:]            # compete in round 1
 
-    # R1 label = stage that round 2 feeds INTO (determined by half_bracket size)
-    r1_stage = stage_for_size(half_bracket)
+    # ── Round 1 stage label ───────────────────────────────────
+    # When bye_count > 0 some players skip this round → it is a preliminary.
+    # When bye_count == 0 everyone plays → label it by the proper round name.
+    if bye_count > 0:
+        r1_stage = "preliminary"
+    else:
+        r1_stage = stage_for_size(n)
 
     specs: List[dict] = []
-
-    # ── Round 1 ──────────────────────────────────────────────
     round_num = 1
-    r1_winners = []  # None = match winner TBD, real ID = odd-player free pass
 
+    # ── Round 1 ───────────────────────────────────────────────
+    r1_winners: List[Optional] = []
     for i in range(0, len(r1_players), 2):
         a = r1_players[i]
         b = r1_players[i + 1] if i + 1 < len(r1_players) else None
-
         if b is not None:
             specs.append({"pid1": a, "pid2": b, "stage": r1_stage, "round": round_num})
-            r1_winners.append(None)
+            r1_winners.append(None)    # winner is TBD
         else:
-            # Odd number of round-1 players: last one gets a free pass
+            # Odd player among r1_players: gets a free pass into round 2.
+            # (Only happens when prelim_count itself is odd, which is rare.)
             r1_winners.append(a)
 
-    # ── Rounds 2 + (power-of-2, no more byes) ────────────────
-    # Bye players fill the first half of the round-2 seed list;
-    # round-1 winners (or TBDs) fill the second half.
-    # The combined list always has exactly half_bracket entries (a power of 2).
+    # ── Rounds 2+ (clean power-of-2, zero byes) ──────────────
+    # Bye players fill the first slots of round 2; round-1 winners fill the rest.
+    # Together they always total exactly half_bracket (a power of 2).
     current: List[Optional] = list(bye_players) + r1_winners
     round_num = 2
 
     while len(current) > 1:
         stage    = stage_for_size(len(current))
-        next_rnd = []
+        next_rnd: List[Optional] = []
 
         for i in range(0, len(current), 2):
             if i + 1 >= len(current):
-                # Truly no partner (odd length — should never happen in a
-                # power-of-2 bracket, but handled defensively).
+                # Odd length — should never occur in a power-of-2 bracket,
+                # but handle defensively.
                 next_rnd.append(current[i])
                 continue
-
             a = current[i]
             b = current[i + 1]
-            # a and/or b may be None (TBD) — always create the match slot.
             specs.append({"pid1": a, "pid2": b, "stage": stage, "round": round_num})
             next_rnd.append(None)
 
-        current = next_rnd
+        current   = next_rnd
         round_num += 1
 
     # ── Optional 3rd-place match ──────────────────────────────
@@ -129,13 +147,12 @@ def build_bracket(
     return specs
 
 
-# ── Convenience: expected match counts ───────────────────────
+# ── Convenience ───────────────────────────────────────────────
 
 def expected_match_count(n: int, third_place: bool = False) -> int:
-    """Return the number of matches that build_bracket will produce."""
+    """Total matches build_bracket will produce (always n-1, plus 1 for third_place)."""
     if n < 2:
         return 0
-    # Every player except the champion loses exactly once → n-1 matches
     count = n - 1
     if third_place and n >= 4:
         count += 1

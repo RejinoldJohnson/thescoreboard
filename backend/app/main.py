@@ -61,6 +61,7 @@ app.add_middleware(
 app.include_router(auth.router,          prefix="/api/auth",    tags=["auth"])
 app.include_router(organizations.router, prefix="/api/orgs",    tags=["organizations"])
 app.include_router(tournaments.router,   prefix="/api/orgs",    tags=["tournaments"])
+app.include_router(tournaments.router,   prefix="/api",         tags=["tournaments"])
 app.include_router(events.router,        prefix="/api",         tags=["events"])
 app.include_router(players.router,       prefix="/api/players", tags=["players"])
 app.include_router(matches.router,       prefix="/api",         tags=["matches"])
