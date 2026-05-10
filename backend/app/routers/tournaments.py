@@ -17,6 +17,7 @@ from app.utils.auth import get_current_user
 from app.utils.slug import generate_unique_slug
 from app.sports.registry import get_sport_engine
 from app.sports.table_tennis.knockout import build_bracket
+from app.sports.table_tennis.group_knockout import assign_players_to_groups
 
 router = APIRouter()
 
@@ -476,6 +477,14 @@ def generate_fixtures(
     # Default sets_to_win comes from event config; organiser can override per match
     default_sets_to_win = (event.sport_config or {}).get("sets_to_win", 3)
 
+    # ── Helper: sets_to_win based on match stage ─────────────
+    def _sets_for_stage(stage: str, is_group: bool = False) -> int:
+        if is_group:
+            return 2  # group stage always best of 3
+        if stage in ("semi", "final", "third_place"):
+            return 3  # best of 5 for late stages
+        return 2  # quarter, round_of_16, preliminary → best of 3
+
     # ── Helper: create one match between two participants ─────
     def _create_match(pid1, pid2, group_id, stage, round_num, table_num):
         match = Match(
@@ -485,23 +494,24 @@ def generate_fixtures(
             stage=stage,
             status="scheduled",
             table_number=table_num,
-            live_state={"sets_to_win": default_sets_to_win},
+            live_state={"sets_to_win": _sets_for_stage(stage, is_group=group_id is not None)},
         )
         db.add(match)
         db.flush()
 
-        # Only create participants when both are known (skip for TBD placeholder matches)
-        if pid1 is not None and pid2 is not None:
+        # Create a participant record for each known position.
+        # Rolling-knockout brackets may have one known player (a bye who cascaded
+        # forward) and one TBD slot in the same match — handle both independently.
+        to_add = []
+        for pos, pid in ((1, pid1), (2, pid2)):
+            if pid is None:
+                continue
             if is_team_event:
-                db.add_all([
-                    MatchParticipant(match_id=match.match_id, team_id=pid1, position=1),
-                    MatchParticipant(match_id=match.match_id, team_id=pid2, position=2),
-                ])
+                to_add.append(MatchParticipant(match_id=match.match_id, team_id=pid, position=pos))
             else:
-                db.add_all([
-                    MatchParticipant(match_id=match.match_id, player_id=pid1, position=1),
-                    MatchParticipant(match_id=match.match_id, player_id=pid2, position=2),
-                ])
+                to_add.append(MatchParticipant(match_id=match.match_id, player_id=pid, position=pos))
+        if to_add:
+            db.add_all(to_add)
 
         if hasattr(engine, "check_set_winner"):
             db.add(MatchSet(match_id=match.match_id, set_number=1))
@@ -771,3 +781,303 @@ def get_standings(
         groups_out.append({"group_id": None, "name": "Standings", "rows": rows})
 
     return {"event_id": event_id, "format": event.format, "groups": groups_out}
+
+
+# ── Phase 1: create groups + round-robin fixtures ─────────────
+
+@router.post("/events/{event_id}/generate-groups")
+def generate_groups(
+    event_id: int,
+    num_groups: int = 4,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Phase 1 of group_knockout setup.
+
+    1. Splits all registered participants into num_groups balanced groups.
+    2. Generates round-robin fixtures within each group.
+
+    Safe to call again if NO group matches have been played yet — it will
+    wipe existing groups and regenerate from scratch.  Refuses if any group
+    match is already live or done (to prevent data loss).
+    """
+    event = db.query(Event).filter(Event.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if event.format != "group_knockout":
+        raise HTTPException(status_code=400, detail="Event format must be group_knockout")
+    if num_groups < 2:
+        raise HTTPException(status_code=400, detail="num_groups must be at least 2")
+
+    t = db.query(Tournament).filter(Tournament.tournament_id == event.tournament_id).first()
+    _check_org_access(t.org_id, user, db)
+
+    is_team_event = event.participant_type in ("team", "doubles_pair")
+    engine = get_sport_engine(event.sport_key)
+    default_sets_to_win = (event.sport_config or {}).get("sets_to_win", 3)
+
+    # Refuse regeneration if any group match has been started
+    started = (
+        db.query(Match)
+        .filter(Match.event_id == event_id, Match.group_id != None, Match.status != "scheduled")
+        .count()
+    )
+    if started:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot regenerate groups — group matches are already in progress or done.",
+        )
+
+    # Also refuse if a knockout bracket already exists
+    knockout_exists = (
+        db.query(Match)
+        .filter(Match.event_id == event_id, Match.group_id == None)
+        .count()
+    )
+    if knockout_exists:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot regenerate groups — knockout bracket already generated.",
+        )
+
+    # Collect all enrolled participants
+    eps = db.query(EventParticipant).filter(EventParticipant.event_id == event_id).all()
+    if len(eps) < num_groups * 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Need at least {num_groups * 2} participants for {num_groups} groups.",
+        )
+
+    all_ids = [ep.team_id if is_team_event else ep.player_id for ep in eps]
+    ep_by_pid = {}
+    for ep in eps:
+        pid = ep.team_id if is_team_event else ep.player_id
+        ep_by_pid[pid] = ep
+
+    # Delete old groups and their scheduled matches
+    old_groups = db.query(Group).filter(Group.event_id == event_id).all()
+    for g in old_groups:
+        # Unassign participants first
+        db.query(EventParticipant).filter(
+            EventParticipant.event_id == event_id,
+            EventParticipant.group_id == g.group_id,
+        ).update({"group_id": None})
+        # Delete scheduled matches in this group
+        for m in db.query(Match).filter(Match.group_id == g.group_id).all():
+            db.delete(m)
+        db.delete(g)
+    db.flush()
+
+    # Create new groups and assign participants
+    group_labels = [chr(ord("A") + i) for i in range(num_groups)]
+    assigned_groups = assign_players_to_groups(all_ids, num_groups, shuffle=True)
+
+    matches_created = 0
+    table_counter = 0
+
+    for idx, pid_list in enumerate(assigned_groups):
+        label = group_labels[idx] if idx < len(group_labels) else f"Group {idx + 1}"
+        group = Group(event_id=event_id, name=f"Group {label}")
+        db.add(group)
+        db.flush()
+
+        # Assign participants to this group
+        for pid in pid_list:
+            ep = ep_by_pid.get(pid)
+            if ep:
+                ep.group_id = group.group_id
+
+        # Single-elimination bracket within this group.
+        # build_bracket gives byes as early as possible (round 1 only),
+        # guaranteeing at most one bye per player.
+        specs = build_bracket(pid_list, shuffle=True, third_place=False)
+        for spec in specs:
+            table_counter += 1
+            match = Match(
+                event_id=event_id,
+                group_id=group.group_id,
+                round=spec["round"],
+                stage=spec["stage"],
+                status="scheduled",
+                table_number=((table_counter - 1) % 2) + 1,
+                live_state={"sets_to_win": 2},  # group stage always best of 3
+            )
+            db.add(match)
+            db.flush()
+
+            to_add = []
+            for pos, pid in ((1, spec["pid1"]), (2, spec["pid2"])):
+                if pid is None:
+                    continue
+                if is_team_event:
+                    to_add.append(MatchParticipant(match_id=match.match_id, team_id=pid, position=pos))
+                else:
+                    to_add.append(MatchParticipant(match_id=match.match_id, player_id=pid, position=pos))
+            if to_add:
+                db.add_all(to_add)
+
+            if hasattr(engine, "check_set_winner"):
+                db.add(MatchSet(match_id=match.match_id, set_number=1))
+
+            matches_created += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "groups_created": num_groups,
+        "matches_created": matches_created,
+        "participants_per_group": [len(g) for g in assigned_groups],
+    }
+
+
+# ── Phase 2: generate knockout bracket from group standings ───
+
+@router.post("/events/{event_id}/generate-knockout-from-groups")
+def generate_knockout_from_groups(
+    event_id: int,
+    qualifiers_per_group: int = 2,
+    third_place: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Phase 2 of group_knockout setup.
+
+    Reads current group standings, picks the top `qualifiers_per_group`
+    players from each group, seeds them with interleaved ordering
+    (A1, B1, C1, A2, B2, …), then builds a single-elimination bracket.
+
+    Safe to call again — replaces any existing knockout matches as long as
+    none of them have been started.
+    """
+    event = db.query(Event).filter(Event.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if event.format != "group_knockout":
+        raise HTTPException(status_code=400, detail="Event format must be group_knockout")
+    if qualifiers_per_group < 1:
+        raise HTTPException(status_code=400, detail="qualifiers_per_group must be at least 1")
+
+    t = db.query(Tournament).filter(Tournament.tournament_id == event.tournament_id).first()
+    _check_org_access(t.org_id, user, db)
+
+    is_team_event = event.participant_type in ("team", "doubles_pair")
+    engine = get_sport_engine(event.sport_key)
+    default_sets_to_win = (event.sport_config or {}).get("sets_to_win", 3)
+
+    # Must have groups
+    groups = db.query(Group).filter(Group.event_id == event_id).all()
+    if not groups:
+        raise HTTPException(status_code=400, detail="No groups found. Run generate-groups first.")
+
+    # Refuse regeneration if knockout matches are in progress
+    started_knockout = (
+        db.query(Match)
+        .filter(Match.event_id == event_id, Match.group_id == None, Match.status != "scheduled")
+        .count()
+    )
+    if started_knockout:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot regenerate knockout — knockout matches already in progress or done.",
+        )
+
+    # Qualify from each group's completed knockout final.
+    # Slot 0 = group champion  (final winner)
+    # Slot 1 = group runner-up (final loser) — only if qualifiers_per_group >= 2
+    # Seeding interleave: A1,B1,C1,D1,A2,B2,C2,D2 so champions are on opposite halves.
+    buckets: list = [[] for _ in range(qualifiers_per_group)]
+    groups_not_ready = 0
+
+    for group in groups:
+        group_final = (
+            db.query(Match)
+            .filter(
+                Match.event_id == event_id,
+                Match.group_id == group.group_id,
+                Match.stage == "final",
+                Match.status == "done",
+            )
+            .options(joinedload(Match.participants))
+            .first()
+        )
+        if not group_final:
+            groups_not_ready += 1
+            continue
+
+        winner_mp = next((p for p in group_final.participants if p.is_winner), None)
+        loser_mp  = next((p for p in group_final.participants if not p.is_winner), None)
+
+        if winner_mp:
+            pid = winner_mp.team_id or winner_mp.player_id
+            if pid:
+                buckets[0].append(pid)
+
+        if qualifiers_per_group >= 2 and loser_mp:
+            pid = loser_mp.team_id or loser_mp.player_id
+            if pid:
+                buckets[1].append(pid)
+
+    qualified_ids: list = []
+    for bucket in buckets:
+        qualified_ids.extend(bucket)
+
+    if len(qualified_ids) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{groups_not_ready} group(s) have no completed final yet. "
+                "Finish each group's knockout bracket before generating the championship bracket."
+            ),
+        )
+
+    # Delete any existing knockout matches (scheduled only — started ones were blocked above)
+    existing_knockout = db.query(Match).filter(Match.event_id == event_id, Match.group_id == None).all()
+    for m in existing_knockout:
+        db.delete(m)
+    db.flush()
+
+    # Build bracket — shuffle=False because seeding order is already meaningful
+    specs = build_bracket(qualified_ids, shuffle=False, third_place=third_place)
+
+    matches_created = 0
+    table_counter = 0
+
+    for spec in specs:
+        table_counter += 1
+        match = Match(
+            event_id=event_id,
+            group_id=None,
+            round=spec["round"],
+            stage=spec["stage"],
+            status="scheduled",
+            table_number=((table_counter - 1) % 2) + 1,
+            live_state={"sets_to_win": 3 if spec["stage"] in ("semi", "final", "third_place") else 2},
+        )
+        db.add(match)
+        db.flush()
+
+        to_add = []
+        for pos, pid in ((1, spec["pid1"]), (2, spec["pid2"])):
+            if pid is None:
+                continue
+            if is_team_event:
+                to_add.append(MatchParticipant(match_id=match.match_id, team_id=pid, position=pos))
+            else:
+                to_add.append(MatchParticipant(match_id=match.match_id, player_id=pid, position=pos))
+        if to_add:
+            db.add_all(to_add)
+
+        if hasattr(engine, "check_set_winner"):
+            db.add(MatchSet(match_id=match.match_id, set_number=1))
+
+        matches_created += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "qualifiers": len(qualified_ids),
+        "matches_created": matches_created,
+        "groups_not_ready": groups_not_ready,
+    }

@@ -3,6 +3,7 @@ Match routes — create, score, and manage matches.
 Scoring is delegated to the sport engine based on event.sport_key.
 Supports: table_tennis, badminton (set-based), cricket (innings), football (goals).
 """
+from collections import defaultdict
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
@@ -116,11 +117,129 @@ def _serialize_match(m: Match) -> dict:
     }
 
 
-def _finish_match(match: Match, winner_position: Optional[int]):
+def _place_in_match(
+    target: Match,
+    participant_id: int,
+    position: int,
+    is_team: bool,
+    db: Session,
+) -> None:
+    """Insert a participant into a specific bracket slot if it is still empty."""
+    already = db.query(MatchParticipant).filter(
+        MatchParticipant.match_id == target.match_id,
+        MatchParticipant.position == position,
+    ).first()
+    if already:
+        return
+    if is_team:
+        db.add(MatchParticipant(match_id=target.match_id, team_id=participant_id, position=position))
+    else:
+        db.add(MatchParticipant(match_id=target.match_id, player_id=participant_id, position=position))
+
+
+def _advance_winner(match: Match, winner_position: Optional[int], db: Session) -> None:
+    """
+    After a direct-knockout match finishes, propagate the winner into the
+    correct slot of the next-round match (and the loser into the third-place
+    match when the stage is 'semi').
+
+    Bracket position mapping
+    ─────────────────────────
+    For rounds after the first:  match k → next-round match k//2, position k%2+1
+    For the first round (byes possible):
+        bye_count = 2*|next_round| - |current_round|
+        match k → next-round match (bye_count+k)//2, position (bye_count+k)%2+1
+    """
+    # Terminal stages never propagate; "group" stage = old round-robin rows, also skip
+    if not winner_position or match.stage in ("third_place", "final", "group"):
+        return
+
+    event = db.query(Event).filter(Event.event_id == match.event_id).first()
+    if not event or event.format not in ("direct_knockout", "group_knockout"):
+        return
+
+    winner_mp = next((p for p in match.participants if p.position == winner_position), None)
+    loser_mp  = next((p for p in match.participants if p.position != winner_position), None)
+    if not winner_mp:
+        return
+
+    winner_id = winner_mp.player_id or winner_mp.team_id
+    is_team   = winner_mp.team_id is not None
+
+    # Scope bracket to the same context:
+    #   group bracket match  (group_id set) → only look within that group
+    #   final bracket match  (group_id None) → only look at ungrouped matches
+    q = db.query(Match).filter(
+        Match.event_id == match.event_id,
+        Match.stage.notin_(["third_place", "group"]),
+    )
+    if match.group_id is not None:
+        q = q.filter(Match.group_id == match.group_id)
+    else:
+        q = q.filter(Match.group_id == None)  # noqa: E711
+    bracket_matches = q.order_by(Match.round, Match.match_id).all()
+
+    by_round = defaultdict(list)
+    for m in bracket_matches:
+        by_round[m.round].append(m)
+
+    rounds        = sorted(by_round.keys())
+    current_round = match.round
+    round_idx     = rounds.index(current_round)
+
+    # ── Advance winner to next bracket round ─────────────────
+    if round_idx + 1 < len(rounds):
+        next_round          = rounds[round_idx + 1]
+        current_rnd_matches = by_round[current_round]
+        next_rnd_matches    = by_round[next_round]
+
+        match_k = next(
+            (i for i, m in enumerate(current_rnd_matches) if m.match_id == match.match_id),
+            None,
+        )
+        if match_k is not None:
+            earliest_round = rounds[0]
+            if current_round == earliest_round:
+                # Round 1 may have byes; compute offset so r1 winners land in
+                # the correct slots of round 2 (after all bye-player pairs).
+                bye_count = 2 * len(next_rnd_matches) - len(current_rnd_matches)
+            else:
+                bye_count = 0
+
+            next_k = (bye_count + match_k) // 2
+            pos    = (bye_count + match_k) % 2 + 1
+
+            if next_k < len(next_rnd_matches):
+                _place_in_match(next_rnd_matches[next_k], winner_id, pos, is_team, db)
+
+    # ── Advance loser to third-place match (semi-finals only) ─
+    if match.stage == "semi" and loser_mp:
+        loser_id = loser_mp.player_id or loser_mp.team_id
+        if loser_id:
+            tq = db.query(Match).filter(
+                Match.event_id == match.event_id, Match.stage == "third_place"
+            )
+            if match.group_id is not None:
+                tq = tq.filter(Match.group_id == match.group_id)
+            else:
+                tq = tq.filter(Match.group_id == None)  # noqa: E711
+            third = tq.first()
+            if third:
+                semi_matches = sorted(by_round.get(current_round, []), key=lambda m: m.match_id)
+                semi_k       = next(
+                    (i for i, m in enumerate(semi_matches) if m.match_id == match.match_id),
+                    0,
+                )
+                _place_in_match(third, loser_id, semi_k + 1, is_team, db)
+
+
+def _finish_match(match: Match, winner_position: Optional[int], db: Optional[Session] = None):
     match.status      = "done"
     match.finished_at = datetime.now(timezone.utc)
     for p in match.participants:
         p.is_winner = (p.position == winner_position) if winner_position else False
+    if db is not None:
+        _advance_winner(match, winner_position, db)
 
 
 # ── Routes ────────────────────────────────────────────────────
@@ -253,7 +372,7 @@ def update_score(
                     sets_won[s.winner_position] += 1
             match_winner = engine.check_match_winner(sets_won[1], sets_won[2], config)
             if match_winner:
-                _finish_match(match, match_winner)
+                _finish_match(match, match_winner, db)
             else:
                 next_num = max(s.set_number for s in match.sets) + 1
                 db.add(MatchSet(match_id=match.match_id, set_number=next_num))
@@ -390,7 +509,7 @@ def finish_match(
             runs_p1 = all_sets[0].score_p1
             runs_p2 = all_sets[1].score_p1
             winner  = engine.check_match_winner(runs_p1, runs_p2, config)
-            _finish_match(match, winner)
+            _finish_match(match, winner, db)
         elif len(completed) == 1:
             # First innings done — set up second innings
             ls["current_innings"] = 2
@@ -412,7 +531,7 @@ def finish_match(
             winner = engine.check_match_winner(s.score_p1, s.score_p2, config)
         else:
             winner = data.winner_position if isinstance(data.winner_position, int) else None
-        _finish_match(match, winner)
+        _finish_match(match, winner, db)
 
     db.commit()
     return _serialize_match(_load_match(match_id, db))
