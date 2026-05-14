@@ -4,7 +4,7 @@ Independent of the direct-knockout implementation — reuses bracket primitives 
 """
 import random
 from itertools import combinations
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -17,24 +17,39 @@ def assign_players_to_groups(
     num_groups: int,
     *,
     shuffle: bool = True,
+    seed_scores: Optional[Dict] = None,
 ) -> List[List]:
     """
-    Distribute player_ids as evenly as possible across num_groups.
-    Returns a list of lists, one per group, in snake-draft order.
+    Distribute player_ids as evenly as possible across num_groups using a
+    snake/serpentine draft so no group gets all the strong players.
 
-    Example — 9 players, 3 groups:
-        slot 0: A, B, C  (forward pass)
-        slot 1: C, B, A  (backward pass — keeps totals even)
-        slot 2: A, B, C
-    This mirrors a tournament seed draw.
+    With seed_scores: sort DESC by score, then snake-draft across groups:
+        Round 1 (forward):  group 0, 1, 2, ..., n-1
+        Round 2 (backward): group n-1, ..., 1, 0
+        Round 3 (forward):  group 0, 1, 2, ...
+    This mirrors a tournament seed draw — top seeds go to different groups.
+
+    Without seed_scores: random shuffle + same snake pattern.
     """
     ids = list(player_ids)
-    if shuffle:
+
+    if seed_scores:
+        ids.sort(key=lambda pid: seed_scores.get(pid, 0), reverse=True)
+    elif shuffle:
         random.shuffle(ids)
 
     groups: List[List] = [[] for _ in range(num_groups)]
     for i, pid in enumerate(ids):
-        groups[i % num_groups].append(pid)
+        # Determine position within current snake pass
+        pass_index  = i // num_groups
+        pos_in_pass = i % num_groups
+        # Odd passes go backward
+        if pass_index % 2 == 1:
+            group_idx = num_groups - 1 - pos_in_pass
+        else:
+            group_idx = pos_in_pass
+        groups[group_idx].append(pid)
+
     return groups
 
 

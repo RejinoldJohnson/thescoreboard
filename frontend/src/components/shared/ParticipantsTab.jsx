@@ -12,16 +12,50 @@
 import { useState } from "react";
 
 // ── Individual Players ────────────────────────────────────────
-export function IndividualTab({ event, onAddPlayer, onCreateGroup, onAssignGroup, onRemovePlayer, flash }) {
+const SEED_LEVELS = [
+  { value: "",             label: "No seed"      },
+  { value: "beginner",     label: "Beginner"     },
+  { value: "intermediate", label: "Intermediate" },
+  { value: "advanced",     label: "Advanced"     },
+  { value: "pro",          label: "Pro"          },
+];
+
+const SEED_COLOR = { beginner: "#64b5f6", intermediate: "#81c784", advanced: "#ffb74d", pro: "#e57373" };
+
+const AGE_GROUPS = [
+  { value: "",      label: "All ages"  },
+  { value: "u18",   label: "Under 18"  },
+  { value: "18-30", label: "18 – 30"   },
+  { value: "31-45", label: "31 – 45"   },
+  { value: "45+",   label: "45+"       },
+];
+
+function matchesAgeGroup(age, group) {
+  if (!group) return true;
+  const a = parseInt(age);
+  if (isNaN(a)) return group === "";   // no age set → only shown on "All ages"
+  if (group === "u18")   return a < 18;
+  if (group === "18-30") return a >= 18 && a <= 30;
+  if (group === "31-45") return a >= 31 && a <= 45;
+  if (group === "45+")   return a > 45;
+  return true;
+}
+
+export function IndividualTab({ event, onAddPlayer, onCreateGroup, onAssignGroup, onRemovePlayer, onUpdateSeed, flash }) {
   const isGroupKnockout = event.format === "group_knockout";
 
-  const [pForm,     setPForm]     = useState({ name: "", age: "", gender: "Male", group_id: "" });
+  const [pForm,     setPForm]     = useState({ name: "", age: "", gender: "Male", seed_level: "", group_id: "" });
   const [groupName, setGroupName] = useState("");
+
+  const [fName,     setFName]     = useState("");
+  const [fGender,   setFGender]   = useState("");
+  const [fSeed,     setFSeed]     = useState("");
+  const [fAge,      setFAge]      = useState("");
 
   const handleAdd = () => {
     if (!pForm.name.trim()) return flash("Name required.");
-    onAddPlayer({ ...pForm, group_id: pForm.group_id || null });
-    setPForm({ name: "", age: "", gender: "Male", group_id: "" });
+    onAddPlayer({ ...pForm, seed_level: pForm.seed_level || null, group_id: pForm.group_id || null });
+    setPForm({ name: "", age: "", gender: "Male", seed_level: "", group_id: "" });
   };
 
   const handleGroup = () => {
@@ -33,6 +67,18 @@ export function IndividualTab({ event, onAddPlayer, onCreateGroup, onAssignGroup
   // All enrolled players (grouped + ungrouped)
   const allGrouped = (event.groups || []).flatMap(g => (g.players || []));
   const ungrouped  = event.ungrouped_players || [];
+  const allPlayers = [...allGrouped, ...ungrouped];
+
+  const hasFilter = fName || fGender || fSeed || fAge;
+  const clearFilters = () => { setFName(""); setFGender(""); setFSeed(""); setFAge(""); };
+
+  const filtered = allPlayers.filter(p => {
+    if (fName   && !p.name.toLowerCase().includes(fName.toLowerCase())) return false;
+    if (fGender && (p.gender || "").toLowerCase() !== fGender.toLowerCase()) return false;
+    if (fSeed   && (p.seed_level || "") !== fSeed) return false;
+    if (fAge    && !matchesAgeGroup(p.age, fAge)) return false;
+    return true;
+  });
 
   return (
     <div>
@@ -48,6 +94,14 @@ export function IndividualTab({ event, onAddPlayer, onCreateGroup, onAssignGroup
           <select className="input" style={{ width: 100 }} value={pForm.gender}
             onChange={e => setPForm(f => ({ ...f, gender: e.target.value }))}>
             <option>Male</option><option>Female</option>
+          </select>
+          <select className="input" style={{ width: 120 }} value={pForm.seed_level}
+            onChange={e => setPForm(f => ({ ...f, seed_level: e.target.value }))}>
+            <option value="">No seed</option>
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+            <option value="pro">Pro</option>
           </select>
           {isGroupKnockout && (event.groups || []).length > 0 && (
             <select className="input" style={{ width: 130 }} value={pForm.group_id}
@@ -85,18 +139,31 @@ export function IndividualTab({ event, onAddPlayer, onCreateGroup, onAssignGroup
                   ({(g.players || []).length} players)
                 </span>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {(g.players || []).map(p => (
-                  <span key={p.player_id} className="player-chip" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    {p.name}
-                    <button onClick={() => onAssignGroup(p.player_id, null)}
-                      style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
-                  </span>
-                ))}
-                {(g.players || []).length === 0 && (
-                  <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>Empty</span>
-                )}
-              </div>
+              {(g.players || []).length === 0 ? (
+                <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>Empty</span>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                  {(g.players || []).map((p, idx) => (
+                    <div key={p.player_id} style={{
+                      display: "grid", gridTemplateColumns: "1fr 48px 72px 120px auto",
+                      gap: 8, padding: "7px 4px", alignItems: "center",
+                      borderBottom: idx < (g.players || []).length - 1 ? "1px solid rgba(0,0,0,0.06)" : "none",
+                    }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{p.name}</span>
+                      <span style={{ fontSize: 12, color: "var(--muted)" }}>{p.age || "—"}</span>
+                      <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "capitalize" }}>{p.gender || "—"}</span>
+                      <select
+                        value={p.seed_level || ""}
+                        onChange={e => onUpdateSeed && onUpdateSeed(p.player_id, e.target.value)}
+                        style={{ padding: "3px 6px", borderRadius: 5, fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: "var(--surface)", color: p.seed_level ? SEED_COLOR[p.seed_level] || "var(--ink)" : "var(--muted)" }}>
+                        {SEED_LEVELS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                      <button onClick={() => onAssignGroup(p.player_id, null)}
+                        style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", padding: "0 4px", fontSize: 16, lineHeight: 1, opacity: 0.6 }}>×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 
@@ -105,10 +172,22 @@ export function IndividualTab({ event, onAddPlayer, onCreateGroup, onAssignGroup
               <div className="group-title" style={{ color: "var(--gold)" }}>
                 Unassigned Players ({ungrouped.length})
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {ungrouped.map(p => (
-                  <div key={p.player_id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", minWidth: 100 }}>{p.name}</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                {ungrouped.map((p, idx) => (
+                  <div key={p.player_id} style={{
+                    display: "grid", gridTemplateColumns: "1fr 48px 72px 120px 1fr",
+                    gap: 8, padding: "8px 4px", alignItems: "center",
+                    borderBottom: idx < ungrouped.length - 1 ? "1px solid rgba(255,204,0,0.15)" : "none",
+                  }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{p.name}</span>
+                    <span style={{ fontSize: 12, color: "var(--muted)" }}>{p.age || "—"}</span>
+                    <span style={{ fontSize: 11, color: "var(--muted)", textTransform: "capitalize" }}>{p.gender || "—"}</span>
+                    <select
+                      value={p.seed_level || ""}
+                      onChange={e => onUpdateSeed && onUpdateSeed(p.player_id, e.target.value)}
+                      style={{ padding: "3px 6px", borderRadius: 5, fontSize: 11, fontWeight: 600, border: "1px solid var(--border)", background: "var(--surface)", color: p.seed_level ? SEED_COLOR[p.seed_level] || "var(--ink)" : "var(--muted)" }}>
+                      {SEED_LEVELS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
                     {(event.groups || []).length > 0 ? (
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                         {event.groups.map(g => (
@@ -130,40 +209,128 @@ export function IndividualTab({ event, onAddPlayer, onCreateGroup, onAssignGroup
         </div>
       )}
 
-      {/* Player list — for non-group formats */}
-      {!isGroupKnockout && (
-        <div className="card">
-          <div className="card-title">
-            Players ({allGrouped.length + ungrouped.length})
+      {/* Player list — detailed rows for all formats */}
+      <div className="card">
+        {/* ── Header row: title + count ── */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div className="card-title" style={{ marginBottom: 0 }}>
+            Players
+            <span style={{ marginLeft: 8, fontFamily: "var(--font-body)", fontSize: 13, fontWeight: 400, color: "var(--muted)", textTransform: "none", letterSpacing: 0 }}>
+              {hasFilter
+                ? `${filtered.length} of ${allPlayers.length}`
+                : allPlayers.length}
+            </span>
           </div>
-          {allGrouped.length === 0 && ungrouped.length === 0 ? (
-            <div style={{ fontSize: 13, color: "var(--muted)" }}>No players added yet.</div>
-          ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {[...allGrouped, ...ungrouped].map(p => (
-                <span key={p.player_id} className="player-chip" style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  {p.name}
-                  {onRemovePlayer && (
-                    <button onClick={() => onRemovePlayer(p.player_id)}
-                      style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
-                  )}
-                </span>
-              ))}
-            </div>
+          {hasFilter && (
+            <button onClick={clearFilters}
+              style={{ fontSize: 11, fontWeight: 700, color: "var(--primary)", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>
+              Clear filters
+            </button>
           )}
         </div>
-      )}
+
+        {/* ── Filter bar ── */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          {/* Name search */}
+          <div style={{ position: "relative", flex: 2, minWidth: 140 }}>
+            <span style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", fontSize: 13, color: "var(--muted)", pointerEvents: "none" }}>🔍</span>
+            <input
+              className="input"
+              placeholder="Search name…"
+              value={fName}
+              onChange={e => setFName(e.target.value)}
+              style={{ paddingLeft: 28, width: "100%" }}
+            />
+          </div>
+
+          {/* Gender */}
+          <select className="input" style={{ width: 110 }} value={fGender} onChange={e => setFGender(e.target.value)}>
+            <option value="">All genders</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+          </select>
+
+          {/* Age group */}
+          <select className="input" style={{ width: 120 }} value={fAge} onChange={e => setFAge(e.target.value)}>
+            {AGE_GROUPS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+          </select>
+
+          {/* Skill level */}
+          <select className="input" style={{ width: 130 }} value={fSeed} onChange={e => setFSeed(e.target.value)}>
+            <option value="">All levels</option>
+            <option value="beginner">Beginner</option>
+            <option value="intermediate">Intermediate</option>
+            <option value="advanced">Advanced</option>
+            <option value="pro">Pro</option>
+          </select>
+        </div>
+
+        {allPlayers.length === 0 ? (
+          <div style={{ fontSize: 13, color: "var(--muted)" }}>No players added yet.</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ fontSize: 13, color: "var(--muted)", padding: "16px 0", textAlign: "center" }}>
+            No players match the current filters.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            {/* Column headers */}
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 56px 80px 130px auto",
+              gap: 8, padding: "6px 8px",
+              fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1,
+              color: "var(--muted)", borderBottom: "1px solid var(--border)",
+            }}>
+              <span>Name</span>
+              <span>Age</span>
+              <span>Gender</span>
+              <span>Skill Level</span>
+              <span></span>
+            </div>
+
+            {filtered.map((p, idx) => (
+              <div key={p.player_id} style={{
+                display: "grid", gridTemplateColumns: "1fr 56px 80px 130px auto",
+                gap: 8, padding: "9px 8px", alignItems: "center",
+                borderBottom: idx < filtered.length - 1 ? "1px solid var(--border)" : "none",
+                background: idx % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)",
+              }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>{p.name}</span>
+                <span style={{ fontSize: 13, color: "var(--muted)" }}>{p.age || "—"}</span>
+                <span style={{ fontSize: 12, color: "var(--muted)", textTransform: "capitalize" }}>{p.gender || "—"}</span>
+                <select
+                  value={p.seed_level || ""}
+                  onChange={e => onUpdateSeed && onUpdateSeed(p.player_id, e.target.value)}
+                  style={{
+                    padding: "4px 8px", borderRadius: 6, fontSize: 12, fontWeight: 600,
+                    border: "1px solid var(--border)", background: "var(--surface)",
+                    color: p.seed_level ? SEED_COLOR[p.seed_level] || "var(--ink)" : "var(--muted)",
+                    cursor: onUpdateSeed ? "pointer" : "default",
+                  }}
+                >
+                  {SEED_LEVELS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+                {onRemovePlayer && (
+                  <button onClick={() => onRemovePlayer(p.player_id)}
+                    style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", padding: "0 4px", fontSize: 16, lineHeight: 1, opacity: 0.6 }}
+                    title="Remove player">×</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
 // ── Doubles Pairs ─────────────────────────────────────────────
-export function DoublesTab({ event, onAddPair, onRemovePair, pairs, flash }) {
+export function DoublesTab({ event, onAddPair, onRemovePair, pairs, flash, numGroups, setNumGroups, onGenerateGroups }) {
   const [form, setForm] = useState({
     pair_name:       "",
     player1_name:    "",
     player2_name:    "",
     contact_phone:   "",
+    seed_level:      "",
   });
 
   const handleAdd = () => {
@@ -171,14 +338,14 @@ export function DoublesTab({ event, onAddPair, onRemovePair, pairs, flash }) {
     if (!form.player2_name.trim()) return flash("Player 2 name required.");
     const pairName = form.pair_name.trim() ||
       `${form.player1_name.trim()} & ${form.player2_name.trim()}`;
-    onAddPair({
-      ...form,
-      pair_name: pairName,
-    });
-    setForm({ pair_name: "", player1_name: "", player2_name: "", contact_phone: "" });
+    onAddPair({ ...form, pair_name: pairName, seed_level: form.seed_level || null });
+    setForm({ pair_name: "", player1_name: "", player2_name: "", contact_phone: "", seed_level: "" });
   };
 
-  const isMixed = event.sport_config?.mixed;
+  const isMixed        = event.sport_config?.mixed;
+  const isGroupKnockout = event.format === "group_knockout";
+  const groups          = event.groups || [];
+  const hasGroups       = groups.length > 0;
 
   return (
     <div>
@@ -218,16 +385,111 @@ export function DoublesTab({ event, onAddPair, onRemovePair, pairs, flash }) {
           </div>
         </div>
 
-        <div className="field">
-          <label>Contact Phone (optional)</label>
-          <input className="input" placeholder="9876543210" type="tel"
-            value={form.contact_phone} onChange={e => setForm(f => ({ ...f, contact_phone: e.target.value }))} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Contact Phone (optional)</label>
+            <input className="input" placeholder="9876543210" type="tel"
+              value={form.contact_phone} onChange={e => setForm(f => ({ ...f, contact_phone: e.target.value }))} />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Skill Level (optional)</label>
+            <select className="input" value={form.seed_level}
+              onChange={e => setForm(f => ({ ...f, seed_level: e.target.value }))}>
+              <option value="">No seed</option>
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+              <option value="pro">Pro</option>
+            </select>
+          </div>
         </div>
 
         <div style={{ textAlign: "right" }}>
           <button className="btn btn-primary" onClick={handleAdd}>Add Pair</button>
         </div>
       </div>
+
+      {/* ── Groups section (group_knockout only) ──────────────── */}
+      {isGroupKnockout && (
+        <div className="card">
+          <div className="card-title">Groups</div>
+
+          {!hasGroups ? (
+            <div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 14 }}>
+                Pairs are randomly divided into groups. Each group runs its own knockout bracket.
+                Winners and runners-up advance to the championship bracket.
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: "var(--muted)" }}>
+                    Number of Groups
+                  </span>
+                  <input
+                    type="number"
+                    value={numGroups}
+                    min={2} max={16}
+                    onChange={e => setNumGroups(Math.max(2, Math.min(16, parseInt(e.target.value) || 2)))}
+                    style={{ width: 60, padding: "6px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)", fontSize: 15, fontWeight: 700, textAlign: "center" }}
+                  />
+                  <span style={{ fontSize: 10, color: "var(--muted)" }}>Min 2 · Standard 4</span>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  style={{ height: 36 }}
+                  disabled={pairs.length < numGroups * 2}
+                  onClick={onGenerateGroups}
+                >
+                  Generate Groups
+                </button>
+              </div>
+              {pairs.length < numGroups * 2 && pairs.length > 0 && (
+                <div style={{ marginTop: 10, fontSize: 11, color: "var(--gold)", fontWeight: 600 }}>
+                  Need at least {numGroups * 2} pairs for {numGroups} groups (currently {pairs.length}).
+                </div>
+              )}
+              {pairs.length === 0 && (
+                <div style={{ marginTop: 10, fontSize: 11, color: "var(--muted)" }}>
+                  Register pairs above first.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+                {groups.length} group{groups.length !== 1 ? "s" : ""} created — go to{" "}
+                <strong>Fixtures</strong> to manage matches.
+              </div>
+              {groups.map(g => {
+                const groupPairs = (g.players || g.participants || []);
+                return (
+                  <div key={g.group_id} className="group-box" style={{ marginBottom: 10 }}>
+                    <div className="group-title">
+                      {g.name}
+                      <span style={{ fontWeight: 400, fontSize: 11, color: "var(--muted)", textTransform: "none", marginLeft: 6 }}>
+                        ({groupPairs.length} pairs)
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {groupPairs.map((p, i) => (
+                        <span key={p.team_id || p.ep_id || i} className="player-chip">
+                          {p.name}
+                        </span>
+                      ))}
+                      {groupPairs.length === 0 && (
+                        <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>Empty</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              <button className="btn btn-sm btn-outline" style={{ marginTop: 4, fontSize: 11 }} onClick={onGenerateGroups}>
+                Reset &amp; Regenerate Groups
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Registered pairs */}
       <div className="section-label">{pairs.length} pair{pairs.length !== 1 ? "s" : ""} registered</div>
@@ -247,16 +509,20 @@ export function DoublesTab({ event, onAddPair, onRemovePair, pairs, flash }) {
             <div key={team.team_id || i} className="team-card">
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div>
-                  {/* Pair display: "Rahul & Priya" */}
                   <div style={{
                     fontFamily: "var(--font-display)", fontSize: 16, fontWeight: 900,
                     textTransform: "uppercase", letterSpacing: -0.5, color: "var(--ink)",
                   }}>
                     {p1?.name || "—"} & {p2?.name || "—"}
                   </div>
-                  {team.contact_phone && (
-                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-                      📞 {team.contact_phone}
+                  {(team.contact_phone || team.seed_level) && (
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2, display: "flex", gap: 8 }}>
+                      {team.contact_phone && <span>📞 {team.contact_phone}</span>}
+                      {team.seed_level && (
+                        <span style={{ fontWeight: 700, textTransform: "capitalize", color: "var(--gold)" }}>
+                          {team.seed_level}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -265,7 +531,6 @@ export function DoublesTab({ event, onAddPair, onRemovePair, pairs, flash }) {
                   Remove
                 </button>
               </div>
-              {/* Pair name chip */}
               {team.name && team.name !== `${p1?.name} & ${p2?.name}` && (
                 <div style={{ marginTop: 6 }}>
                   <span className="pill pill-gold">{team.name}</span>

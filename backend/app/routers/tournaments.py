@@ -346,15 +346,16 @@ def _serialize_participant(ep: EventParticipant, is_team: bool) -> dict:
         }
     elif ep.player:
         return {
-            "ep_id":     ep.ep_id,
-            "player_id": ep.player.player_id,
-            "name":      ep.player.name,
-            "age":       ep.player.age,
-            "gender":    ep.player.gender,
-            "seed":      ep.seed,
-            "group_id":  ep.group_id,
+            "ep_id":      ep.ep_id,
+            "player_id":  ep.player.player_id,
+            "name":       ep.player.name,
+            "age":        ep.player.age,
+            "gender":     ep.player.gender,
+            "seed":       ep.seed,
+            "seed_level": ep.player.seed_level,
+            "group_id":   ep.group_id,
         }
-    return {"ep_id": ep.ep_id, "name": "Unknown", "seed": ep.seed, "group_id": ep.group_id}
+    return {"ep_id": ep.ep_id, "name": "Unknown", "seed": ep.seed, "seed_level": None, "group_id": ep.group_id}
 
 
 # ── Update tournament ─────────────────────────────────────────
@@ -527,6 +528,21 @@ def generate_fixtures(
             return [ep.team_id for ep in eps if ep.team_id]
         return [ep.player_id for ep in eps if ep.player_id]
 
+    # ── Helper: build {participant_id: seed_score} dict ───────
+    def _get_seed_scores():
+        eps = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event_id,
+            EventParticipant.seed.isnot(None),
+        ).all()
+        if not eps:
+            return None  # no seeds set — fall back to shuffle
+        scores = {}
+        for ep in eps:
+            pid = ep.team_id if is_team_event else ep.player_id
+            if pid and ep.seed is not None:
+                scores[pid] = ep.seed
+        return scores if scores else None
+
     # ── Helper: already-existing pair set ─────────────────────
     def _existing_pairs(group_id=None):
         q = db.query(Match).filter(Match.event_id == event_id)
@@ -614,7 +630,8 @@ def generate_fixtures(
         # Delegate bracket layout to the dedicated knockout module.
         # build_bracket returns an ordered list of match specs with correct
         # stage labels and round numbers for any player count.
-        specs = build_bracket(ids, shuffle=True, third_place=third_place)
+        seed_scores = _get_seed_scores()
+        specs = build_bracket(ids, shuffle=not seed_scores, third_place=third_place, seed_scores=seed_scores)
 
         for spec in specs:
             table_counter += 1
@@ -851,9 +868,13 @@ def generate_groups(
 
     all_ids = [ep.team_id if is_team_event else ep.player_id for ep in eps]
     ep_by_pid = {}
+    seed_map = {}
     for ep in eps:
         pid = ep.team_id if is_team_event else ep.player_id
         ep_by_pid[pid] = ep
+        if pid and ep.seed is not None:
+            seed_map[pid] = ep.seed
+    seed_scores_for_groups = seed_map if seed_map else None
 
     # Delete old groups and their scheduled matches
     old_groups = db.query(Group).filter(Group.event_id == event_id).all()
@@ -871,7 +892,11 @@ def generate_groups(
 
     # Create new groups and assign participants
     group_labels = [chr(ord("A") + i) for i in range(num_groups)]
-    assigned_groups = assign_players_to_groups(all_ids, num_groups, shuffle=True)
+    assigned_groups = assign_players_to_groups(
+        all_ids, num_groups,
+        shuffle=not seed_scores_for_groups,
+        seed_scores=seed_scores_for_groups,
+    )
 
     matches_created = 0
     table_counter = 0

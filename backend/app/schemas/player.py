@@ -9,6 +9,7 @@ class PlayerCreate(BaseModel):
     gender: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    seed_level: Optional[str] = None  # beginner / intermediate / advanced / pro
 
 
 class PlayerOut(BaseModel):
@@ -18,6 +19,7 @@ class PlayerOut(BaseModel):
     gender: Optional[str]
     phone: Optional[str]
     email: Optional[str]
+    seed_level: Optional[str] = None
     created_at: datetime
 
     class Config:

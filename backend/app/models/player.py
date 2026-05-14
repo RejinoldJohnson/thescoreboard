@@ -21,6 +21,8 @@ class Player(Base):
     email      = Column(String(200), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    seed_level = Column(String(20), nullable=True)  # beginner / intermediate / advanced / pro
+
     org = relationship("Organization")
     event_participations = relationship("EventParticipant", back_populates="player",
                                         foreign_keys="EventParticipant.player_id")
@@ -36,6 +38,8 @@ class Team(Base):
     contact_name  = Column(String(150), nullable=True)
     contact_phone = Column(String(30),  nullable=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
+
+    seed_level = Column(String(20), nullable=True)  # beginner / intermediate / advanced / pro
 
     org = relationship("Organization")
     members              = relationship("TeamMember", back_populates="team",
