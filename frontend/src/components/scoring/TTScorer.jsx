@@ -1,37 +1,58 @@
 /**
  * TTScorer — fullscreen Table Tennis live scorer.
- * Stadium Lights design: deep black, electric orange accents, gold scores.
+ * Grass-green design with swap-sides support.
  *
  * Set flow:
  *   addPoint → if winning score → show pendingSet confirmation overlay
  *              (score is NOT sent to backend yet)
  *   Organiser confirms → confirmSet → onScore → backend advances to next set or ends match
  *   "Cancel" on overlay → dismiss without scoring the point
+ *
+ * Swap logic:
+ *   baseSwap   — manual toggle before any point is scored
+ *   autoSwap   — true when completedSets is odd (auto-switch after every set)
+ *   isSwapped  — baseSwap XOR autoSwap  (actual display flip)
+ *   canSwap    — no points scored yet and match not done
  */
 import { useState } from "react";
 
-export default function TTScorer({ match, config, onScore, onUndoSet, onClose }) {
+export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover, onClose }) {
   const p1   = match.player_1;
   const p2   = match.player_2;
-  // Backend serializes sets with field "winner" (not "winner_position")
   const sets = (match.sets || []).slice().sort((a, b) => a.set_number - b.set_number);
-  const currentSet  = sets.find(s => !s.is_complete) || sets[sets.length - 1];
-  const isDone      = match.status === "done";
+  const currentSet = sets.find(s => !s.is_complete) || sets[sets.length - 1];
+  const isDone     = match.status === "done";
 
-  // Per-match sets_to_win overrides event default
   const setsToWin = match.live_state?.sets_to_win ?? config?.sets_to_win ?? 2;
   const totalSets = setsToWin * 2 - 1;
 
   const s1 = currentSet?.score_p1 ?? 0;
   const s2 = currentSet?.score_p2 ?? 0;
 
-  const [firstServer, setFirstServer] = useState(match.current_server || 1);
-  // pendingSet: holds winning score waiting for organiser to confirm before committing to backend
-  const [pendingSet,  setPendingSet]  = useState(null);
+  const [firstServer,    setFirstServer]    = useState(match.current_server || 1);
+  const [pendingSet,     setPendingSet]     = useState(null);
+  const [walkoverPending, setWalkoverPending] = useState(false);
+  const [baseSwap,       setBaseSwap]       = useState(false);
 
   const pts      = config?.points_per_set  || 11;
   const margin   = config?.win_margin      || 2;
   const deuce_at = config?.deuce_starts_at ?? (pts - 1);
+
+  // ── Swap logic ───────────────────────────────────────────────
+  const completedSets    = sets.filter(s => s.is_complete).length;
+  const autoSwap         = completedSets % 2 !== 0;
+  const isSwapped        = baseSwap !== autoSwap;  // XOR
+
+  const completedPts = sets.filter(s => s.is_complete).reduce((a, s) => a + s.score_p1 + s.score_p2, 0);
+  const canSwap      = s1 === 0 && s2 === 0 && completedPts === 0 && !isDone;
+
+  // Display-side to position mapping
+  const leftPos  = isSwapped ? 2 : 1;
+  const rightPos = isSwapped ? 1 : 2;
+  const leftName  = isSwapped ? (p2?.name || "Player 2") : (p1?.name || "Player 1");
+  const rightName = isSwapped ? (p1?.name || "Player 1") : (p2?.name || "Player 2");
+  const leftScore  = isSwapped ? s2 : s1;
+  const rightScore = isSwapped ? s1 : s2;
 
   // ── Serve calculation ────────────────────────────────────────
   const isDeuce = s1 >= deuce_at && s2 >= deuce_at;
@@ -47,16 +68,17 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
     return flips % 2 === 0 ? firstServer : other;
   })();
 
-  // ── Set/match winner detection ───────────────────────────────
-  // Uses backend field name: s.winner (NOT s.winner_position)
+  // ── Set/match winner detection ────────────────────────────────
   const setsWon1 = sets.filter(s => s.is_complete && s.winner === 1).length;
   const setsWon2 = sets.filter(s => s.is_complete && s.winner === 2).length;
+
+  const leftSetsWon  = isSwapped ? setsWon2 : setsWon1;
+  const rightSetsWon = isSwapped ? setsWon1 : setsWon2;
 
   const matchWinner = isDone
     ? (p1?.is_winner ? 1 : p2?.is_winner ? 2 : null)
     : null;
 
-  // Detect if current set score has already won the set (disables buttons while loadData is in flight)
   const setWinner = (() => {
     const d = s1 >= deuce_at && s2 >= deuce_at;
     if (d) {
@@ -74,12 +96,6 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
     return null;
   })();
 
-  const p1Name = p1?.name || "Player 1";
-  const p2Name = p2?.name || "Player 2";
-
-  // ── Check if a proposed score (ns1, ns2) would win the set ──
-  // Two ways to win a set: reach pts (e.g. 11) with a margin, OR the 7-0 early rule.
-  // Either way it is ONLY a set win — the match continues until enough sets are won.
   const checkSetWin = (ns1, ns2) => {
     const d = ns1 >= deuce_at && ns2 >= deuce_at;
     if (d) {
@@ -89,7 +105,6 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
       if (ns1 >= pts) return 1;
       if (ns2 >= pts) return 2;
     }
-    // 7-0 early set win
     const iw = config?.instant_win;
     if (iw?.enabled) {
       if (ns1 === iw.score && ns2 === iw.opponent_score) return 1;
@@ -98,13 +113,12 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
     return null;
   };
 
-  // ── Point buttons ────────────────────────────────────────────
-  const addPoint = (player) => {
+  // ── Point buttons ─────────────────────────────────────────────
+  const addPoint = (pos) => {
     if (isDone || setWinner || pendingSet) return;
-    const ns1 = player === 1 ? s1 + 1 : s1;
-    const ns2 = player === 2 ? s2 + 1 : s2;
+    const ns1 = pos === 1 ? s1 + 1 : s1;
+    const ns2 = pos === 2 ? s2 + 1 : s2;
     const winner = checkSetWin(ns1, ns2);
-
     if (winner) {
       const projSW1 = setsWon1 + (winner === 1 ? 1 : 0);
       const projSW2 = setsWon2 + (winner === 2 ? 1 : 0);
@@ -120,30 +134,32 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
     }
   };
 
-  // Organiser confirms the set result → commit score to backend
   const confirmSet = () => {
     if (!pendingSet) return;
     onScore(pendingSet.ns1, pendingSet.ns2, serving);
     setPendingSet(null);
   };
 
-  const undoPoint = (player) => {
-    if (player === 1 && s1 === 0) return;
-    if (player === 2 && s2 === 0) return;
-    onScore(player === 1 ? s1 - 1 : s1, player === 2 ? s2 - 1 : s2, serving);
+  const undoPoint = (pos) => {
+    if (pos === 1 && s1 === 0) return;
+    if (pos === 2 && s2 === 0) return;
+    onScore(pos === 1 ? s1 - 1 : s1, pos === 2 ? s2 - 1 : s2, serving);
   };
 
-  // ── Colors ───────────────────────────────────────────────────
+  // ── Colors ────────────────────────────────────────────────────
   const c = {
-    bg:      "#0d0d0d",
-    surface: "#1a1a1a",
-    border:  "#2a2a2a",
-    orange:  "#FF6B35",
-    gold:    "#FFCC00",
+    bg:      "#080b08",
+    surface: "#111711",
+    surface2:"#182018",
+    border:  "#1f2b1f",
     green:   "#22c55e",
+    greenDim:"#16a34a",
+    greenGlow:"#22c55e33",
+    gold:    "#facc15",
     red:     "#ef4444",
-    muted:   "#666",
-    ink:     "#fff",
+    muted:   "#5a6e5a",
+    mutedHi: "#8aaa8a",
+    ink:     "#f0fdf0",
   };
 
   const scoreColor = (pos) => {
@@ -152,255 +168,481 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
     return c.ink;
   };
 
+  // Map display-side "left serving" to position check
+  const leftServing  = serving === leftPos;
+  const rightServing = serving === rightPos;
+
+  // Set-dot helper
+  const SetDots = ({ won, total }) => (
+    <div style={{ display:"flex", gap:4, justifyContent:"center", marginTop:6 }}>
+      {Array.from({ length: total }).map((_, i) => (
+        <div key={i} style={{
+          width:8, height:8, borderRadius:"50%",
+          background: i < won ? c.green : c.border,
+          boxShadow:  i < won ? `0 0 6px ${c.green}88` : "none",
+          transition: "all .3s",
+        }} />
+      ))}
+    </div>
+  );
+
   return (
     <div style={{
       position:"fixed", inset:0, zIndex:9999,
       background: c.bg,
       display:"flex", flexDirection:"column", overflow:"hidden",
-      fontFamily:"'Space Grotesk', sans-serif",
+      fontFamily:"'Space Grotesk', system-ui, sans-serif",
     }}>
+
+      {/* ── CSS for pulse animation ── */}
+      <style>{`
+        @keyframes tt-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+        @keyframes tt-glow  { 0%,100%{box-shadow:0 0 12px #22c55e44} 50%{box-shadow:0 0 28px #22c55e88} }
+        .tt-pulse { animation: tt-pulse 1.5s ease-in-out infinite; }
+        .tt-btn-point:hover:not(:disabled) { filter: brightness(1.15); transform: translateY(-1px); }
+        .tt-btn-swap:hover:not(:disabled)  { background: #22c55e22 !important; }
+      `}</style>
 
       {/* ── TOP BAR ── */}
       <div style={{
         display:"flex", justifyContent:"space-between", alignItems:"center",
-        padding:"10px 20px",
+        padding:"10px 16px",
         background: c.surface,
-        borderBottom: `2px solid ${c.orange}`,
+        borderBottom: `2px solid ${c.border}`,
+        gap:10,
       }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        {/* Live badge + set counter */}
+        <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
           <span style={{
             display:"inline-flex", alignItems:"center", gap:6,
-            background:c.orange, color:c.bg,
-            fontFamily:"'Unbounded',sans-serif",
+            background: isDone ? c.gold : c.green,
+            color: "#000",
+            fontFamily:"'Space Grotesk', sans-serif",
             fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase",
             padding:"3px 10px", borderRadius:4,
           }}>
-            <span style={{ width:7, height:7, borderRadius:"50%", background:c.bg, animation:"pulse 1.5s infinite", display:"inline-block" }}/>
-            {isDone ? "Final" : `Set ${currentSet?.set_number || 1}`}
+            <span className="tt-pulse" style={{
+              width:7, height:7, borderRadius:"50%",
+              background:"#000",
+              display: isDone ? "none" : "inline-block",
+            }}/>
+            {isDone ? "Final" : `Set ${currentSet?.set_number || 1} of ${totalSets}`}
           </span>
-          <span style={{ fontSize:12, color:c.muted, fontWeight:600 }}>
-            Sets: <strong style={{ color:c.orange }}>{setsWon1}</strong>
-            <span style={{ color:c.border, margin:"0 6px" }}>—</span>
-            <strong style={{ color:c.orange }}>{setsWon2}</strong>
-            <span style={{ color:c.muted, marginLeft:8, fontSize:11 }}>{totalSets} sets</span>
+          <span style={{ fontSize:11, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>
+            <strong style={{ color:c.green }}>{setsWon1}</strong>
+            <span style={{ color:c.border, margin:"0 5px" }}>—</span>
+            <strong style={{ color:c.green }}>{setsWon2}</strong>
           </span>
         </div>
+
+        {/* Swap button — centre */}
+        <button
+          className="tt-btn-swap"
+          onClick={() => canSwap && setBaseSwap(b => !b)}
+          disabled={!canSwap}
+          title={canSwap ? "Swap player sides" : "Cannot swap after match starts"}
+          style={{
+            display:"flex", alignItems:"center", gap:6,
+            padding:"6px 14px", borderRadius:8, cursor: canSwap ? "pointer" : "not-allowed",
+            background: "transparent",
+            color:  canSwap ? c.green : c.muted,
+            border: `1px solid ${canSwap ? c.green + "66" : c.border}`,
+            fontSize:12, fontWeight:700, fontFamily:"inherit",
+            opacity: canSwap ? 1 : 0.45,
+            transition:"all .15s",
+          }}
+        >
+          ⇌ Swap Sides
+        </button>
+
+        {/* Close */}
         <button onClick={onClose} style={{
           background:"transparent", color:c.muted,
           border:`1px solid ${c.border}`,
           borderRadius:6, padding:"5px 14px", cursor:"pointer",
           fontSize:12, fontWeight:700, fontFamily:"inherit",
+          flexShrink:0,
         }}>✕ Close</button>
       </div>
 
-      <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", padding:"16px 20px 20px", gap:16, maxWidth:600, margin:"0 auto", width:"100%" }}>
+      {/* ── AUTO-SWAP INDICATOR ── */}
+      {autoSwap && !isDone && (
+        <div style={{
+          background:`${c.green}12`,
+          borderBottom:`1px solid ${c.green}22`,
+          textAlign:"center", padding:"5px 0",
+          fontSize:11, color:c.greenDim, fontWeight:600, letterSpacing:1,
+        }}>
+          ⇌ Sides switched for Set {currentSet?.set_number || 1}
+        </div>
+      )}
+
+      {/* ── MAIN CONTENT ── */}
+      <div style={{
+        flex:1, display:"flex", flexDirection:"column",
+        justifyContent:"center", padding:"12px 16px 16px",
+        gap:14, maxWidth:600, margin:"0 auto", width:"100%",
+      }}>
 
         {/* ── SET HISTORY ── */}
-        {sets.filter(s => s.is_complete).length > 0 && (
-          <div style={{ display:"flex", justifyContent:"center", gap:6, flexWrap:"wrap" }}>
-            {sets.filter(s => s.is_complete).map(s => (
-              <span key={s.set_number} style={{
-                fontSize:11, padding:"3px 10px", borderRadius:4, fontWeight:800,
-                // Backend field is "winner", not "winner_position"
-                background: s.winner === 1 ? `${c.green}18` : `${c.red}18`,
-                color:      s.winner === 1 ? c.green : c.red,
-                border: `1px solid ${s.winner === 1 ? c.green : c.red}44`,
-                fontFamily:"'Unbounded',sans-serif",
-              }}>
-                S{s.set_number}: {s.score_p1}–{s.score_p2}
-              </span>
-            ))}
+        {completedSets > 0 && (
+          <div style={{ display:"flex", justifyContent:"center", gap:5, flexWrap:"wrap" }}>
+            {sets.filter(s => s.is_complete).map(s => {
+              // Show score from left-player perspective
+              const lScore = isSwapped ? s.score_p2 : s.score_p1;
+              const rScore = isSwapped ? s.score_p1 : s.score_p2;
+              const leftWon = isSwapped ? s.winner === 2 : s.winner === 1;
+              return (
+                <span key={s.set_number} style={{
+                  fontSize:10, padding:"3px 9px", borderRadius:4, fontWeight:800,
+                  background: leftWon ? `${c.green}18` : `${c.red}18`,
+                  color:      leftWon ? c.green : c.red,
+                  border: `1px solid ${leftWon ? c.green : c.red}33`,
+                  letterSpacing:1,
+                }}>
+                  S{s.set_number}: {lScore}–{rScore}
+                </span>
+              );
+            })}
           </div>
         )}
 
         {/* ── SERVE SELECTOR ── */}
         {!isDone && !setWinner && (
           <div style={{ display:"flex", justifyContent:"center", gap:8 }}>
-            {[1, 2].map(pos => (
+            {[
+              { pos: leftPos,  label: leftName },
+              { pos: rightPos, label: rightName },
+            ].map(({ pos, label }) => (
               <button key={pos} onClick={() => setFirstServer(pos)} style={{
-                padding:"7px 18px", borderRadius:8, fontWeight:700, fontSize:12, cursor:"pointer",
-                fontFamily:"inherit",
-                background: serving === pos ? c.orange : "transparent",
-                color:      serving === pos ? c.bg : c.muted,
-                border:     serving === pos ? `2px solid ${c.orange}` : `2px solid ${c.border}`,
+                padding:"6px 16px", borderRadius:8, fontWeight:700, fontSize:11,
+                cursor:"pointer", fontFamily:"inherit",
+                background: serving === pos ? `${c.green}22` : "transparent",
+                color:      serving === pos ? c.green : c.muted,
+                border:     serving === pos ? `2px solid ${c.green}` : `2px solid ${c.border}`,
                 transition:"all .15s",
               }}>
-                {pos === 1 ? p1Name : p2Name}
+                {label}
               </button>
             ))}
           </div>
         )}
 
         {/* ── SCORE DISPLAY ── */}
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:16 }}>
-          {[
-            { name: p1Name, score: s1, pos: 1 },
-            null,
-            { name: p2Name, score: s2, pos: 2 },
-          ].map((side, i) =>
-            side ? (
-              <div key={side.pos} style={{ flex:1, textAlign:"center" }}>
-                <div style={{
-                  fontSize:11, fontWeight:700, letterSpacing:2, textTransform:"uppercase",
-                  color: serving === side.pos && !isDone ? c.orange : c.muted,
-                  marginBottom:8, transition:"color .15s",
-                }}>
-                  {side.name}
-                </div>
-                <div style={{
-                  fontFamily:"'Unbounded',sans-serif",
-                  fontSize: window.innerWidth < 400 ? 72 : 96,
-                  fontWeight:900, lineHeight:1,
-                  color: scoreColor(side.pos),
-                  transition:"color .3s",
-                }}>
-                  {side.score}
-                </div>
-              </div>
-            ) : (
-              <div key="vs" style={{ color:c.border, fontSize:28, fontWeight:900, flexShrink:0 }}>—</div>
-            )
-          )}
+        <div style={{ display:"flex", alignItems:"stretch", justifyContent:"center", gap:12 }}>
+
+          {/* LEFT PANEL */}
+          <div style={{
+            flex:1, textAlign:"center", padding:"16px 8px 12px",
+            background: leftServing && !isDone ? `${c.green}0e` : c.surface,
+            borderRadius:14,
+            border: `1px solid ${leftServing && !isDone ? c.green + "44" : c.border}`,
+            boxShadow: leftServing && !isDone ? `0 0 24px ${c.green}18` : "none",
+            transition:"all .3s",
+          }}>
+            {/* Serving dot */}
+            <div style={{ height:10, display:"flex", justifyContent:"center", marginBottom:8 }}>
+              {leftServing && !isDone && (
+                <div className="tt-pulse" style={{
+                  width:8, height:8, borderRadius:"50%", background:c.green,
+                  boxShadow:`0 0 8px ${c.green}`,
+                }}/>
+              )}
+            </div>
+            <div style={{
+              fontSize:11, fontWeight:700, letterSpacing:2, textTransform:"uppercase",
+              color: leftServing && !isDone ? c.green : c.mutedHi, marginBottom:6,
+            }}>
+              {leftName}
+            </div>
+            <div style={{
+              fontSize: window.innerWidth < 400 ? 76 : 96,
+              fontWeight:900, lineHeight:1,
+              color: scoreColor(leftPos),
+              transition:"color .3s",
+            }}>
+              {leftScore}
+            </div>
+            <SetDots won={leftSetsWon} total={setsToWin} />
+          </div>
+
+          {/* DIVIDER */}
+          <div style={{
+            display:"flex", alignItems:"center",
+            color:c.border, fontSize:24, fontWeight:900, flexShrink:0, padding:"0 4px",
+          }}>—</div>
+
+          {/* RIGHT PANEL */}
+          <div style={{
+            flex:1, textAlign:"center", padding:"16px 8px 12px",
+            background: rightServing && !isDone ? `${c.green}0e` : c.surface,
+            borderRadius:14,
+            border: `1px solid ${rightServing && !isDone ? c.green + "44" : c.border}`,
+            boxShadow: rightServing && !isDone ? `0 0 24px ${c.green}18` : "none",
+            transition:"all .3s",
+          }}>
+            <div style={{ height:10, display:"flex", justifyContent:"center", marginBottom:8 }}>
+              {rightServing && !isDone && (
+                <div className="tt-pulse" style={{
+                  width:8, height:8, borderRadius:"50%", background:c.green,
+                  boxShadow:`0 0 8px ${c.green}`,
+                }}/>
+              )}
+            </div>
+            <div style={{
+              fontSize:11, fontWeight:700, letterSpacing:2, textTransform:"uppercase",
+              color: rightServing && !isDone ? c.green : c.mutedHi, marginBottom:6,
+            }}>
+              {rightName}
+            </div>
+            <div style={{
+              fontSize: window.innerWidth < 400 ? 76 : 96,
+              fontWeight:900, lineHeight:1,
+              color: scoreColor(rightPos),
+              transition:"color .3s",
+            }}>
+              {rightScore}
+            </div>
+            <SetDots won={rightSetsWon} total={setsToWin} />
+          </div>
+
         </div>
 
         {/* ── STATUS TEXT ── */}
         {isDeuce && !setWinner && (
-          <div style={{ textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:c.red }}>
-            {s1 === s2 ? "Deuce" : `Advantage ${s1 > s2 ? p1Name : p2Name}`}
+          <div style={{
+            textAlign:"center", fontSize:12, fontWeight:800,
+            textTransform:"uppercase", letterSpacing:2, color:c.red,
+          }}>
+            {s1 === s2 ? "Deuce" : `Advantage ${s1 > s2 ? (isSwapped ? rightName : leftName) : (isSwapped ? leftName : rightName)}`}
           </div>
         )}
         {setWinner && !matchWinner && (
-          <div style={{ textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:c.green }}>
-            Set {currentSet?.set_number} → {setWinner === 1 ? p1Name : p2Name}
+          <div style={{
+            textAlign:"center", fontSize:13, fontWeight:800,
+            textTransform:"uppercase", letterSpacing:2, color:c.green,
+          }}>
+            Set {currentSet?.set_number} → {setWinner === leftPos ? leftName : rightName}
           </div>
         )}
         {matchWinner && (
-          <div style={{ textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:16, fontWeight:900, textTransform:"uppercase", letterSpacing:2, color:c.gold }}>
-            {matchWinner === 1 ? p1Name : p2Name} Wins!
+          <div style={{
+            textAlign:"center", fontSize:16, fontWeight:900,
+            textTransform:"uppercase", letterSpacing:2, color:c.gold,
+          }}>
+            {matchWinner === leftPos ? leftName : rightName} Wins!
+          </div>
+        )}
+
+        {/* ── WALKOVER BADGE ── */}
+        {isDone && match.live_state?.walkover && (
+          <div style={{
+            textAlign:"center", padding:"6px 0",
+            fontSize:11, fontWeight:800,
+            textTransform:"uppercase", letterSpacing:2, color:"#ef4444",
+          }}>
+            Walkover / No Show
           </div>
         )}
 
         {/* ── POINT BUTTONS ── */}
         {!isDone && (
-          <div style={{ display:"flex", gap:12 }}>
-            {[1, 2].map(pos => (
-              <div key={pos} style={{ flex:1, display:"flex", flexDirection:"column", gap:6 }}>
-                <button
-                  onClick={() => addPoint(pos)}
-                  disabled={!!(setWinner || pendingSet)}
-                  style={{
-                    width:"100%", padding:"18px 0", borderRadius:10,
-                    fontFamily:"'Unbounded',sans-serif",
-                    fontSize:15, fontWeight:900,
-                    background: (setWinner || pendingSet) ? c.surface : serving === pos ? c.orange : `${c.orange}cc`,
-                    color: (setWinner || pendingSet) ? c.muted : c.bg,
-                    border: serving === pos && !setWinner && !pendingSet ? `3px solid ${c.gold}` : "3px solid transparent",
-                    cursor: (setWinner || pendingSet) ? "not-allowed" : "pointer",
-                    opacity: (setWinner || pendingSet) ? .4 : 1,
-                    transition:"all .15s",
-                    boxShadow: serving === pos && !setWinner && !pendingSet ? `0 0 20px ${c.orange}44` : "none",
-                  }}
-                >
-                  + Point
-                </button>
-                <button
-                  onClick={() => undoPoint(pos)}
-                  disabled={(pos === 1 ? s1 : s2) === 0 || !!pendingSet}
-                  style={{
-                    width:"100%", padding:"9px 0", background:"transparent",
-                    color:c.muted, border:`1px solid ${c.border}`, borderRadius:8,
-                    fontSize:12, fontWeight:700, fontFamily:"inherit",
-                    cursor:(pos===1?s1:s2)===0||pendingSet?"not-allowed":"pointer",
-                    opacity:(pos===1?s1:s2)===0||pendingSet?.35:1,
-                  }}
-                >↩ Undo</button>
-              </div>
-            ))}
+          <div style={{ display:"flex", gap:10 }}>
+            {[
+              { pos: leftPos,  score: leftScore  },
+              { pos: rightPos, score: rightScore },
+            ].map(({ pos, score }) => {
+              const isServing = serving === pos;
+              const disabled  = !!(setWinner || pendingSet);
+              return (
+                <div key={pos} style={{ flex:1, display:"flex", flexDirection:"column", gap:6 }}>
+                  <button
+                    className="tt-btn-point"
+                    onClick={() => addPoint(pos)}
+                    disabled={disabled}
+                    style={{
+                      width:"100%", padding:"18px 0", borderRadius:12,
+                      fontSize:14, fontWeight:900,
+                      background: disabled ? c.surface2 : isServing ? c.green : c.greenDim,
+                      color: disabled ? c.muted : "#000",
+                      border: isServing && !disabled ? `3px solid ${c.green}` : "3px solid transparent",
+                      cursor: disabled ? "not-allowed" : "pointer",
+                      opacity: disabled ? .4 : 1,
+                      transition:"all .15s",
+                      boxShadow: isServing && !disabled ? `0 0 20px ${c.green}44` : "none",
+                    }}
+                  >
+                    + Point
+                  </button>
+                  <button
+                    onClick={() => undoPoint(pos)}
+                    disabled={score === 0 || !!pendingSet}
+                    style={{
+                      width:"100%", padding:"8px 0",
+                      background:"transparent",
+                      color:c.muted, border:`1px solid ${c.border}`, borderRadius:8,
+                      fontSize:11, fontWeight:700, fontFamily:"inherit",
+                      cursor: score===0||pendingSet ? "not-allowed" : "pointer",
+                      opacity: score===0||pendingSet ? .35 : 1,
+                    }}
+                  >↩ Undo</button>
+                </div>
+              );
+            })}
           </div>
         )}
 
         {/* ── UNDO SET ── */}
-        {!isDone && sets.length > 0 && !pendingSet && (
+        {!isDone && sets.length > 0 && !pendingSet && !walkoverPending && (
           <button onClick={onUndoSet} style={{
-            width:"100%", padding:"11px 0", background:"transparent",
+            width:"100%", padding:"10px 0", background:"transparent",
             color:c.muted, border:`1px solid ${c.border}`, borderRadius:8,
             fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer",
           }}>
             ↩ Undo Last Set
           </button>
         )}
+
+        {/* ── WALKOVER / NO SHOW ── */}
+        {!isDone && !pendingSet && !walkoverPending && (
+          <button
+            onClick={() => setWalkoverPending(true)}
+            style={{
+              width:"100%", padding:"10px 0", background:"transparent",
+              color:"#ef4444", border:"1px solid #ef444430", borderRadius:8,
+              fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer",
+            }}
+          >
+            🚫 Walkover / No Show
+          </button>
+        )}
       </div>
 
-      {/* ── SET CONFIRMATION OVERLAY ─────────────────────────────
-          Shown when a set-winning point is scored. The score is NOT
-          committed to the backend until the organiser confirms here.
-          "Cancel" dismisses without scoring the point.
-      ──────────────────────────────────────────────────────────── */}
-      {pendingSet && (
+      {/* ── WALKOVER OVERLAY ── */}
+      {walkoverPending && (
         <div style={{
           position:"absolute", inset:0, zIndex:10,
-          background:"rgba(0,0,0,0.92)",
+          background:"rgba(0,0,0,0.95)",
           display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
           gap:24, padding:32,
         }}>
-          {/* Stage label */}
           <div style={{
-            fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800,
-            textTransform:"uppercase", letterSpacing:4, color:c.orange,
+            fontSize:10, fontWeight:800,
+            textTransform:"uppercase", letterSpacing:4, color:"#ef4444",
+          }}>
+            Walkover / No Show
+          </div>
+          <div style={{ fontSize:14, color:c.muted, textAlign:"center", fontWeight:600 }}>
+            Who wins? (opponent did not show up or forfeited)
+          </div>
+          <div style={{ display:"flex", gap:16, width:"100%", maxWidth:380 }}>
+            {[
+              { pos: leftPos,  name: leftName  },
+              { pos: rightPos, name: rightName },
+            ].map(({ pos, name }) => (
+              <button
+                key={pos}
+                onClick={() => { setWalkoverPending(false); onWalkover && onWalkover(pos); }}
+                style={{
+                  flex:1, padding:"20px 12px", borderRadius:12, cursor:"pointer",
+                  fontSize:13, fontWeight:800,
+                  textTransform:"uppercase", letterSpacing:0.5,
+                  background:"#ef444418", color:"#ef4444",
+                  border:"2px solid #ef444455",
+                  transition:"all .15s", fontFamily:"inherit",
+                }}
+              >
+                {name}
+                <div style={{ fontSize:10, fontWeight:600, color:c.muted, marginTop:6, textTransform:"none", letterSpacing:0 }}>
+                  wins by walkover
+                </div>
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize:12, color:c.muted, textAlign:"center" }}>
+            Sets will be recorded as {setsToWin}–0 ({pts}–0 each set)
+          </div>
+          <button
+            onClick={() => setWalkoverPending(false)}
+            style={{
+              background:"transparent", color:c.muted,
+              border:`1px solid ${c.border}`, borderRadius:6,
+              padding:"9px 24px", cursor:"pointer",
+              fontSize:11, fontWeight:700, fontFamily:"inherit",
+            }}
+          >
+            ↩ Cancel
+          </button>
+        </div>
+      )}
+
+      {/* ── SET CONFIRMATION OVERLAY ── */}
+      {pendingSet && (
+        <div style={{
+          position:"absolute", inset:0, zIndex:10,
+          background:"rgba(0,0,0,0.93)",
+          display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+          gap:24, padding:32,
+        }}>
+          <div style={{
+            fontSize:10, fontWeight:800,
+            textTransform:"uppercase", letterSpacing:4,
+            color: pendingSet.willEndMatch ? c.gold : c.green,
           }}>
             {pendingSet.willEndMatch ? "Match Point" : `Set ${pendingSet.setNumber} Complete`}
           </div>
 
-          {/* Winner name */}
           <div style={{ textAlign:"center" }}>
             <div style={{
-              fontFamily:"'Unbounded',sans-serif", fontSize:24, fontWeight:900, letterSpacing:-1,
-              color: pendingSet.winner === 1 ? c.green : c.red,
+              fontSize:24, fontWeight:900, letterSpacing:-1,
+              color: pendingSet.winner === leftPos ? c.green : c.red,
               marginBottom:6,
             }}>
-              {pendingSet.winner === 1 ? p1Name : p2Name}
+              {pendingSet.winner === leftPos ? leftName : rightName}
             </div>
             <div style={{ fontSize:13, color:c.muted, fontWeight:600 }}>
               {pendingSet.willEndMatch ? "wins the match" : "wins the set"}
             </div>
           </div>
 
-          {/* Score card */}
           <div style={{
-            background:c.surface, borderRadius:12,
+            background:c.surface2, borderRadius:12,
             padding:"18px 40px", textAlign:"center",
             border:`1px solid ${c.border}`,
           }}>
             <div style={{
-              fontFamily:"'Unbounded',sans-serif", fontSize:36, fontWeight:900,
+              fontSize:36, fontWeight:900,
               color:c.ink, letterSpacing:2, marginBottom:10,
             }}>
-              {pendingSet.ns1} – {pendingSet.ns2}
+              {isSwapped ? pendingSet.ns2 : pendingSet.ns1}
+              {" – "}
+              {isSwapped ? pendingSet.ns1 : pendingSet.ns2}
             </div>
-            <div style={{ fontSize:12, color:c.muted }}>
-              Set {pendingSet.setNumber} score
-            </div>
+            <div style={{ fontSize:12, color:c.muted }}>Set {pendingSet.setNumber} score</div>
             <div style={{ borderTop:`1px solid ${c.border}`, marginTop:12, paddingTop:12, fontSize:13 }}>
-              <span style={{ color:c.muted }}>Sets lead: </span>
-              <strong style={{ color: pendingSet.winner === 1 ? c.green : c.ink }}>{pendingSet.projSetsWon1}</strong>
+              <span style={{ color:c.muted }}>Sets: </span>
+              <strong style={{ color: pendingSet.winner === leftPos ? c.green : c.ink }}>
+                {isSwapped ? pendingSet.projSetsWon2 : pendingSet.projSetsWon1}
+              </strong>
               <span style={{ color:c.border, margin:"0 10px" }}>—</span>
-              <strong style={{ color: pendingSet.winner === 2 ? c.green : c.ink }}>{pendingSet.projSetsWon2}</strong>
+              <strong style={{ color: pendingSet.winner === rightPos ? c.green : c.ink }}>
+                {isSwapped ? pendingSet.projSetsWon1 : pendingSet.projSetsWon2}
+              </strong>
               <span style={{ color:c.muted, marginLeft:8, fontSize:11 }}>of {setsToWin} needed</span>
             </div>
           </div>
 
-          {/* Confirm button */}
           <button
             onClick={confirmSet}
             style={{
               padding:"16px 48px", borderRadius:12, cursor:"pointer",
-              fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:800,
-              background: pendingSet.willEndMatch ? c.gold : c.orange,
-              color: c.bg, border:"none",
-              textTransform:"uppercase", letterSpacing:1,
+              fontSize:13, fontWeight:800,
+              background: pendingSet.willEndMatch ? c.gold : c.green,
+              color: "#000", border:"none",
+              textTransform:"uppercase", letterSpacing:1, fontFamily:"inherit",
               boxShadow: pendingSet.willEndMatch
                 ? `0 0 32px ${c.gold}44`
-                : `0 0 32px ${c.orange}44`,
+                : `0 0 32px ${c.green}44`,
             }}
           >
             {pendingSet.willEndMatch
@@ -408,7 +650,6 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onClose })
               : `Continue to Set ${pendingSet.setNumber + 1} →`}
           </button>
 
-          {/* Cancel — dismiss overlay, point is NOT scored */}
           <button
             onClick={() => setPendingSet(null)}
             style={{

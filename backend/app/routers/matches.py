@@ -537,6 +537,71 @@ def finish_match(
     return _serialize_match(_load_match(match_id, db))
 
 
+@router.post("/matches/{match_id}/walkover")
+def walkover_match(
+    match_id: int,
+    winner_position: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Record a walkover / no-show.
+    The winner receives pts-0 in every required set and is immediately declared
+    match winner.  Winner advances in the bracket exactly as after a normal win.
+    """
+    match = _load_match(match_id, db)
+    if match.status == "done":
+        raise HTTPException(status_code=400, detail="Match is already done")
+    if winner_position not in (1, 2):
+        raise HTTPException(status_code=400, detail="winner_position must be 1 or 2")
+
+    event  = db.query(Event).filter(Event.event_id == match.event_id).first()
+    engine = get_sport_engine(event.sport_key)
+    config = dict(event.sport_config or engine.get_default_config())
+    if match.live_state and "sets_to_win" in match.live_state:
+        config["sets_to_win"] = match.live_state["sets_to_win"]
+
+    sets_to_win = config.get("sets_to_win", 2)
+    pts         = config.get("points_per_set", 11)
+
+    # Wipe any existing (incomplete) sets
+    for s in list(match.sets):
+        db.delete(s)
+    db.flush()
+
+    # Create clean walkover sets: winner gets pts, loser gets 0
+    for i in range(1, sets_to_win + 1):
+        new_set = MatchSet(
+            match_id         = match.match_id,
+            set_number       = i,
+            score_p1         = pts if winner_position == 1 else 0,
+            score_p2         = pts if winner_position == 2 else 0,
+            is_complete      = True,
+            winner_position  = winner_position,
+        )
+        db.add(new_set)
+
+    # Update aggregate scores (sets won counts)
+    parts = sorted(match.participants, key=lambda p: p.position)
+    if len(parts) == 2:
+        parts[0].score = sets_to_win if winner_position == 1 else 0
+        parts[1].score = sets_to_win if winner_position == 2 else 0
+
+    # Stamp started_at if match hadn't been started yet
+    if not match.started_at:
+        match.started_at = datetime.now(timezone.utc)
+
+    # Flag in live_state so UI can display "Walkover" badge
+    ls = dict(match.live_state or {})
+    ls["walkover"]        = True
+    ls["walkover_winner"] = winner_position
+    match.live_state = ls
+
+    _finish_match(match, winner_position, db)
+    db.commit()
+    return _serialize_match(_load_match(match_id, db))
+
+
 @router.post("/matches/{match_id}/undo-set")
 def undo_set(
     match_id: int,

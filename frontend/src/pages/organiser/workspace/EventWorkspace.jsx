@@ -3,8 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   getWorkspace,
   createPlayer, addPlayerToEvent, assignPlayerGroup, removePlayerFromEvent,
+  updateParticipantSeed,
   createGroup, generateFixtures,
-  updateMatchStatus, updateScore, undoSet, rematchMatch, deleteMatch,
+  updateMatchStatus, updateScore, undoSet, rematchMatch, deleteMatch, walkoverMatch,
   getMe, clearToken,
 } from "../../../api/client";
 import TTScorer        from "../../../components/scoring/TTScorer";
@@ -126,7 +127,12 @@ export default function EventWorkspace() {
 
   const handleAddPlayer = async (form) => {
     try {
-      const p = await createPlayer({ name: form.name.trim(), age: parseInt(form.age) || null, gender: form.gender });
+      const p = await createPlayer({
+        name:       form.name.trim(),
+        age:        parseInt(form.age) || null,
+        gender:     form.gender,
+        seed_level: form.seed_level || null,
+      });
       await addPlayerToEvent(currentEvent.event_id, p.player_id, form.group_id ? parseInt(form.group_id) : null);
       loadData(); flash("Player added!");
     } catch (e) { flash("Error: " + e.message); }
@@ -143,6 +149,13 @@ export default function EventWorkspace() {
     try {
       await removePlayerFromEvent(currentEvent.event_id, playerId);
       loadData(); flash("Player removed.");
+    } catch (e) { flash("Error: " + e.message); }
+  };
+
+  const handleUpdateSeed = async (playerId, seedLevel) => {
+    try {
+      await updateParticipantSeed(currentEvent.event_id, playerId, seedLevel);
+      loadData();
     } catch (e) { flash("Error: " + e.message); }
   };
 
@@ -165,6 +178,7 @@ export default function EventWorkspace() {
         name:          form.pair_name,
         contact_phone: form.contact_phone || "",
         sport_key:     currentEvent.sport_key,
+        seed_level:    form.seed_level || null,
         members: [
           { name: form.player1_name.trim(), role: "player1" },
           { name: form.player2_name.trim(), role: "player2" },
@@ -271,6 +285,17 @@ export default function EventWorkspace() {
     catch (e) { flash("Error: " + e.message); }
   };
 
+  const handleWalkover = async (matchId, winnerPos) => {
+    try {
+      await walkoverMatch(matchId, winnerPos);
+      loadData();
+      if (showStandings) loadStandings();
+      setActiveMatch(null);
+      flash("Walkover recorded.");
+    }
+    catch (e) { flash("Error: " + e.message); }
+  };
+
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
       <OrgHeader
@@ -361,6 +386,7 @@ export default function EventWorkspace() {
             onCreateGroup={handleCreateGroup}
             onAssignGroup={handleAssignGroup}
             onRemovePlayer={handleRemovePlayer}
+            onUpdateSeed={handleUpdateSeed}
             flash={flash}
           />
         )}
@@ -372,6 +398,9 @@ export default function EventWorkspace() {
             onAddPair={handleAddPair}
             onRemovePair={handleRemovePair}
             flash={flash}
+            numGroups={numGroups}
+            setNumGroups={setNumGroups}
+            onGenerateGroups={handleGenerateGroups}
           />
         )}
 
@@ -402,13 +431,14 @@ export default function EventWorkspace() {
                 onAction={handleMatchAction}
                 onSetConfig={handleSetConfig}
                 sportKey={currentEvent.sport_key}
+                participantType={currentEvent.participant_type}
               />
             ) : (
               <>
                 {/* ── Control bar (non-group_knockout) ── */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
                   <span style={{ fontFamily: "var(--font-display)", fontSize: 13, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
-                    {currentEvent.match_count} matches
+                    {currentEvent.match_count} {isDoubles ? "pair " : isTeam ? "team " : ""}matches
                   </span>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     {currentEvent.format === "direct_knockout" && (
@@ -529,12 +559,14 @@ export default function EventWorkspace() {
         <TTScorer match={activeMatchData} config={currentEvent.sport_config || {}}
           onScore={(s1, s2, srv) => handleScore(activeMatch, s1, s2, srv)}
           onUndoSet={() => { undoSet(activeMatch).then(loadData); }}
+          onWalkover={(winPos) => handleWalkover(activeMatch, winPos)}
           onClose={() => { setActiveMatch(null); loadData(); loadStandings(); }} />
       )}
       {activeMatch && activeMatchData && currentEvent.sport_key === "badminton" && (
         <BadmintonScorer match={activeMatchData} config={currentEvent.sport_config || {}}
           onScore={(s1, s2, srv) => handleScore(activeMatch, s1, s2, srv)}
           onUndoSet={() => { undoSet(activeMatch).then(loadData); }}
+          onWalkover={(winPos) => handleWalkover(activeMatch, winPos)}
           onClose={() => { setActiveMatch(null); loadData(); }} />
       )}
       {activeMatch && activeMatchData && currentEvent.sport_key === "cricket" && (
@@ -560,13 +592,18 @@ export default function EventWorkspace() {
 function GroupKnockoutFixtures({
   event, numGroups, setNumGroups, qualifiersPerGroup, setQualifiersPerGroup,
   thirdPlace, setThirdPlace, onGenerateGroups, onGenerateKnockout,
-  onAction, onSetConfig, sportKey,
+  onAction, onSetConfig, sportKey, participantType,
 }) {
   const allMatches      = event.matches || [];
   const groupMatches    = allMatches.filter(m => m.group_id);
   const knockoutMatches = allMatches.filter(m => !m.group_id);
   const hasGroups       = groupMatches.length > 0;
   const hasKnockout     = knockoutMatches.length > 0;
+
+  const isDoubles = participantType === "doubles_pair";
+  const isTeam    = participantType === "team";
+  const unitLabel = isDoubles ? "pairs" : isTeam ? "teams" : "players";
+  const UnitLabel = unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1);
 
   // "Group stage complete" = every group has a DONE final match
   const allGroupFinalsDone = (event.groups?.length > 0) && event.groups.every(g =>
@@ -596,16 +633,21 @@ function GroupKnockoutFixtures({
             Step 1 — Set up Groups
           </div>
           <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>
-            Players are divided randomly into groups. Each group plays a single-elimination bracket (with byes if needed). Group winner and runner-up advance to the championship bracket.
+            {UnitLabel} are divided randomly into groups. Each group plays a single-elimination bracket (with byes if needed). Group winner and runner-up advance to the championship bracket.
           </div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
-            <NumInput label="Number of groups" value={numGroups} setter={setNumGroups} min={2} max={16} />
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <NumInput label="Number of groups" value={numGroups} setter={setNumGroups} min={2} max={16} />
+              <span style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                Min 2 · Standard 4
+              </span>
+            </div>
             <button className="btn btn-primary" style={{ height: 34 }} onClick={onGenerateGroups}>
               Generate Groups
             </button>
           </div>
         </div>
-        <div className="empty"><div className="empty-icon"></div>Add players first, then generate groups.</div>
+        <div className="empty"><div className="empty-icon"></div>Add {unitLabel} first, then generate groups.</div>
       </div>
     );
   }
@@ -623,7 +665,7 @@ function GroupKnockoutFixtures({
               </div>
               <div style={{ fontSize: 12, color: "var(--muted)" }}>
                 {doneGroup}/{groupMatches.length} group matches played
-                {allGroupFinalsDone ? " — ready to seed the championship bracket." : ". Complete each group's final to advance."}
+                {allGroupFinalsDone ? ` — ready to seed the championship bracket.` : `. Complete each group's final to advance.`}
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>

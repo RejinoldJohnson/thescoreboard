@@ -33,6 +33,7 @@ def create_player(
         gender=data.gender,
         phone=data.phone,
         email=data.email,
+        seed_level=data.seed_level,
         org_id=org_id,
     )
     db.add(player)
@@ -69,6 +70,9 @@ def delete_player(
 
 # ── Event enrollment ─────────────────────────────────────────
 
+SEED_SCORES = {"beginner": 2, "intermediate": 5, "advanced": 8, "pro": 10}
+
+
 @router.post("/events/{event_id}/participants")
 def add_player_to_event(
     event_id: int,
@@ -92,6 +96,10 @@ def add_player_to_event(
     ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Player already enrolled in this event")
+
+    # Auto-compute seed score from player's seed_level if not explicitly provided
+    if seed is None and player.seed_level:
+        seed = SEED_SCORES.get(player.seed_level.lower())
 
     ep = EventParticipant(
         event_id=event_id,
@@ -180,10 +188,11 @@ def assign_player_group(
     event_id: int,
     player_id: int,
     group_id: Optional[int] = None,
+    seed_level: Optional[str] = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Set (or clear) a participant's group assignment."""
+    """Set (or clear) a participant's group and/or seed level."""
     ep = db.query(EventParticipant).filter(
         EventParticipant.event_id == event_id,
         EventParticipant.player_id == player_id,
@@ -196,7 +205,30 @@ def assign_player_group(
         ).first()
         if not group:
             raise HTTPException(status_code=404, detail="Group not found in this event")
-    ep.group_id = group_id
+    # Only update group_id when it was explicitly passed in the request
+    # (None here means "was not sent", not "clear the group")
+    # We use a sentinel approach: group_id=None with no seed_level = clear group
+    # group_id=None with seed_level = seed-only update, don't touch group
+    if seed_level is None:
+        # Legacy group-assignment path: always update group_id
+        ep.group_id = group_id
+
+    if seed_level is not None:
+        # "" means "remove seed"; otherwise map level → numeric score
+        if seed_level == "":
+            ep.seed = None
+            player = db.query(Player).filter(Player.player_id == player_id).first()
+            if player:
+                player.seed_level = None
+        else:
+            score = SEED_SCORES.get(seed_level.lower())
+            if score is None:
+                raise HTTPException(status_code=400, detail=f"Invalid seed_level: {seed_level}")
+            ep.seed = score
+            player = db.query(Player).filter(Player.player_id == player_id).first()
+            if player:
+                player.seed_level = seed_level.lower()
+
     db.commit()
     return {"ok": True}
 

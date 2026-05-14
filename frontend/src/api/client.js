@@ -62,6 +62,8 @@ export const getEventParticipants = (eId) => request("GET", `/players/events/${e
 export const removePlayerFromEvent = (eId, pId) => request("DELETE", `/players/events/${eId}/participants/${pId}`);
 export const assignPlayerGroup = (eId, pId, gId) =>
   request("PATCH", `/players/events/${eId}/participants/${pId}${gId != null ? `?group_id=${gId}` : ""}`);
+export const updateParticipantSeed = (eId, pId, seedLevel) =>
+  request("PATCH", `/players/events/${eId}/participants/${pId}?seed_level=${encodeURIComponent(seedLevel)}`);
 export const createGroup = (eId, name) => request("POST", `/players/events/${eId}/groups?name=${encodeURIComponent(name)}`);
 
 // Matches
@@ -70,6 +72,7 @@ export const createMatch = (eId, d) => request("POST", `/events/${eId}/matches`,
 export const updateMatchStatus = (mId, d) => request("PATCH", `/matches/${mId}/status`, d);
 export const updateScore = (mId, d) => request("PATCH", `/matches/${mId}/score`, d);
 export const undoSet = (mId) => request("POST", `/matches/${mId}/undo-set`);
+export const walkoverMatch = (mId, winnerPos) => request("POST", `/matches/${mId}/walkover?winner_position=${winnerPos}`);
 export const rematchMatch = (mId) => request("POST", `/matches/${mId}/rematch`);
 export const deleteMatch = (mId) => request("DELETE", `/matches/${mId}`);
 

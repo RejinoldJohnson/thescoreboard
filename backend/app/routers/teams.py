@@ -27,11 +27,15 @@ class TeamMemberIn(BaseModel):
     jersey_number: Optional[int] = None
 
 
+SEED_SCORES = {"beginner": 2, "intermediate": 5, "advanced": 8, "pro": 10}
+
+
 class TeamCreate(BaseModel):
     name:          str
     sport_key:     Optional[str] = None
     contact_name:  Optional[str] = None
     contact_phone: Optional[str] = None
+    seed_level:    Optional[str] = None  # beginner / intermediate / advanced / pro
     members:       List[TeamMemberIn] = []
 
 
@@ -55,6 +59,7 @@ def _serialize_team(team: Team) -> dict:
         "sport_key":     team.sport_key,
         "contact_name":  team.contact_name,
         "contact_phone": team.contact_phone,
+        "seed_level":    team.seed_level,
         "member_count":  len(team.members),
         "members": [
             {
@@ -96,6 +101,7 @@ def create_team(
         sport_key=data.sport_key,
         contact_name=data.contact_name,
         contact_phone=data.contact_phone,
+        seed_level=data.seed_level,
     )
     db.add(team)
     db.flush()
@@ -172,7 +178,13 @@ def add_team_to_event(
     if existing:
         raise HTTPException(status_code=400, detail="Team already enrolled in this event")
 
-    ep = EventParticipant(event_id=event_id, team_id=team_id, group_id=group_id)
+    # Auto-compute seed score from team's seed_level
+    team = db.query(Team).filter(Team.team_id == team_id).first()
+    seed = None
+    if team and team.seed_level:
+        seed = SEED_SCORES.get(team.seed_level.lower())
+
+    ep = EventParticipant(event_id=event_id, team_id=team_id, group_id=group_id, seed=seed)
     db.add(ep)
     db.commit()
     return {"ok": True, "ep_id": ep.ep_id}
