@@ -564,28 +564,40 @@ def walkover_match(
     sets_to_win = config.get("sets_to_win", 2)
     pts         = config.get("points_per_set", 11)
 
-    # Wipe any existing (incomplete) sets
+    # Wipe any existing sets
     for s in list(match.sets):
         db.delete(s)
     db.flush()
 
-    # Create clean walkover sets: winner gets pts, loser gets 0
-    for i in range(1, sets_to_win + 1):
-        new_set = MatchSet(
-            match_id         = match.match_id,
-            set_number       = i,
-            score_p1         = pts if winner_position == 1 else 0,
-            score_p2         = pts if winner_position == 2 else 0,
-            is_complete      = True,
-            winner_position  = winner_position,
-        )
-        db.add(new_set)
-
-    # Update aggregate scores (sets won counts)
     parts = sorted(match.participants, key=lambda p: p.position)
-    if len(parts) == 2:
-        parts[0].score = sets_to_win if winner_position == 1 else 0
-        parts[1].score = sets_to_win if winner_position == 2 else 0
+
+    if engine.has_sets:
+        # Set-based sports (TT, Badminton): create N walkover sets, winner gets pts-0 each
+        for i in range(1, sets_to_win + 1):
+            db.add(MatchSet(
+                match_id        = match.match_id,
+                set_number      = i,
+                score_p1        = pts if winner_position == 1 else 0,
+                score_p2        = pts if winner_position == 2 else 0,
+                is_complete     = True,
+                winner_position = winner_position,
+            ))
+        if len(parts) == 2:
+            parts[0].score = sets_to_win if winner_position == 1 else 0
+            parts[1].score = sets_to_win if winner_position == 2 else 0
+    else:
+        # Non-set sports (Football, Cricket): single result row, 1–0 walkover
+        db.add(MatchSet(
+            match_id        = match.match_id,
+            set_number      = 1,
+            score_p1        = 1 if winner_position == 1 else 0,
+            score_p2        = 1 if winner_position == 2 else 0,
+            is_complete     = True,
+            winner_position = winner_position,
+        ))
+        if len(parts) == 2:
+            parts[0].score = 1 if winner_position == 1 else 0
+            parts[1].score = 1 if winner_position == 2 else 0
 
     # Stamp started_at if match hadn't been started yet
     if not match.started_at:

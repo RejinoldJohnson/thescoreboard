@@ -6,7 +6,7 @@
  */
 import { useState } from "react";
 
-export default function FootballScorer({ match, config, onScore, onFinish, onClose }) {
+export default function FootballScorer({ match, config, onScore, onFinish, onWalkover, onClose }) {
   const p1 = match.player_1 || {};
   const p2 = match.player_2 || {};
   const sets = match.sets || [];
@@ -17,10 +17,11 @@ export default function FootballScorer({ match, config, onScore, onFinish, onClo
   const halfDuration = config.half_duration_minutes || 45;
   const totalHalves  = config.halves || 2;
 
-  const [goals1, setGoals1] = useState(currentSet?.score_p1 ?? (p1?.score ?? 0));
-  const [goals2, setGoals2] = useState(currentSet?.score_p2 ?? (p2?.score ?? 0));
-  const [minute, setMinute] = useState(ls.minute || 0);
-  const [half,   setHalf]   = useState(ls.half || 1);
+  const [goals1,       setGoals1]       = useState(currentSet?.score_p1 ?? (p1?.score ?? 0));
+  const [goals2,       setGoals2]       = useState(currentSet?.score_p2 ?? (p2?.score ?? 0));
+  const [minute,       setMinute]       = useState(ls.minute || 0);
+  const [half,         setHalf]         = useState(ls.half || 1);
+  const [showWalkover, setShowWalkover] = useState(false);
 
   const isLeading = goals1 > goals2 ? 1 : goals2 > goals1 ? 2 : 0;
 
@@ -77,7 +78,15 @@ export default function FootballScorer({ match, config, onScore, onFinish, onClo
             {isDone ? "Full Time" : `${half===1?"1st":"2nd"} Half · ${minute}'`}
           </span>
         </div>
-        <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
+        <div style={{ display:"flex", gap:8 }}>
+          {!isDone && onWalkover && (
+            <button onClick={() => setShowWalkover(true)}
+              style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>
+              Walkover
+            </button>
+          )}
+          <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
+        </div>
       </div>
 
       <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", padding:"16px 20px 24px", gap:20, maxWidth:600, margin:"0 auto", width:"100%" }}>
@@ -127,17 +136,24 @@ export default function FootballScorer({ match, config, onScore, onFinish, onClo
               </div>
             </div>
 
-            {/* Quick minute presets */}
-            <div style={{ display:"flex", gap:4, marginTop:8, flexWrap:"wrap" }}>
-              {[45, 46, 47, 48, 90, 91, 92, 93].filter(m => half===1?m<=50:m>44).slice(0,6).map(m => (
-                <button key={m} onClick={() => setMinute(m)} style={{
-                  padding:"4px 10px", background:c.surface, border:`1px solid ${c.border}`,
-                  borderRadius:4, color:c.muted, fontSize:11, fontWeight:700, cursor:"pointer",
-                  fontFamily:"'Unbounded',sans-serif",
-                }}>
-                  {m}'
-                </button>
-              ))}
+            {/* Stoppage time quick-fill */}
+            <div style={{ marginTop:10 }}>
+              <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:c.muted, marginBottom:5 }}>
+                Stoppage time
+              </div>
+              <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                {(half === 1 ? [45, 46, 47, 48] : [90, 91, 92, 93, 94, 95]).map(m => (
+                  <button key={m} onClick={() => setMinute(m)} style={{
+                    padding:"4px 10px", background: minute===m ? c.green : c.surface,
+                    border:`1px solid ${minute===m ? c.green : c.border}`,
+                    borderRadius:4, color: minute===m ? c.bg : c.muted,
+                    fontSize:11, fontWeight:700, cursor:"pointer",
+                    fontFamily:"'Unbounded',sans-serif",
+                  }}>
+                    {m}'
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -168,6 +184,33 @@ export default function FootballScorer({ match, config, onScore, onFinish, onClo
           </div>
         )}
       </div>
+
+      {/* ── WALKOVER MODAL ── */}
+      {showWalkover && (
+        <div style={{ position:"fixed", inset:0, zIndex:10000, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:c.surface, border:`1px solid ${c.border}`, borderRadius:14, padding:"28px 24px", width:"100%", maxWidth:340 }}>
+            <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.ink, marginBottom:6 }}>
+              Record Walkover / No-show
+            </div>
+            <div style={{ fontSize:12, color:c.muted, marginBottom:20, lineHeight:1.5 }}>
+              The match will be marked complete. The winning team advances. No goals are recorded.
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
+              {[{ pos:1, name:p1?.name||"Team 1" }, { pos:2, name:p2?.name||"Team 2" }].map(({ pos, name }) => (
+                <button key={pos}
+                  onClick={() => { setShowWalkover(false); onWalkover(pos); }}
+                  style={{ padding:"14px 20px", borderRadius:10, background:`${c.green}18`, border:`2px solid ${c.green}`, color:c.ink, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:800, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
+                  {name} wins by walkover
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowWalkover(false)}
+              style={{ width:"100%", padding:"10px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

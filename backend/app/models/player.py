@@ -54,8 +54,9 @@ class TeamMember(Base):
     tm_id         = Column(Integer, primary_key=True)
     team_id       = Column(Integer, ForeignKey("teams.team_id", ondelete="CASCADE"), nullable=False)
     name          = Column(String(150), nullable=False)
-    role          = Column(String(50),  nullable=True)   # captain / player / goalkeeper
+    role          = Column(String(50),  nullable=True)   # captain / vice_captain / player
     jersey_number = Column(Integer,     nullable=True)
+    age           = Column(Integer,     nullable=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now())
 
     team = relationship("Team", back_populates="members")

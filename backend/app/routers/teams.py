@@ -25,6 +25,7 @@ class TeamMemberIn(BaseModel):
     name:          str
     role:          Optional[str] = "player"
     jersey_number: Optional[int] = None
+    age:           Optional[int] = None
 
 
 SEED_SCORES = {"beginner": 2, "intermediate": 5, "advanced": 8, "pro": 10}
@@ -67,8 +68,9 @@ def _serialize_team(team: Team) -> dict:
                 "name":          m.name,
                 "role":          m.role,
                 "jersey_number": m.jersey_number,
+                "age":           m.age,
             }
-            for m in sorted(team.members, key=lambda x: (x.role != "captain", x.tm_id))
+            for m in sorted(team.members, key=lambda x: (x.role != "captain", x.role != "vice_captain", x.tm_id))
         ],
     }
 
@@ -112,6 +114,7 @@ def create_team(
             name=m.name.strip(),
             role=m.role or "player",
             jersey_number=m.jersey_number,
+            age=m.age,
         ))
 
     db.commit()
@@ -327,6 +330,7 @@ def public_register_team(
                 name=m.name.strip(),
                 role=m.role if m.role else ("player1" if i == 0 else "player2"),
                 jersey_number=m.jersey_number,
+                age=m.age,
             ))
 
     # ── Enrol in target events

@@ -579,6 +579,7 @@ export default function EventWorkspace() {
         <FootballScorer match={activeMatchData} config={currentEvent.sport_config || {}}
           onScore={(s1, s2, extra) => updateScore(activeMatch, { score_p1: s1, score_p2: s2, ...extra }).then(loadData)}
           onFinish={(wp) => handleFinishMatch(activeMatch, wp)}
+          onWalkover={(winPos) => handleWalkover(activeMatch, winPos)}
           onClose={() => { setActiveMatch(null); loadData(); }} />
       )}
     </div>

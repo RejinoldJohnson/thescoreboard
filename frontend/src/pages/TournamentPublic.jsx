@@ -40,6 +40,7 @@ async function apiPost(path, body) {
 
 const registerIndividual = (tId, p) => apiPost(`/public/tournaments/${tId}/register`, p);
 const registerPair       = (tId, p) => apiPost(`/public/tournaments/${tId}/register-team`, p);
+const registerTeam       = (tId, p) => apiPost(`/public/tournaments/${tId}/register-team`, p);
 
 // ── Status config ─────────────────────────────────────────────
 const STATUS_CFG = {
@@ -65,23 +66,24 @@ function computeStandings(event) {
     const n2 = m.player_2?.name;
     if (!n1 || !n2 || n1 === "TBD" || n2 === "TBD") continue;
 
-    if (!table[n1]) table[n1] = { name: n1, p: 0, w: 0, l: 0, sw: 0, sl: 0, pts: 0 };
-    if (!table[n2]) table[n2] = { name: n2, p: 0, w: 0, l: 0, sw: 0, sl: 0, pts: 0 };
+    if (!table[n1]) table[n1] = { name: n1, p: 0, w: 0, d: 0, l: 0, sf: 0, sa: 0, pts: 0 };
+    if (!table[n2]) table[n2] = { name: n2, p: 0, w: 0, d: 0, l: 0, sf: 0, sa: 0, pts: 0 };
 
     table[n1].p++; table[n2].p++;
-    table[n1].sw += m.player_1?.score ?? 0;
-    table[n1].sl += m.player_2?.score ?? 0;
-    table[n2].sw += m.player_2?.score ?? 0;
-    table[n2].sl += m.player_1?.score ?? 0;
+    table[n1].sf += m.player_1?.score ?? 0;
+    table[n1].sa += m.player_2?.score ?? 0;
+    table[n2].sf += m.player_2?.score ?? 0;
+    table[n2].sa += m.player_1?.score ?? 0;
 
     if (m.status === "done") {
-      if (m.player_1?.is_winner) { table[n1].w++; table[n1].pts += 3; table[n2].l++; }
-      else                       { table[n2].w++; table[n2].pts += 3; table[n1].l++; }
+      if (m.player_1?.is_winner)      { table[n1].w++; table[n1].pts += 3; table[n2].l++; }
+      else if (m.player_2?.is_winner) { table[n2].w++; table[n2].pts += 3; table[n1].l++; }
+      else                            { table[n1].d++; table[n1].pts++; table[n2].d++; table[n2].pts++; }
     }
   }
 
   return Object.values(table).sort((a, b) =>
-    b.pts - a.pts || b.w - a.w || (b.sw - b.sl) - (a.sw - a.sl)
+    b.pts - a.pts || b.w - a.w || (b.sf - b.sa) - (a.sf - a.sa)
   );
 }
 
@@ -216,23 +218,116 @@ function DoublesForm({ event, tournament, onSuccess, onBack }) {
   );
 }
 
-// ── Team info ─────────────────────────────────────────────────
-function TeamInfo({ event, onBack }) {
+// ── Team registration form ────────────────────────────────────
+function TeamRegistrationForm({ event, tournament, onSuccess, onBack }) {
+  const cfg        = event.sport_config || {};
+  const teamSize   = cfg.team_size   || 11;
+  const subs       = cfg.substitutes || 0;
+  const totalSlots = teamSize + subs;
+
+  const emptyMember = (role) => ({ name: "", role, jersey: "", age: "" });
+  const [teamName, setTeamName] = useState("");
+  const [phone,    setPhone]    = useState("");
+  const [members,  setMembers]  = useState(() => [
+    emptyMember("captain"),
+    emptyMember("vice_captain"),
+    ...Array.from({ length: Math.max(0, Math.min(totalSlots - 2, 9)) }, () => emptyMember("player")),
+  ]);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+
+  const updateMember = (i, field, val) =>
+    setMembers(prev => prev.map((m, idx) => idx === i ? { ...m, [field]: val } : m));
+  const addSlot = () => setMembers(prev => [...prev, emptyMember("player")]);
+  const removeSlot = (i) => setMembers(prev => prev.filter((_, idx) => idx !== i));
+
+  const submit = async () => {
+    if (!teamName.trim()) return setError("Team name is required.");
+    const captain = members.find(m => m.role === "captain" && m.name.trim());
+    if (!captain)         return setError("Captain name is required.");
+    const valid = members
+      .filter(m => m.name.trim())
+      .map(m => ({
+        name:          m.name.trim(),
+        role:          m.role,
+        jersey_number: m.jersey ? parseInt(m.jersey) || null : null,
+        age:           m.age    ? parseInt(m.age)    || null : null,
+      }));
+    setLoading(true); setError("");
+    try {
+      await registerTeam(tournament.tournament_id, {
+        name:          teamName.trim(),
+        contact_phone: phone.trim(),
+        sport_key:     event.sport_key,
+        event_ids:     [event.event_id],
+        members:       valid,
+      });
+      onSuccess(teamName.trim());
+    } catch(e) { setError(e.message); } finally { setLoading(false); }
+  };
+
+  const roleLabel = r => r === "vice_captain" ? "Vice Captain" : r.charAt(0).toUpperCase() + r.slice(1);
+  const roleOptions = ["captain", "vice_captain", "player"];
+
   return (
     <div>
-      <FormHeader event={event} subtitle="Team Sport" onBack={onBack} />
-      <div style={{ textAlign:"center", padding:"28px 0" }}>
-        <div style={{ width:56, height:56, borderRadius:10, background:"var(--elevated)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"var(--font-display)", fontSize:18, fontWeight:900, color:"var(--muted)", margin:"0 auto 14px" }}>
-          {sa(event.sport_key)}
-        </div>
-        <h3 style={{ fontFamily:"var(--font-display)", fontSize:17, fontWeight:900, textTransform:"uppercase", letterSpacing:-0.5, marginBottom:10 }}>Team Registration</h3>
-        <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.7, maxWidth:300, margin:"0 auto 20px" }}>
-          Team registrations for <strong style={{ color:"var(--ink)" }}>{sl(event.sport_key)}</strong> are managed by the organiser.
-        </p>
-        <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:8, padding:"12px 18px", display:"inline-block", fontSize:13, color:"var(--muted)" }}>
-          Contact the organiser to register your team
-        </div>
+      <FormHeader event={event} subtitle="Team Registration" onBack={onBack} />
+      {error && <div className="pub-error">{error}</div>}
+
+      {/* Team details */}
+      <div className="field">
+        <label>Team Name *</label>
+        <input className="input" autoFocus placeholder="e.g. FC Rangers"
+          value={teamName} onChange={e => setTeamName(e.target.value)} />
       </div>
+      <div className="field">
+        <label>Captain's Contact Phone</label>
+        <input className="input" type="tel" placeholder="9876543210"
+          value={phone} onChange={e => setPhone(e.target.value)} />
+      </div>
+
+      {/* Squad size hint */}
+      <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:8, padding:"8px 14px", marginBottom:16, fontSize:12, color:"var(--muted)", lineHeight:1.5 }}>
+        {sl(event.sport_key)} · {teamSize} on field{subs > 0 ? ` + ${subs} subs` : ""} · Fill in your full squad below
+      </div>
+
+      {/* Column headers */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 58px 52px 130px 28px", gap:6, marginBottom:4 }}>
+        {["Player Name","Jersey","Age","Role",""].map(h => (
+          <span key={h} style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1, color:"var(--muted)" }}>{h}</span>
+        ))}
+      </div>
+
+      {/* Roster rows */}
+      {members.map((m, i) => (
+        <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 58px 52px 130px 28px", gap:6, marginBottom:6, alignItems:"center" }}>
+          <input className="input"
+            placeholder={i === 0 ? "Captain *" : i === 1 ? "Vice Captain" : `Player ${i + 1}`}
+            value={m.name} onChange={e => updateMember(i, "name", e.target.value)} />
+          <input className="input" type="number" placeholder="#" style={{ textAlign:"center" }}
+            value={m.jersey} onChange={e => updateMember(i, "jersey", e.target.value)} />
+          <input className="input" type="number" placeholder="Age" min="5" max="60" style={{ textAlign:"center" }}
+            value={m.age} onChange={e => updateMember(i, "age", e.target.value)} />
+          <select className="input" value={m.role} onChange={e => updateMember(i, "role", e.target.value)}>
+            {roleOptions.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+          </select>
+          <button onClick={() => removeSlot(i)} disabled={members.length <= 1}
+            style={{ background:"none", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:18, padding:0, opacity: members.length <= 1 ? 0.3 : 1 }}>×</button>
+        </div>
+      ))}
+
+      {members.length < totalSlots + 3 && (
+        <button onClick={addSlot} style={{ width:"100%", padding:"8px 0", background:"none", border:"1.5px dashed var(--border)", borderRadius:6, color:"var(--muted)", fontFamily:"var(--font-display)", fontSize:11, fontWeight:700, letterSpacing:1, textTransform:"uppercase", cursor:"pointer", marginBottom:16, marginTop:4 }}>
+          + Add Player
+        </button>
+      )}
+
+      <p style={{ fontSize:11, color:"var(--muted)", marginBottom:14 }}>
+        {members.filter(m => m.name.trim()).length} of {totalSlots} roster slots filled
+      </p>
+      <button className="btn btn-gradient btn-lg" style={{ width:"100%" }} onClick={submit} disabled={loading}>
+        {loading ? "Registering…" : "Register Team →"}
+      </button>
     </div>
   );
 }
@@ -518,7 +613,7 @@ function RegisterSection({ events, tournament }) {
       {phase === "success" && <SuccessView name={regName} event={selEvt} onBack={handleBack} />}
       {phase === "form" && selEvt && (() => {
         const mode = getRegMode(selEvt);
-        if (mode === "team")    return <TeamInfo     event={selEvt} onBack={handleBack} />;
+        if (mode === "team")    return <TeamRegistrationForm event={selEvt} tournament={tournament} onSuccess={n => { setRegName(n); setPhase("success"); }} onBack={handleBack} />;
         if (mode === "doubles") return <DoublesForm  event={selEvt} tournament={tournament} onSuccess={n => { setRegName(n); setPhase("success"); }} onBack={handleBack} />;
         return                         <IndividualForm event={selEvt} tournament={tournament} onSuccess={n => { setRegName(n); setPhase("success"); }} onBack={handleBack} />;
       })()}
@@ -643,8 +738,17 @@ function LeaderboardSection({ events }) {
   return (
     <Section id="leaderboard" title="Leaderboard" accent="#eab308">
       {relevant.map(ev => {
-        const rows = computeStandings(ev);
-        const isGK = ev.format === "group_knockout";
+        const rows  = computeStandings(ev);
+        const isGK  = ev.format === "group_knockout";
+        const hasDrw = rows.some(r => r.d > 0);
+        const isFootball = ev.sport_key === "football";
+        const scoreLabel = isFootball ? "GF–GA" : "Sets";
+        const cols = hasDrw
+          ? "32px 1fr 32px 32px 32px 32px 56px"
+          : "32px 1fr 32px 32px 32px 56px";
+        const headers = hasDrw
+          ? ["#", isFootball ? "Team" : "Player", "P", "W", "D", "L", scoreLabel]
+          : ["#", isFootball ? "Team" : "Player", "P", "W", "L", scoreLabel];
 
         return (
           <div key={ev.event_id} style={{ marginBottom:28 }}>
@@ -660,8 +764,8 @@ function LeaderboardSection({ events }) {
               <>
                 <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
                   {/* Table header */}
-                  <div style={{ display:"grid", gridTemplateColumns:"32px 1fr 32px 32px 32px 52px", padding:"8px 16px", background:"var(--elevated)", borderBottom:"1px solid var(--border)" }}>
-                    {["#","Player","P","W","L","Sets"].map((h, i) => (
+                  <div style={{ display:"grid", gridTemplateColumns:cols, padding:"8px 16px", background:"var(--elevated)", borderBottom:"1px solid var(--border)" }}>
+                    {headers.map((h, i) => (
                       <span key={h} style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"var(--muted)", fontFamily:"var(--font-display)", textAlign: i > 1 ? "center" : "left" }}>{h}</span>
                     ))}
                   </div>
@@ -669,7 +773,7 @@ function LeaderboardSection({ events }) {
                     const advances = isGK && i < 2;
                     return (
                       <div key={row.name} style={{
-                        display:"grid", gridTemplateColumns:"32px 1fr 32px 32px 32px 52px",
+                        display:"grid", gridTemplateColumns:cols,
                         padding:"11px 16px", alignItems:"center",
                         borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none",
                         background: advances ? "rgba(34,197,94,0.04)" : "transparent",
@@ -678,8 +782,9 @@ function LeaderboardSection({ events }) {
                         <span style={{ fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{row.name}</span>
                         <span style={{ textAlign:"center", fontSize:12, color:"var(--muted)" }}>{row.p}</span>
                         <span style={{ textAlign:"center", fontSize:13, fontWeight:800, color: row.w > 0 ? "var(--green)" : "var(--muted)" }}>{row.w}</span>
+                        {hasDrw && <span style={{ textAlign:"center", fontSize:12, color:"var(--muted)" }}>{row.d}</span>}
                         <span style={{ textAlign:"center", fontSize:12, color:"var(--muted)" }}>{row.l}</span>
-                        <span style={{ textAlign:"center", fontSize:11, color:"var(--muted)" }}>{row.sw}–{row.sl}</span>
+                        <span style={{ textAlign:"center", fontSize:11, color:"var(--muted)" }}>{row.sf}–{row.sa}</span>
                       </div>
                     );
                   })}

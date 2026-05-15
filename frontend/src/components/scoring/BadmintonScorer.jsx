@@ -1,12 +1,23 @@
 /**
  * BadmintonScorer — fullscreen Badminton live scorer.
- * Rules: Best of 3, first to 21, win by 2, cap at 30.
- * Rally scoring: server changes each point based on who wins it.
- * Stadium Lights design — dark, electric orange, gold.
+ *
+ * Rules: Best of 3 games (configurable), first to 21, win by 2, cap at 30.
+ * Rally scoring: server changes each point (whoever wins the rally serves next).
+ *
+ * Props
+ * ─────
+ *   match       – match data from API (players, sets, status, current_server)
+ *   config      – event sport_config (points_per_set, sets_to_win, win_margin, max_points)
+ *   onScore     – (score_p1, score_p2, current_server) → void
+ *   onUndoSet   – () → void
+ *   onWalkover  – (winner_position: 1|2) → void
+ *   onClose     – () → void
  */
 import { useState } from "react";
 
-export default function BadmintonScorer({ match, config, onScore, onUndoSet, onClose }) {
+export default function BadmintonScorer({ match, config, onScore, onUndoSet, onWalkover, onClose }) {
+  const [showWalkover, setShowWalkover] = useState(false);
+
   const p1 = match.player_1 || {};
   const p2 = match.player_2 || {};
   const sets = (match.sets || []).slice().sort((a, b) => a.set_number - b.set_number);
@@ -16,12 +27,12 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
   const s1 = currentSet?.score_p1 ?? 0;
   const s2 = currentSet?.score_p2 ?? 0;
 
-  const pts      = config.points_per_set || 21;
-  const margin   = config.win_margin || 2;
-  const maxPts   = config.max_points || 30;
-  const deuceAt  = config.deuce_starts_at || 20;
-  const isDeuce  = s1 >= deuceAt && s2 >= deuceAt;
-  const isCap    = s1 >= maxPts - 1 || s2 >= maxPts - 1;
+  const pts     = config.points_per_set || 21;
+  const margin  = config.win_margin     || 2;
+  const maxPts  = config.max_points     || 30;
+  const deuceAt = config.deuce_starts_at || pts - 1;
+  const isDeuce = s1 >= deuceAt && s2 >= deuceAt;
+  const isCap   = s1 >= maxPts - 1 || s2 >= maxPts - 1;
 
   const setWinner = (() => {
     if (s1 >= maxPts && s1 > s2) return 1;
@@ -31,11 +42,11 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
     return null;
   })();
 
-  const setsWon1 = sets.filter(s => s.is_complete && s.winner_position === 1).length;
-  const setsWon2 = sets.filter(s => s.is_complete && s.winner_position === 2).length;
+  const setsWon1    = sets.filter(s => s.is_complete && s.winner_position === 1).length;
+  const setsWon2    = sets.filter(s => s.is_complete && s.winner_position === 2).length;
   const matchWinner = isDone ? (p1?.is_winner ? 1 : p2?.is_winner ? 2 : null) : null;
 
-  // In badminton, server = whoever won the last point. We track as current_server.
+  // In badminton, server = whoever won the last rally; tracked in current_server.
   const serving = isDone ? null : (match.current_server || 1);
 
   const p1Name = p1?.name || "Player 1";
@@ -45,7 +56,7 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
     if (isDone || setWinner) return;
     const ns1 = player === 1 ? s1 + 1 : s1;
     const ns2 = player === 2 ? s2 + 1 : s2;
-    // In badminton, winner of the point serves next
+    // Winner of the rally becomes server
     onScore(ns1, ns2, player);
   };
 
@@ -55,10 +66,22 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
     onScore(player === 1 ? s1 - 1 : s1, player === 2 ? s2 - 1 : s2, serving);
   };
 
+  const handleWalkover = (pos) => {
+    setShowWalkover(false);
+    onWalkover(pos);
+  };
+
   const c = {
-    bg:"#0d0d0d", surface:"#1a1a1a", border:"#2a2a2a",
-    orange:"#FF6B35", gold:"#FFCC00", green:"#22c55e", red:"#ef4444",
-    blue:"#38bdf8", muted:"#666", ink:"#fff",
+    bg:      "#0d0d0d",
+    surface: "#1a1a1a",
+    border:  "#2a2a2a",
+    orange:  "#FF6B35",
+    gold:    "#FFCC00",
+    green:   "#22c55e",
+    red:     "#ef4444",
+    blue:    "#38bdf8",
+    muted:   "#666",
+    ink:     "#fff",
   };
 
   const scoreColor = (pos) => {
@@ -76,20 +99,30 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:c.blue, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
             <span style={{ width:7, height:7, borderRadius:"50%", background:c.bg, animation:"pulse 1.5s infinite", display:"inline-block" }}/>
-            {isDone ? "Final" : `Set ${currentSet?.set_number || 1}`}
+            {isDone ? "Final" : `Game ${currentSet?.set_number || 1}`}
           </span>
           <span style={{ fontSize:12, color:c.muted, fontWeight:600 }}>
-            Sets: <strong style={{ color:c.blue }}>{setsWon1}</strong>
+            Games: <strong style={{ color:c.blue }}>{setsWon1}</strong>
             <span style={{ color:c.border, margin:"0 6px" }}>—</span>
             <strong style={{ color:c.blue }}>{setsWon2}</strong>
           </span>
         </div>
-        <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
+        <div style={{ display:"flex", gap:8 }}>
+          {!isDone && onWalkover && (
+            <button
+              onClick={() => setShowWalkover(true)}
+              style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}
+            >
+              Walkover
+            </button>
+          )}
+          <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
+        </div>
       </div>
 
       <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", padding:"16px 20px 20px", gap:16, maxWidth:600, margin:"0 auto", width:"100%" }}>
 
-        {/* ── SET HISTORY ── */}
+        {/* ── GAME HISTORY ── */}
         {sets.filter(s => s.is_complete).length > 0 && (
           <div style={{ display:"flex", justifyContent:"center", gap:6, flexWrap:"wrap" }}>
             {sets.filter(s => s.is_complete).map(s => (
@@ -100,21 +133,19 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
           </div>
         )}
 
-        {/* ── SERVER ── */}
+        {/* ── SERVER INDICATOR ── */}
         {!isDone && !setWinner && (
           <div style={{ textAlign:"center", fontSize:12, color:c.muted, fontWeight:600 }}>
             Serving: <strong style={{ color:c.blue }}>{serving===1?p1Name:p2Name}</strong>
           </div>
         )}
 
-        {/* ── TARGET SCORE ── */}
-        {!isDone && !setWinner && (
-          <div style={{ display:"flex", justifyContent:"center", gap:6 }}>
-            {isDeuce && (
-              <span style={{ fontSize:11, fontWeight:800, fontFamily:"'Unbounded',sans-serif", textTransform:"uppercase", letterSpacing:1, color:c.blue }}>
-                {isCap ? `Match Point` : "Deuce — Win by 2"}
-              </span>
-            )}
+        {/* ── DEUCE / CAP INDICATOR ── */}
+        {!isDone && !setWinner && isDeuce && (
+          <div style={{ display:"flex", justifyContent:"center" }}>
+            <span style={{ fontSize:11, fontWeight:800, fontFamily:"'Unbounded',sans-serif", textTransform:"uppercase", letterSpacing:1, color:c.blue }}>
+              {isCap ? "Game Point — next wins" : "Deuce — win by 2"}
+            </span>
           </div>
         )}
 
@@ -140,7 +171,7 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
           )}
         </div>
 
-        {/* ── STATUS ── */}
+        {/* ── GAME / MATCH WINNER BANNER ── */}
         {setWinner && !matchWinner && (
           <div style={{ textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:c.green }}>
             Game {currentSet?.set_number} → {setWinner===1?p1Name:p2Name}
@@ -148,36 +179,82 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onC
         )}
         {matchWinner && (
           <div style={{ textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:16, fontWeight:900, textTransform:"uppercase", letterSpacing:2, color:c.gold }}>
-            {matchWinner === 1 ? p1Name : p2Name} Wins!
+            {matchWinner===1?p1Name:p2Name} Wins!
           </div>
         )}
 
         {/* ── POINT BUTTONS ── */}
         {!isDone && (
           <div style={{ display:"flex", gap:12 }}>
-            {[1,2].map(pos => (
+            {[1, 2].map(pos => (
               <div key={pos} style={{ flex:1, display:"flex", flexDirection:"column", gap:6 }}>
-                <button onClick={() => addPoint(pos)} disabled={!!setWinner} style={{
-                  width:"100%", padding:"18px 0", borderRadius:10,
-                  fontFamily:"'Unbounded',sans-serif", fontSize:15, fontWeight:900,
-                  background: setWinner?c.surface:serving===pos?c.blue:`${c.blue}99`,
-                  color: setWinner?c.muted:c.bg,
-                  border: serving===pos&&!setWinner?`3px solid ${c.gold}`:"3px solid transparent",
-                  cursor: setWinner?"not-allowed":"pointer", opacity:setWinner?.4:1,
-                  boxShadow: serving===pos&&!setWinner?`0 0 20px ${c.blue}44`:"none",
-                }}>+ Point</button>
-                <button onClick={() => undoPoint(pos)} disabled={(pos===1?s1:s2)===0} style={{ width:"100%", padding:"9px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:(pos===1?s1:s2)===0?"not-allowed":"pointer", opacity:(pos===1?s1:s2)===0?.35:1 }}>↩ Undo</button>
+                <button
+                  onClick={() => addPoint(pos)}
+                  disabled={!!setWinner}
+                  style={{
+                    width:"100%", padding:"18px 0", borderRadius:10,
+                    fontFamily:"'Unbounded',sans-serif", fontSize:15, fontWeight:900,
+                    background: setWinner?c.surface:serving===pos?c.blue:`${c.blue}99`,
+                    color: setWinner?c.muted:c.bg,
+                    border: serving===pos&&!setWinner?`3px solid ${c.gold}`:"3px solid transparent",
+                    cursor: setWinner?"not-allowed":"pointer", opacity:setWinner?.4:1,
+                    boxShadow: serving===pos&&!setWinner?`0 0 20px ${c.blue}44`:"none",
+                  }}
+                >
+                  + Point
+                </button>
+                <button
+                  onClick={() => undoPoint(pos)}
+                  disabled={(pos===1?s1:s2)===0}
+                  style={{ width:"100%", padding:"9px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:(pos===1?s1:s2)===0?"not-allowed":"pointer", opacity:(pos===1?s1:s2)===0?.35:1 }}
+                >
+                  ↩ Undo
+                </button>
               </div>
             ))}
           </div>
         )}
 
         {!isDone && sets.length > 0 && (
-          <button onClick={onUndoSet} style={{ width:"100%", padding:"11px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
+          <button
+            onClick={onUndoSet}
+            style={{ width:"100%", padding:"11px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}
+          >
             ↩ Undo Last Game
           </button>
         )}
       </div>
+
+      {/* ── WALKOVER MODAL ── */}
+      {showWalkover && (
+        <div style={{ position:"fixed", inset:0, zIndex:10000, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:c.surface, border:`1px solid ${c.border}`, borderRadius:14, padding:"28px 24px", width:"100%", maxWidth:340 }}>
+            <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.ink, marginBottom:6 }}>
+              Record Walkover
+            </div>
+            <div style={{ fontSize:12, color:c.muted, marginBottom:20, lineHeight:1.5 }}>
+              The match will be marked as done. The winner advances in the bracket. Walkover score is recorded automatically.
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
+              {[{ pos:1, name:p1Name }, { pos:2, name:p2Name }].map(({ pos, name }) => (
+                <button
+                  key={pos}
+                  onClick={() => handleWalkover(pos)}
+                  style={{ padding:"14px 20px", borderRadius:10, background:`${c.blue}18`, border:`2px solid ${c.blue}`, color:c.ink, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:800, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}
+                >
+                  {name} wins by walkover
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowWalkover(false)}
+              style={{ width:"100%", padding:"10px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

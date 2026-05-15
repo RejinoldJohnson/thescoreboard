@@ -510,6 +510,16 @@ def _serialize_match(m: Match) -> dict:
     p1 = parts[0] if len(parts) > 0 else None
     p2 = parts[1] if len(parts) > 1 else None
     sets = sorted(m.sets, key=lambda s: s.set_number) if m.sets else []
+
+    def _name(p):
+        if not p:
+            return "TBD"
+        if p.team:
+            return p.team.name
+        if p.player:
+            return p.player.name
+        return "TBD"
+
     return {
         "match_id":       m.match_id,
         "event_id":       m.event_id,
@@ -519,12 +529,12 @@ def _serialize_match(m: Match) -> dict:
         "table_number":   m.table_number,
         "current_server": m.current_server,
         "player_1": {
-            "name":      p1.player.name if p1 and p1.player else "TBD",
+            "name":      _name(p1),
             "score":     p1.score      if p1 else 0,
             "is_winner": p1.is_winner  if p1 else False,
         },
         "player_2": {
-            "name":      p2.player.name if p2 and p2.player else "TBD",
+            "name":      _name(p2),
             "score":     p2.score      if p2 else 0,
             "is_winner": p2.is_winner  if p2 else False,
         },
