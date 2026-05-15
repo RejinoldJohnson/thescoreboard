@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { getHomepageData, isLoggedIn } from "../api/client";
 import TournamentCard, { SPORT_LABELS } from "../components/shared/TournamentCard";
@@ -19,8 +19,19 @@ export default function Landing() {
   const [data,  setData]  = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
 
-  const fetchData = useCallback(() => {
-    getHomepageData().then(setData).catch(console.error);
+  const fetchingRef = useRef(false);
+
+  const fetchData = useCallback(async () => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+    try {
+      const d = await getHomepageData();
+      setData(d);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      fetchingRef.current = false;
+    }
   }, []);
 
   useEffect(() => {

@@ -1,10 +1,38 @@
 /**
  * FootballScorer — fullscreen Football match scorer.
- * + / − goal buttons, match minute, half selector.
- * Organiser presses "Full Time" to end match.
  * Stadium Lights design.
+ *
+ * Phase flow: Normal (1st/2nd half) → Extra Time (knockout draw) → Penalties
+ * Penalty phase: hit/miss per kick, 5 standard slots, undo support.
+ * "Full Time" is disabled during 1st half.
  */
 import { useState } from "react";
+
+// Penalty slot visual
+function PenSlot({ result, isCurrent }) {
+  const scored  = result === "H";
+  const missed  = result === "M";
+  const taken   = scored || missed;
+
+  return (
+    <div style={{
+      width: 34, height: 34, borderRadius: "50%",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 15, fontWeight: 900,
+      background: scored ? "#16a34a" : missed ? "#dc2626" : "transparent",
+      border: isCurrent
+        ? "2.5px solid #FFCC00"
+        : taken ? "none"
+        : "2px solid #3a3a3a",
+      color: "#fff",
+      boxShadow: isCurrent ? "0 0 8px #FFCC0066" : scored ? "0 0 6px #16a34a55" : "none",
+      transition: "all .2s",
+      flexShrink: 0,
+    }}>
+      {scored ? "✓" : missed ? "✗" : isCurrent ? "→" : ""}
+    </div>
+  );
+}
 
 export default function FootballScorer({ match, config, onScore, onFinish, onWalkover, onClose }) {
   const p1 = match.player_1 || {};
@@ -14,70 +42,181 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
   const isDone = match.status === "done";
   const ls     = match.live_state || {};
 
-  const halfDuration = config.half_duration_minutes || 45;
-  const totalHalves  = config.halves || 2;
+  const isKnockout = !!(match.stage && !["group"].includes(match.stage));
+
+  const getInitPhase = () => {
+    const h = ls.half || 1;
+    if (h >= 5) return "penalties";
+    if (h >= 3) return "extra_time";
+    return "normal";
+  };
 
   const [goals1,       setGoals1]       = useState(currentSet?.score_p1 ?? (p1?.score ?? 0));
   const [goals2,       setGoals2]       = useState(currentSet?.score_p2 ?? (p2?.score ?? 0));
-  const [minute,       setMinute]       = useState(ls.minute || 0);
   const [half,         setHalf]         = useState(ls.half || 1);
+  const [phase,        setPhase]        = useState(getInitPhase);
+  // Penalty histories: arrays of "H" (hit) or "M" (miss)
+  const [penH1,        setPenH1]        = useState(ls.pen_h1 || []);
+  const [penH2,        setPenH2]        = useState(ls.pen_h2 || []);
   const [showWalkover, setShowWalkover] = useState(false);
 
   const isLeading = goals1 > goals2 ? 1 : goals2 > goals1 ? 2 : 0;
+  const isDraw    = goals1 === goals2;
 
   const c = {
     bg:"#0d0d0d", surface:"#1a1a1a", border:"#2a2a2a",
     orange:"#FF6B35", gold:"#FFCC00", green:"#22c55e",
-    red:"#ef4444", muted:"#666", ink:"#fff",
+    blue:"#3b82f6", red:"#ef4444", muted:"#666", ink:"#fff",
   };
 
-  const handleScore = () => onScore(goals1, goals2, { football_minute: minute, football_half: half });
-  const handleFullTime = () => onFinish(goals1 > goals2 ? 1 : goals2 > goals1 ? 2 : null);
+  // ── Goal handling ──────────────────────────────────────────
+  const addGoal = (pos) => {
+    const g1 = pos === 1 ? goals1 + 1 : goals1;
+    const g2 = pos === 2 ? goals2 + 1 : goals2;
+    if (pos === 1) setGoals1(g1); else setGoals2(g2);
+    onScore(g1, g2, { football_half: half });
+  };
+  const removeGoal = (pos) => {
+    const g1 = pos === 1 ? Math.max(0, goals1 - 1) : goals1;
+    const g2 = pos === 2 ? Math.max(0, goals2 - 1) : goals2;
+    if (pos === 1) setGoals1(g1); else setGoals2(g2);
+    onScore(g1, g2, { football_half: half });
+  };
+  const changeHalf = (h) => {
+    setHalf(h);
+    onScore(goals1, goals2, { football_half: h });
+  };
 
-  const GoalButton = ({ pos, score, setScore }) => (
-    <div style={{ flex:1, textAlign:"center" }}>
-      <div style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", color: !isDone && isLeading === pos ? c.gold : c.muted, marginBottom:10, transition:"color .2s" }}>
-        {pos === 1 ? p1?.name||"Team 1" : p2?.name||"Team 2"}
-        {isLeading === pos && !isDone && <span style={{ color:c.gold }}> ★</span>}
-      </div>
+  // ── Penalty helpers ────────────────────────────────────────
+  const penGoals1 = penH1.filter(r => r === "H").length;
+  const penGoals2 = penH2.filter(r => r === "H").length;
 
-      {/* Score */}
-      <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:80, fontWeight:900, lineHeight:1, color: isDone && (pos===1?p1.is_winner:p2.is_winner) ? c.gold : isLeading===pos&&!isDone ? c.orange : c.ink, marginBottom:12, transition:"color .3s" }}>
-        {score}
-      </div>
+  // T1 always shoots first: if penH1.length > penH2.length → T2's turn, else T1's turn
+  const nextPenTeam   = penH1.length > penH2.length ? 2 : 1;
+  const nextPenNum    = nextPenTeam === 1 ? penH1.length + 1 : penH2.length + 1;
+  const slotsToShow   = Math.max(5, penH1.length + (nextPenTeam === 1 ? 1 : 0), penH2.length + (nextPenTeam === 2 ? 1 : 0));
 
-      {/* +/- buttons */}
-      {!isDone && (
-        <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
-          <button
-            onClick={() => { setScore(v => Math.max(0, v-1)); }}
-            style={{ width:48, height:48, borderRadius:10, background:"transparent", border:`2px solid ${c.border}`, color:c.muted, fontSize:22, cursor:"pointer", fontFamily:"'Unbounded',sans-serif", fontWeight:900 }}>
-            −
-          </button>
-          <button
-            onClick={() => { setScore(v => v+1); }}
-            style={{ width:64, height:64, borderRadius:12, background:c.orange, border:`3px solid ${c.gold}`, color:c.bg, fontSize:28, cursor:"pointer", fontFamily:"'Unbounded',sans-serif", fontWeight:900, boxShadow:`0 0 24px ${c.orange}55`, transition:"all .15s" }}
-            onMouseOver={e => e.currentTarget.style.transform="scale(1.08)"}
-            onMouseOut={e => e.currentTarget.style.transform="scale(1)"}
-          >
-            +
-          </button>
+  const savePenalties = (nh1, nh2) => {
+    const pg1 = nh1.filter(r => r === "H").length;
+    const pg2 = nh2.filter(r => r === "H").length;
+    onScore(goals1, goals2, {
+      football_half:   5,
+      football_pen_1:  pg1,
+      football_pen_2:  pg2,
+      football_live_state: { pen_h1: nh1, pen_h2: nh2 },
+    });
+  };
+
+  const recordPen = (result) => {
+    const nh1 = nextPenTeam === 1 ? [...penH1, result] : penH1;
+    const nh2 = nextPenTeam === 2 ? [...penH2, result] : penH2;
+    setPenH1(nh1);
+    setPenH2(nh2);
+    savePenalties(nh1, nh2);
+  };
+
+  const undoPen = () => {
+    if (penH1.length > penH2.length) {
+      const nh1 = penH1.slice(0, -1);
+      setPenH1(nh1);
+      savePenalties(nh1, penH2);
+    } else if (penH2.length > 0) {
+      const nh2 = penH2.slice(0, -1);
+      setPenH2(nh2);
+      savePenalties(penH1, nh2);
+    }
+  };
+
+  // Can declare winner: both teams shot equal rounds AND scores differ
+  const canDeclare = penH1.length === penH2.length && penH1.length > 0 && penGoals1 !== penGoals2;
+
+  // ── Phase transitions ──────────────────────────────────────
+  const handleFullTime = () => {
+    if (phase === "normal" && isKnockout && isDraw) {
+      setPhase("extra_time");
+      changeHalf(3);
+    } else if (phase === "extra_time" && isKnockout && goals1 === goals2) {
+      setPhase("penalties");
+      changeHalf(5);
+    } else {
+      onFinish(goals1 > goals2 ? 1 : goals2 > goals1 ? 2 : null);
+    }
+  };
+
+  const handleDeclareWinner = () => {
+    if (!canDeclare) return;
+    const winner = penGoals1 > penGoals2 ? 1 : 2;
+    onScore(goals1, goals2, {
+      football_half: 5,
+      football_pen_1: penGoals1,
+      football_pen_2: penGoals2,
+      football_live_state: { pen_h1: penH1, pen_h2: penH2 },
+    });
+    onFinish(winner);
+  };
+
+  // Disable Full Time during 1st half of normal time
+  const canEndNormal = !(phase === "normal" && half === 1);
+
+  const phaseLabel = phase === "penalties"
+    ? "Penalty Shootout"
+    : phase === "extra_time"
+    ? (half === 3 ? "Extra Time · 1st Half" : "Extra Time · 2nd Half")
+    : (half === 1 ? "1st Half" : "2nd Half");
+
+  const ftLabel = (() => {
+    if (phase === "normal" && isKnockout && isDraw) return "Full Time → Extra Time";
+    if (phase === "extra_time" && isKnockout && goals1 === goals2) return "End ET → Penalties";
+    if (phase === "extra_time") return "⏱ End Extra Time";
+    return "⏱ Full Time";
+  })();
+
+  const ftColor = (phase === "normal" && isKnockout && isDraw) ||
+                  (phase === "extra_time" && isKnockout && goals1 === goals2)
+    ? c.blue : c.green;
+
+  const GoalButton = ({ pos }) => {
+    const score  = pos === 1 ? goals1 : goals2;
+    const name   = pos === 1 ? (p1?.name||"Team 1") : (p2?.name||"Team 2");
+    const winner = isDone && (pos === 1 ? p1.is_winner : p2.is_winner);
+    const leading = isLeading === pos;
+
+    return (
+      <div style={{ flex:1, textAlign:"center" }}>
+        <div style={{ fontSize:12, fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", color: !isDone && leading ? c.gold : c.muted, marginBottom:10 }}>
+          {name}
+          {leading && !isDone && <span style={{ color:c.gold }}> ★</span>}
         </div>
-      )}
-    </div>
-  );
+        <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:80, fontWeight:900, lineHeight:1, color: winner ? c.gold : leading&&!isDone ? c.orange : c.ink, marginBottom:12, transition:"color .3s" }}>
+          {score}
+        </div>
+        {!isDone && phase !== "penalties" && (
+          <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+            <button onClick={() => removeGoal(pos)}
+              style={{ width:48, height:48, borderRadius:10, background:"transparent", border:`2px solid ${c.border}`, color:c.muted, fontSize:22, cursor:"pointer", fontFamily:"'Unbounded',sans-serif", fontWeight:900 }}>
+              −
+            </button>
+            <button onClick={() => addGoal(pos)}
+              style={{ width:64, height:64, borderRadius:12, background:c.orange, border:`3px solid ${c.gold}`, color:c.bg, fontSize:28, cursor:"pointer", fontFamily:"'Unbounded',sans-serif", fontWeight:900, boxShadow:`0 0 24px ${c.orange}55`, transition:"all .15s" }}
+              onMouseOver={e => e.currentTarget.style.transform="scale(1.08)"}
+              onMouseOut={e  => e.currentTarget.style.transform="scale(1)"}>
+              +
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={{ position:"fixed", inset:0, zIndex:9999, background:c.bg, display:"flex", flexDirection:"column", overflow:"hidden", fontFamily:"'Space Grotesk',sans-serif" }}>
 
-      {/* ── TOP BAR ── */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 20px", background:c.surface, borderBottom:`2px solid ${c.green}` }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:c.green, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
-            <span style={{ width:7, height:7, borderRadius:"50%", background:c.bg, animation:"pulse 1.5s infinite", display:"inline-block" }}/>
-            {isDone ? "Full Time" : `${half===1?"1st":"2nd"} Half · ${minute}'`}
-          </span>
-        </div>
+      {/* TOP BAR */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 20px", background:c.surface, borderBottom:`2px solid ${phase==="penalties"?c.blue:phase==="extra_time"?c.blue:c.green}` }}>
+        <span style={{ display:"inline-flex", alignItems:"center", gap:6, background: phase==="penalties"?c.blue:phase==="extra_time"?c.blue:c.green, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
+          <span style={{ width:7, height:7, borderRadius:"50%", background:c.bg, animation:"pulse 1.5s infinite", display:"inline-block" }} />
+          {isDone ? "Full Time" : phaseLabel}
+        </span>
         <div style={{ display:"flex", gap:8 }}>
           {!isDone && onWalkover && (
             <button onClick={() => setShowWalkover(true)}
@@ -89,103 +228,144 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
         </div>
       </div>
 
-      <div style={{ flex:1, display:"flex", flexDirection:"column", justifyContent:"center", padding:"16px 20px 24px", gap:20, maxWidth:600, margin:"0 auto", width:"100%" }}>
+      <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", justifyContent:"center", padding:"16px 20px 24px", gap:20, maxWidth:600, margin:"0 auto", width:"100%" }}>
 
-        {/* ── SCORE ROW ── */}
+        {/* SCORE ROW */}
         <div style={{ display:"flex", alignItems:"center", gap:20 }}>
-          <GoalButton pos={1} score={goals1} setScore={setGoals1} />
+          <GoalButton pos={1} />
           <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:8, flexShrink:0 }}>
             <div style={{ color:c.border, fontFamily:"'Unbounded',sans-serif", fontSize:24, fontWeight:900 }}>vs</div>
-            {!isDone && isLeading === 0 && (
+            {!isDone && isLeading === 0 && phase !== "penalties" && (
               <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:c.muted }}>Draw</div>
             )}
           </div>
-          <GoalButton pos={2} score={goals2} setScore={setGoals2} />
+          <GoalButton pos={2} />
         </div>
 
-        {/* ── MATCH CLOCK ── */}
-        {!isDone && (
-          <div>
-            <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:c.muted, marginBottom:8, textAlign:"center" }}>Match Clock</div>
-            <div style={{ display:"flex", gap:8 }}>
-              {/* Minute */}
-              <div style={{ flex:2 }}>
-                <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-                  <button onClick={() => setMinute(v=>Math.max(0,v-1))} style={{ padding:"8px 14px", background:c.surface, border:`1px solid ${c.border}`, borderRadius:8, color:c.muted, fontSize:16, cursor:"pointer" }}>−</button>
-                  <div style={{ flex:1, textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:28, fontWeight:900, color:c.orange }}>
-                    {minute}'
-                  </div>
-                  <button onClick={() => setMinute(v=>Math.min(halfDuration*totalHalves+15,v+1))} style={{ padding:"8px 14px", background:c.surface, border:`1px solid ${c.border}`, borderRadius:8, color:c.orange, fontSize:16, cursor:"pointer" }}>+</button>
+        {/* HALF SELECTOR — Normal */}
+        {!isDone && phase === "normal" && (
+          <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+            {[1, 2].map(h => (
+              <button key={h} onClick={() => changeHalf(h)}
+                style={{ flex:1, maxWidth:130, padding:"10px 0", borderRadius:8, background: half===h ? c.green : "transparent", border:`2px solid ${half===h ? c.green : c.border}`, color: half===h ? c.bg : c.muted, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:800, cursor:"pointer" }}>
+                {h === 1 ? "1st Half" : "2nd Half"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* HALF SELECTOR — Extra Time */}
+        {!isDone && phase === "extra_time" && (
+          <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+            {[3, 4].map(h => (
+              <button key={h} onClick={() => changeHalf(h)}
+                style={{ flex:1, maxWidth:150, padding:"10px 0", borderRadius:8, background: half===h ? c.blue : "transparent", border:`2px solid ${half===h ? c.blue : c.border}`, color: half===h ? "#fff" : c.muted, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:800, cursor:"pointer" }}>
+                {h === 3 ? "ET 1st Half" : "ET 2nd Half"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* PENALTIES UI */}
+        {!isDone && phase === "penalties" && (
+          <div style={{ background:c.surface, borderRadius:14, border:`2px solid ${c.blue}33`, padding:"20px 16px" }}>
+            {/* Penalty slot grids */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:12, alignItems:"start", marginBottom:20 }}>
+              {/* Team 1 */}
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:c.muted, marginBottom:10 }}>{p1?.name||"Team 1"}</div>
+                <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:36, fontWeight:900, color: penGoals1 > penGoals2 ? c.gold : c.ink, lineHeight:1, marginBottom:10 }}>{penGoals1}</div>
+                <div style={{ display:"flex", gap:5, justifyContent:"center", flexWrap:"wrap" }}>
+                  {Array.from({ length: slotsToShow }, (_, i) => (
+                    <PenSlot key={i} result={penH1[i]} isCurrent={nextPenTeam === 1 && i === penH1.length} />
+                  ))}
                 </div>
               </div>
-              {/* Half */}
-              <div style={{ flex:1 }}>
-                <div style={{ display:"flex", gap:4 }}>
-                  {[1,2].map(h => (
-                    <button key={h} onClick={() => setHalf(h)} style={{
-                      flex:1, padding:"10px 0", borderRadius:8,
-                      background: half===h?c.green:"transparent",
-                      border:`2px solid ${half===h?c.green:c.border}`,
-                      color: half===h?c.bg:c.muted,
-                      fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:800, cursor:"pointer",
-                    }}>
-                      {h===1?"1st":"2nd"}
-                    </button>
+
+              {/* Separator */}
+              <div style={{ textAlign:"center", paddingTop:40, fontFamily:"'Unbounded',sans-serif", fontSize:20, fontWeight:900, color:c.border }}>–</div>
+
+              {/* Team 2 */}
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:c.muted, marginBottom:10 }}>{p2?.name||"Team 2"}</div>
+                <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:36, fontWeight:900, color: penGoals2 > penGoals1 ? c.gold : c.ink, lineHeight:1, marginBottom:10 }}>{penGoals2}</div>
+                <div style={{ display:"flex", gap:5, justifyContent:"center", flexWrap:"wrap" }}>
+                  {Array.from({ length: slotsToShow }, (_, i) => (
+                    <PenSlot key={i} result={penH2[i]} isCurrent={nextPenTeam === 2 && i === penH2.length} />
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* Stoppage time quick-fill */}
-            <div style={{ marginTop:10 }}>
-              <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:c.muted, marginBottom:5 }}>
-                Stoppage time
-              </div>
-              <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                {(half === 1 ? [45, 46, 47, 48] : [90, 91, 92, 93, 94, 95]).map(m => (
-                  <button key={m} onClick={() => setMinute(m)} style={{
-                    padding:"4px 10px", background: minute===m ? c.green : c.surface,
-                    border:`1px solid ${minute===m ? c.green : c.border}`,
-                    borderRadius:4, color: minute===m ? c.bg : c.muted,
-                    fontSize:11, fontWeight:700, cursor:"pointer",
-                    fontFamily:"'Unbounded',sans-serif",
-                  }}>
-                    {m}'
-                  </button>
-                ))}
-              </div>
+            {/* Current shooter label */}
+            <div style={{ textAlign:"center", marginBottom:14 }}>
+              <span style={{ fontFamily:"'Unbounded',sans-serif", fontSize:11, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.gold }}>
+                {nextPenTeam === 1 ? (p1?.name||"Team 1") : (p2?.name||"Team 2")}'s Penalty #{nextPenNum}
+              </span>
             </div>
+
+            {/* Hit / Miss buttons */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
+              <button onClick={() => recordPen("H")}
+                style={{ padding:"16px 0", borderRadius:10, background:"#16a34a22", border:"2px solid #16a34a", color:"#4ade80", fontFamily:"'Unbounded',sans-serif", fontSize:14, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
+                ✓ Goal / Hit
+              </button>
+              <button onClick={() => recordPen("M")}
+                style={{ padding:"16px 0", borderRadius:10, background:`${c.red}18`, border:`2px solid ${c.red}`, color:c.red, fontFamily:"'Unbounded',sans-serif", fontSize:14, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
+                ✗ Miss
+              </button>
+            </div>
+
+            {/* Undo */}
+            <button onClick={undoPen} disabled={penH1.length === 0 && penH2.length === 0}
+              style={{ width:"100%", padding:"10px 0", borderRadius:8, background:"transparent", border:`1px solid ${c.border}`, color:c.muted, fontFamily:"inherit", fontSize:12, fontWeight:700, cursor: (penH1.length > 0 || penH2.length > 0) ? "pointer" : "not-allowed", opacity: (penH1.length > 0 || penH2.length > 0) ? 1 : 0.4 }}>
+              ↩ Undo Last Penalty
+            </button>
           </div>
         )}
 
-        {/* ── DONE STATE ── */}
+        {/* DONE STATE */}
         {isDone && (
           <div style={{ textAlign:"center" }}>
             <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:20, fontWeight:900, textTransform:"uppercase", letterSpacing:-1, color:c.gold }}>
-              {goals1 === goals2 ? "Draw" : `${goals1>goals2?p1?.name||"Team 1":p2?.name||"Team 2"} Win!`}
+              {p1.is_winner ? `${p1?.name||"Team 1"} Win!` : p2.is_winner ? `${p2?.name||"Team 2"} Win!` : "Draw"}
             </div>
-            <div style={{ fontSize:13, color:c.muted, marginTop:8 }}>Full Time</div>
+            {/* Show penalty summary if applicable */}
+            {(ls.pen_h1?.length > 0 || ls.pen_h2?.length > 0) && (
+              <div style={{ fontSize:13, color:c.muted, marginTop:8 }}>
+                Penalties: {ls.pen_h1?.filter(r=>r==="H").length ?? 0}–{ls.pen_h2?.filter(r=>r==="H").length ?? 0}
+              </div>
+            )}
+            <div style={{ fontSize:13, color:c.muted, marginTop:4 }}>Full Time</div>
           </div>
         )}
 
-        {/* ── ACTION BUTTONS ── */}
+        {/* ACTION BUTTONS */}
         {!isDone && (
-          <div style={{ display:"flex", gap:8, marginTop:4 }}>
-            <button
-              onClick={handleScore}
-              style={{ flex:1, padding:"14px 0", background:c.orange, border:"none", borderRadius:8, fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.bg, cursor:"pointer", boxShadow:`0 0 16px ${c.orange}33` }}>
-              Update Score
-            </button>
-            <button
-              onClick={handleFullTime}
-              style={{ flex:1, padding:"14px 0", background:`${c.green}22`, border:`2px solid ${c.green}66`, borderRadius:8, fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.green, cursor:"pointer" }}>
-              ⏱ Full Time
-            </button>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {phase !== "penalties" ? (
+              <>
+                <button onClick={handleFullTime} disabled={!canEndNormal}
+                  style={{ width:"100%", padding:"16px 0", background: canEndNormal ? `${ftColor}22` : `${c.border}22`, border:`2px solid ${canEndNormal ? ftColor : c.border}66`, borderRadius:8, fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color: canEndNormal ? ftColor : c.muted, cursor: canEndNormal ? "pointer" : "not-allowed", opacity: canEndNormal ? 1 : 0.5 }}>
+                  {canEndNormal ? ftLabel : "⚽ 1st Half in Progress…"}
+                </button>
+                {!canEndNormal && (
+                  <div style={{ textAlign:"center", fontSize:11, color:c.muted }}>
+                    Switch to 2nd Half to enable Full Time
+                  </div>
+                )}
+              </>
+            ) : (
+              <button onClick={handleDeclareWinner} disabled={!canDeclare}
+                style={{ width:"100%", padding:"16px 0", background:`${c.gold}18`, border:`2px solid ${c.gold}${canDeclare ? "" : "44"}`, borderRadius:8, fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.gold, cursor: canDeclare ? "pointer" : "not-allowed", opacity: canDeclare ? 1 : 0.5 }}>
+                🏆 Declare Penalty Winner
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {/* ── WALKOVER MODAL ── */}
+      {/* WALKOVER MODAL */}
       {showWalkover && (
         <div style={{ position:"fixed", inset:0, zIndex:10000, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
           <div style={{ background:c.surface, border:`1px solid ${c.border}`, borderRadius:14, padding:"28px 24px", width:"100%", maxWidth:340 }}>
@@ -193,21 +373,18 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
               Record Walkover / No-show
             </div>
             <div style={{ fontSize:12, color:c.muted, marginBottom:20, lineHeight:1.5 }}>
-              The match will be marked complete. The winning team advances. No goals are recorded.
+              The match will be marked complete. The winning team advances.
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:16 }}>
               {[{ pos:1, name:p1?.name||"Team 1" }, { pos:2, name:p2?.name||"Team 2" }].map(({ pos, name }) => (
-                <button key={pos}
-                  onClick={() => { setShowWalkover(false); onWalkover(pos); }}
+                <button key={pos} onClick={() => { setShowWalkover(false); onWalkover(pos); }}
                   style={{ padding:"14px 20px", borderRadius:10, background:`${c.green}18`, border:`2px solid ${c.green}`, color:c.ink, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:800, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
                   {name} wins by walkover
                 </button>
               ))}
             </div>
             <button onClick={() => setShowWalkover(false)}
-              style={{ width:"100%", padding:"10px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>
-              Cancel
-            </button>
+              style={{ width:"100%", padding:"10px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}>Cancel</button>
           </div>
         </div>
       )}

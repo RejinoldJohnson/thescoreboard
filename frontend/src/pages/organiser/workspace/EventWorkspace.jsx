@@ -276,11 +276,17 @@ export default function EventWorkspace() {
 
   const handleFinishMatch = async (matchId, winPos) => {
     try {
-      await finishMatchAPI(matchId, winPos);
+      const result = await finishMatchAPI(matchId, winPos);
       loadData();
       if (showStandings) loadStandings();
-      setActiveMatch(null);
-      flash("Match finished!");
+      // Keep scorer open for cricket innings transitions (match still "live")
+      // and for super over setup. Only close when match is fully done.
+      if (result?.status === "done") {
+        setActiveMatch(null);
+        flash("Match finished!");
+      } else {
+        flash(winPos === "super_over" ? "Super Over starting!" : "Innings ended — 2nd innings starting…");
+      }
     }
     catch (e) { flash("Error: " + e.message); }
   };

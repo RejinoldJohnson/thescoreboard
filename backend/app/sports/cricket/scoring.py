@@ -31,8 +31,8 @@ class Cricket(BaseSport):
         c.update({k: v for k, v in config.items() if k in c})
         if not (1 <= c["overs"] <= 50):
             raise ValueError("overs must be between 1 and 50")
-        if c["wickets"] != 10:
-            raise ValueError("wickets must be 10")
+        if not (1 <= c["wickets"] <= 10):
+            raise ValueError("wickets must be between 1 and 10")
         return c
 
     def check_set_winner(self, score_p1: int, score_p2: int, config: dict) -> Optional[int]:

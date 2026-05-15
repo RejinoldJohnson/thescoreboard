@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { getSportPageData } from "../api/client";
 import Header from "../components/shared/Header";
@@ -41,10 +41,19 @@ export default function SportPage() {
   const sportKey = SPORT_URL_TO_KEY[sportUrl];
   const accent   = SPORT_COLOR[sportKey] || "var(--primary)";
 
-  const fetchData = useCallback(() => {
-    if (!sportUrl) return;
-    getSportPageData(sportUrl, filterCity || null, searchQ || null)
-      .then(setData).catch(console.error);
+  const fetchingRef = useRef(false);
+
+  const fetchData = useCallback(async () => {
+    if (!sportUrl || fetchingRef.current) return;
+    fetchingRef.current = true;
+    try {
+      const d = await getSportPageData(sportUrl, filterCity || null, searchQ || null);
+      setData(d);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      fetchingRef.current = false;
+    }
   }, [sportUrl, filterCity, searchQ]);
 
   useEffect(() => {

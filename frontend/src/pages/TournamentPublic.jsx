@@ -3,7 +3,7 @@
  * Single-scroll layout with section nav. No tabs.
  * Sections: Register | Fixtures | Leaderboard | Road to Final
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getTournamentBySlug, getSportTournament } from "../api/client";
 import RoadToFinal from "../components/shared/RoadToFinal";
@@ -356,92 +356,366 @@ function SuccessView({ name, event, onBack }) {
 function EventCard({ event, onClick }) {
   const mode = getRegMode(event);
   const modeLabel = { team:"Team Sport", doubles:"Doubles Pair", individual:"Individual" }[mode];
-  const modeCls   = { team:"pub-pill pub-pill-blue", doubles:"pub-pill pub-pill-orange", individual:"pub-pill pub-pill-green" }[mode];
+  const sportIcon = SPORT_META[event.sport_key]?.icon || "🏆";
 
   return (
-    <div className="pub-event-card" onClick={onClick}>
-      <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-        <div style={{ width:48, height:48, borderRadius:12, background:"var(--primary-dim)", border:"1px solid rgba(255,107,53,.2)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, color:"var(--primary)" }}>
-          {sa(event.sport_key)}
-        </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, textTransform:"uppercase", letterSpacing:-0.5, color:"var(--ink)", marginBottom:6 }}>{event.name}</div>
-          <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-            <span className={modeCls}>{modeLabel}</span>
-            {event.format && <span className="pub-pill pub-pill-gray">{event.format.replace(/_/g, " ")}</span>}
-          </div>
-        </div>
-        <div style={{ fontFamily:"var(--font-display)", fontSize:22, color:"var(--primary)", flexShrink:0 }}>›</div>
+    <div onClick={onClick} style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 16px", borderRadius:14, marginBottom:8, background:"var(--surface)", border:"1.5px solid var(--border)", borderLeft:"4px solid var(--accent)", cursor:"pointer", boxShadow:"var(--sh-sm)", transition:"box-shadow .15s" }}
+      onMouseEnter={e => e.currentTarget.style.boxShadow = "var(--accent-glow), var(--sh-sm)"}
+      onMouseLeave={e => e.currentTarget.style.boxShadow = "var(--sh-sm)"}
+    >
+      <div style={{ width:44, height:44, borderRadius:12, background:"var(--accent-dim)", border:"1px solid var(--accent-border)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>
+        {sportIcon}
       </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:"-0.5px", color:"var(--ink)", marginBottom:6 }}>{event.name}</div>
+        <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+          <span style={{ fontFamily:"var(--font-display)", fontSize:8, fontWeight:900, textTransform:"uppercase", letterSpacing:1, background:"var(--accent-dim)", color:"var(--accent)", border:"1px solid var(--accent-border)", padding:"2px 8px", borderRadius:20 }}>{modeLabel}</span>
+          {event.format && <span style={{ fontFamily:"var(--font-display)", fontSize:8, fontWeight:900, textTransform:"uppercase", letterSpacing:1, background:"var(--elevated)", color:"var(--muted)", border:"1px solid var(--border)", padding:"2px 8px", borderRadius:20 }}>{event.format.replace(/_/g, " ")}</span>}
+        </div>
+      </div>
+      <div style={{ color:"var(--accent)", fontSize:20, flexShrink:0 }}>›</div>
     </div>
   );
 }
 
-// ── Match card ─────────────────────────────────────────────────
-function MatchCard({ match: m }) {
+// ── Sport accent colours ──────────────────────────────────────
+const SPORT_ACCENT_CFG = {
+  cricket:      { accent:"#16a34a", rgb:"22,163,74"   },
+  football:     { accent:"#2563eb", rgb:"37,99,235"   },
+  badminton:    { accent:"#7c3aed", rgb:"124,58,237"  },
+  table_tennis: { accent:"#0891b2", rgb:"8,145,178"   },
+};
+// Per-sport colors used inline (for multi-event pages)
+const SPORT_ACCENT = {
+  cricket:      { color:"#16a34a", dim:"rgba(22,163,74,0.12)"   },
+  football:     { color:"#2563eb", dim:"rgba(37,99,235,0.12)"   },
+  badminton:    { color:"#7c3aed", dim:"rgba(124,58,237,0.12)"  },
+  table_tennis: { color:"#0891b2", dim:"rgba(8,145,178,0.12)"   },
+};
+const sAccent = (key) => SPORT_ACCENT[key] || { color:"var(--primary)", dim:"var(--primary-dim)" };
+
+function applyAccent(sportKey) {
+  const s = SPORT_ACCENT_CFG[sportKey];
+  if (!s) return;
+  const r = document.documentElement;
+  r.style.setProperty("--accent",        s.accent);
+  r.style.setProperty("--accent-dim",    `rgba(${s.rgb},.12)`);
+  r.style.setProperty("--accent-border", `rgba(${s.rgb},.22)`);
+  r.style.setProperty("--accent-glow",   `0 0 20px rgba(${s.rgb},.2)`);
+  r.style.setProperty("--accent-rgb",    s.rgb);
+}
+
+// ── Penalty dot (public viewer) ───────────────────────────────
+function PenDot({ result }) {
+  const scored = result === "H";
+  const missed = result === "M";
+  return (
+    <span style={{
+      display:"inline-flex", alignItems:"center", justifyContent:"center",
+      width:18, height:18, borderRadius:"50%", fontSize:9, fontWeight:900,
+      background: scored ? "#16a34a" : missed ? "#dc2626" : "transparent",
+      border: !scored && !missed ? "1.5px solid #444" : "none",
+      color:"#fff", flexShrink:0,
+    }}>
+      {scored ? "✓" : missed ? "✗" : ""}
+    </span>
+  );
+}
+
+// ── Round chip ────────────────────────────────────────────────
+function RoundChip({ round, table }) {
+  if (round == null) return null;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", minWidth:32, flexShrink:0 }}>
+      <span style={{ fontFamily:"var(--font-display)", fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:1, background:"var(--primary-dim)", color:"var(--primary)", padding:"2px 5px", borderRadius:3 }}>
+        R{round}
+      </span>
+      {table && <span style={{ fontSize:9, color:"var(--muted)", fontWeight:700, marginTop:2 }}>T{table}</span>}
+    </div>
+  );
+}
+
+// ── Live / Done status pill ───────────────────────────────────
+function StatusPill({ isLive, isDone }) {
+  if (isLive) return (
+    <span className="pill pill-orange" style={{ fontSize:9, padding:"2px 6px", display:"flex", alignItems:"center", gap:3, whiteSpace:"nowrap" }}>
+      <span className="live-dot" style={{ width:5, height:5, background:"var(--primary)" }}/>LIVE
+    </span>
+  );
+  if (isDone) return <span className="pill pill-green" style={{ fontSize:9, padding:"2px 6px" }}>FT</span>;
+  return null;
+}
+
+// ── Cricket match card ────────────────────────────────────────
+function CricketCard({ m }) {
   const isLive = m.status === "live";
   const isDone = m.status === "done";
-  const sets   = (m.sets || []).filter(s => s.is_complete);
+  const ls     = m.live_state || {};
+  const battingFirst   = ls.batting_first   || 1;
+  const currentInnings = ls.current_innings || 1;
+  const completedSets  = (m.sets || [])
+    .filter(s => s.is_complete)
+    .sort((a, b) => a.set_number - b.set_number);
+
+  const p1Name = m.player_1?.name || "TBD";
+  const p2Name = m.player_2?.name || "TBD";
+
+  // Build innings display list
+  const maxInn = isDone ? completedSets.length : (isLive ? currentInnings : 0);
+  const inningsData = Array.from({ length: maxInn }, (_, idx) => {
+    const innNum    = idx + 1;
+    const battingPos = (innNum % 2 === 1) ? battingFirst : (3 - battingFirst);
+    const teamName   = battingPos === 1 ? p1Name : p2Name;
+    const isP1       = battingPos === 1;
+    const set        = completedSets.find(s => s.set_number === innNum);
+    const isActiveLive = isLive && innNum === currentInnings;
+
+    const runs    = set ? set.score_p1 : (isActiveLive ? ls.runs    || 0 : 0);
+    const wickets = set ? set.score_p2 : (isActiveLive ? ls.wickets || 0 : 0);
+    const overs   = isActiveLive ? ls.overs : null;
+    const isWinner = isDone && (isP1 ? m.player_1?.is_winner : m.player_2?.is_winner);
+    return { innNum, teamName, isP1, runs, wickets, overs, isComplete: !!set, isActiveLive, isWinner };
+  });
+
+  const target = inningsData[0] ? inningsData[0].runs + 1 : null;
 
   return (
-    <div className={`match-row${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:8 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-        {m.round != null && (
-          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", minWidth:34, flexShrink:0 }}>
-            <span style={{ fontFamily:"var(--font-display)", fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:1, background:"var(--primary-dim)", color:"var(--primary)", padding:"2px 5px", borderRadius:3 }}>
-              R{m.round}
-            </span>
-            {m.table_number && (
-              <span style={{ fontSize:9, color:"var(--muted)", fontWeight:700, marginTop:2 }}>T{m.table_number}</span>
-            )}
-          </div>
-        )}
+    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:0 }}>
+      {isLive && <div className="glow-bg"/>}
+      {/* Header row */}
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8, gap:6 }}>
+        <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+          <RoundChip round={m.round} />
+          <span style={{ fontSize:13 }}>🏏</span>
+        </div>
+        <StatusPill isLive={isLive} isDone={isDone} />
+      </div>
 
-        <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
-          <span style={{ flex:1, fontSize:13, fontWeight:700, color: m.player_1?.is_winner ? "var(--green)" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-            {m.player_1?.name || "TBD"}
-          </span>
-          <span style={{ fontFamily:"var(--font-display)", fontSize:isLive || isDone ? 17 : 13, fontWeight:900, minWidth:52, textAlign:"center", color: isLive ? "var(--primary)" : isDone ? "var(--ink)" : "var(--muted)" }}>
-            {isLive || isDone ? `${m.player_1?.score ?? 0}–${m.player_2?.score ?? 0}` : "vs"}
-          </span>
-          <span style={{ flex:1, textAlign:"right", fontSize:13, fontWeight:700, color: m.player_2?.is_winner ? "var(--green)" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-            {m.player_2?.name || "TBD"}
-          </span>
+      {/* Pre-match */}
+      {inningsData.length === 0 && (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+          <span style={{ flex:1, fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p1Name}</span>
+          <span style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:800, color:"var(--muted)" }}>vs</span>
+          <span style={{ flex:1, fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"right" }}>{p2Name}</span>
+        </div>
+      )}
+
+      {/* Innings rows */}
+      {inningsData.map((inn, idx) => {
+        const isChasing = idx === 1 && target !== null;
+        const runsNeeded = isChasing && !isDone ? target - inn.runs : null;
+        const won = isChasing && inn.runs >= target;
+        return (
+          <div key={inn.innNum} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderTop: idx > 0 ? "1px solid var(--border)" : "none" }}>
+            {/* Live bat icon */}
+            <span style={{ width:14, fontSize:10, flexShrink:0, color:"#16a34a", opacity: inn.isActiveLive ? 1 : 0 }}>🏏</span>
+            {/* Team name */}
+            <span style={{ flex:1, fontSize:13, fontWeight: inn.isWinner ? 800 : 600, color: inn.isWinner ? "#16a34a" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {inn.teamName}
+            </span>
+            {/* Score */}
+            <span style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:900, color: inn.isActiveLive ? "var(--primary)" : inn.isWinner ? "#16a34a" : "var(--ink)", lineHeight:1 }}>
+              {inn.runs}
+              <span style={{ fontSize:11, fontWeight:600, color:"var(--muted)" }}>/{inn.wickets}</span>
+            </span>
+            {/* Overs + need */}
+            <span style={{ fontSize:10, color:"var(--muted)", minWidth:56, textAlign:"right", flexShrink:0 }}>
+              {inn.overs ? `(${inn.overs})` : ""}
+              {isChasing && inn.isActiveLive && runsNeeded !== null && (
+                <span style={{ color: won ? "#16a34a" : "var(--muted)", display:"block", fontSize:9 }}>
+                  {won ? "✓ won" : `need ${runsNeeded}`}
+                </span>
+              )}
+            </span>
+          </div>
+        );
+      })}
+
+      {/* Target line for live 2nd innings */}
+      {isLive && currentInnings === 2 && target !== null && inningsData.length > 1 && (
+        <div style={{ fontSize:10, color:"var(--muted)", textAlign:"right", marginTop:3 }}>Target: {target}</div>
+      )}
+    </div>
+  );
+}
+
+// ── Football match card ───────────────────────────────────────
+function FootballCard({ m }) {
+  const isLive = m.status === "live";
+  const isDone = m.status === "done";
+  const ls     = m.live_state || {};
+
+  const penH1     = ls.pen_h1 || [];
+  const penH2     = ls.pen_h2 || [];
+  const hasPens   = penH1.length > 0 || penH2.length > 0;
+  const penScore1 = penH1.filter(r => r === "H").length;
+  const penScore2 = penH2.filter(r => r === "H").length;
+  const penSlots  = Math.max(5, penH1.length, penH2.length);
+
+  const fbHalf = ls.half;
+  const phaseLabel = (() => {
+    if (!fbHalf) return null;
+    if (fbHalf >= 5) return "Penalties";
+    if (fbHalf === 4) return "ET 2nd";
+    if (fbHalf === 3) return "ET 1st";
+    if (fbHalf === 2) return "2nd Half";
+    return "1st Half";
+  })();
+
+  const score1 = m.player_1?.score ?? 0;
+  const score2 = m.player_2?.score ?? 0;
+  const p1Win  = m.player_1?.is_winner;
+  const p2Win  = m.player_2?.is_winner;
+
+  return (
+    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:8 }}>
+      {isLive && <div className="glow-bg"/>}
+      {/* Main score row */}
+      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+        <RoundChip round={m.round} table={m.table_number} />
+
+        {/* Team 1 */}
+        <span style={{ flex:1, fontSize:13, fontWeight: p1Win ? 800 : 700, color: p1Win ? "#2563eb" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"right" }}>
+          {m.player_1?.name || "TBD"}
+        </span>
+
+        {/* Central score block */}
+        <div style={{ textAlign:"center", flexShrink:0, minWidth:60 }}>
+          <div style={{ fontFamily:"var(--font-display)", fontSize: isLive || isDone ? 22 : 14, fontWeight:900, lineHeight:1, color: isLive ? "var(--primary)" : isDone ? "var(--ink)" : "var(--muted)" }}>
+            {isLive || isDone ? `${score1}–${score2}` : "vs"}
+          </div>
+          {isLive && phaseLabel && (
+            <div style={{ fontSize:8, fontWeight:800, color:"var(--muted)", textTransform:"uppercase", letterSpacing:0.5, marginTop:2 }}>{phaseLabel}</div>
+          )}
         </div>
 
-        <div style={{ flexShrink:0, width:36, display:"flex", justifyContent:"flex-end" }}>
-          {isLive && (
-            <span className="pill pill-orange" style={{ fontSize:9, padding:"2px 6px", display:"flex", alignItems:"center", gap:3 }}>
-              <span className="live-dot" style={{ width:5, height:5, background:"var(--primary)" }}/>LIVE
-            </span>
-          )}
-          {isDone && <span className="pill pill-green" style={{ fontSize:9, padding:"2px 6px" }}>FT</span>}
+        {/* Team 2 */}
+        <span style={{ flex:1, fontSize:13, fontWeight: p2Win ? 800 : 700, color: p2Win ? "#2563eb" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          {m.player_2?.name || "TBD"}
+        </span>
+
+        <div style={{ flexShrink:0, width:40, display:"flex", justifyContent:"flex-end" }}>
+          <StatusPill isLive={isLive} isDone={isDone} />
         </div>
       </div>
 
-      {sets.length > 0 && (
-        <div style={{ display:"flex", gap:4, justifyContent:"center", flexWrap:"wrap" }}>
-          {sets.map(s => (
-            <span key={s.set_number} style={{ fontSize:10, padding:"2px 7px", borderRadius:3, fontWeight:700, fontFamily:"var(--font-display)", background:"var(--primary-dim)", color:"var(--primary)" }}>
-              S{s.set_number}: {s.score_p1}-{s.score_p2}
-            </span>
-          ))}
+      {/* Penalty shootout */}
+      {hasPens && (
+        <div style={{ padding:"8px 12px", background:"#0d1b2a", borderRadius:8, border:"1px solid #1e3a5f" }}>
+          <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"#3b82f6", marginBottom:6, textAlign:"center" }}>
+            Penalty Shootout
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"center" }}>
+            <div style={{ display:"flex", gap:3 }}>
+              {Array.from({ length: penSlots }, (_, i) => <PenDot key={i} result={penH1[i]} />)}
+            </div>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"#fff", minWidth:36, textAlign:"center" }}>
+              {penScore1}–{penScore2}
+            </div>
+            <div style={{ display:"flex", gap:3 }}>
+              {Array.from({ length: penSlots }, (_, i) => <PenDot key={i} result={penH2[i]} />)}
+            </div>
+          </div>
+          {isDone && (
+            <div style={{ textAlign:"center", fontSize:10, color:"#3b82f6", fontWeight:700, marginTop:6 }}>
+              {p1Win ? (m.player_1?.name||"Team 1") : (m.player_2?.name||"Team 2")} win on penalties
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+// ── Default match card (Badminton / Table Tennis) ─────────────
+function DefaultCard({ m, sportKey }) {
+  const isLive = m.status === "live";
+  const isDone = m.status === "done";
+  const ls     = m.live_state || {};
+  const completedSets = (m.sets || [])
+    .filter(s => s.is_complete)
+    .sort((a, b) => a.set_number - b.set_number);
+
+  const liveS1 = ls.score_p1 ?? 0;
+  const liveS2 = ls.score_p2 ?? 0;
+  const p1Win  = m.player_1?.is_winner;
+  const p2Win  = m.player_2?.is_winner;
+  const ac     = sAccent(sportKey);
+
+  const SetChip = ({ val, isWinner, isLiveChip }) => (
+    <span style={{
+      display:"inline-flex", alignItems:"center", justifyContent:"center",
+      minWidth:24, height:22, borderRadius:4, fontSize:12, fontWeight:800,
+      fontFamily:"var(--font-display)",
+      background: isLiveChip ? "var(--primary-dim)" : isWinner ? ac.color : "var(--elevated)",
+      color:      isLiveChip ? "var(--primary)"    : isWinner ? "#fff"    : "var(--muted)",
+      border:     isLiveChip ? "1px solid rgba(255,107,53,0.4)" : "none",
+    }}>
+      {val}
+    </span>
+  );
+
+  return (
+    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:6 }}>
+      {isLive && <div className="glow-bg"/>}
+      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+        <RoundChip round={m.round} table={m.table_number} />
+
+        {/* Two-row player layout */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column", gap:4 }}>
+          {/* Player 1 */}
+          <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+            <span style={{ flex:1, fontSize:13, fontWeight: p1Win ? 800 : 700, color: p1Win ? "var(--green)" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {m.player_1?.name || "TBD"}
+            </span>
+            <div style={{ display:"flex", gap:3 }}>
+              {completedSets.map(s => (
+                <SetChip key={s.set_number} val={s.score_p1} isWinner={s.score_p1 > s.score_p2} />
+              ))}
+              {isLive && <SetChip val={liveS1} isLiveChip />}
+            </div>
+          </div>
+          {/* Player 2 */}
+          <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+            <span style={{ flex:1, fontSize:13, fontWeight: p2Win ? 800 : 700, color: p2Win ? "var(--green)" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              {m.player_2?.name || "TBD"}
+            </span>
+            <div style={{ display:"flex", gap:3 }}>
+              {completedSets.map(s => (
+                <SetChip key={s.set_number} val={s.score_p2} isWinner={s.score_p2 > s.score_p1} />
+              ))}
+              {isLive && <SetChip val={liveS2} isLiveChip />}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flexShrink:0, display:"flex", alignItems:"center" }}>
+          <StatusPill isLive={isLive} isDone={isDone} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Sport-aware match card dispatcher ─────────────────────────
+function MatchCard({ match: m, sportKey }) {
+  if (sportKey === "cricket")  return <CricketCard m={m} />;
+  if (sportKey === "football") return <FootballCard m={m} />;
+  return <DefaultCard m={m} sportKey={sportKey} />;
+}
+
 // BracketCard removed — bracket rendering handled by RoadToFinal component
 
 // ── Section wrapper ───────────────────────────────────────────
-function Section({ id, title, accent, children, wide }) {
+function Section({ id, title, count, accent, children, wide, action }) {
   return (
-    <section id={id} style={{ padding:"28px 0 20px", scrollMarginTop:48 }}>
-      <div style={{ maxWidth: wide ? 1280 : 1100, margin:"0 auto", padding:"0 24px" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:22, paddingBottom:14, borderBottom:"2px solid var(--border)" }}>
-          <div style={{ width:4, height:24, borderRadius:2, background: accent || "var(--primary)", flexShrink:0 }}/>
-          <h2 style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:900, textTransform:"uppercase", letterSpacing:-0.5, color:"var(--ink)", margin:0, flex:1 }}>{title}</h2>
+    <section id={id} style={{ padding:"24px 20px 4px", scrollMarginTop:52 }}>
+      <div style={{ maxWidth: wide ? 1280 : 640, margin:"0 auto" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, paddingBottom:12, borderBottom:"1px solid var(--border)" }}>
+          <div style={{ width:3, height:20, borderRadius:2, background: accent || "var(--primary)", flexShrink:0 }}/>
+          <h2 style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, textTransform:"uppercase", letterSpacing:"-0.5px", color:"var(--ink)", flex:1, margin:0 }}>{title}</h2>
+          {count > 0 && <span style={{ fontFamily:"var(--font-display)", fontSize:9, fontWeight:900, color:"var(--muted)", background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:10, padding:"2px 8px" }}>{count}</span>}
+          {action}
         </div>
         {children}
       </div>
@@ -450,58 +724,88 @@ function Section({ id, title, accent, children, wide }) {
 }
 
 // ── Tournament hero ───────────────────────────────────────────
-function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, totalMatches }) {
-  const navigate = useNavigate();
+function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, totalMatches, sportKey, darkMode, onToggleDark }) {
   const sc = STATUS_CFG[tournament.status] || STATUS_CFG.draft;
   const isLive = tournament.status === "live";
+  const sportIcon = SPORT_META[sportKey]?.icon;
+  const sportLabel = SPORT_META[sportKey]?.label;
+
+  const stCfg = ({
+    live:         { label:"Live Now",           bg:"var(--primary-dim)",    c:"var(--primary)",  b:"rgba(255,107,53,.25)", dot:true  },
+    registration: { label:"Registration Open",  bg:"rgba(22,163,74,.1)",    c:"#16a34a",          b:"rgba(22,163,74,.25)",  dot:false },
+    completed:    { label:"Completed",          bg:"var(--elevated)",       c:"var(--muted)",    b:"var(--border)",         dot:false },
+    draft:        { label:"Coming Soon",        bg:"var(--elevated)",       c:"var(--muted)",    b:"var(--border)",         dot:false },
+    fixtures:     { label:"Fixtures Set",       bg:"rgba(37,99,235,.1)",    c:"#2563eb",          b:"rgba(37,99,235,.25)",  dot:false },
+  })[tournament.status] || { label:sc.label, bg:"var(--elevated)", c:"var(--muted)", b:"var(--border)", dot:false };
+
+  const metaParts = [tournament.venue, tournament.city ? `${tournament.city}${tournament.state ? `, ${tournament.state}` : ""}` : null, tournament.start_date].filter(Boolean);
 
   return (
-    <div style={{ background:"var(--surface)", borderBottom:"3px solid var(--border)", position:"relative", overflow:"hidden" }}>
-      {/* Subtle radial accent */}
-      <div style={{ position:"absolute", top:-60, right:-60, width:280, height:280, borderRadius:"50%", background:`radial-gradient(circle, var(--primary-dim) 0%, transparent 70%)`, pointerEvents:"none" }}/>
+    <div style={{ background:"linear-gradient(160deg, rgba(var(--accent-rgb),.07) 0%, var(--bg) 55%)", borderBottom:"1px solid var(--border)", position:"relative", overflow:"hidden" }}>
+      {/* Accent radial glow */}
+      <div style={{ position:"absolute", top:-100, right:-60, width:380, height:380, borderRadius:"50%", background:"radial-gradient(circle, rgba(var(--accent-rgb),.14) 0%, transparent 65%)", pointerEvents:"none" }}/>
 
-      <div style={{ maxWidth:1100, margin:"0 auto", padding:"22px 24px 24px", position:"relative" }}>
-        {/* Breadcrumb */}
-        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:14 }}>
-          <span onClick={() => navigate("/")} style={{ fontFamily:"var(--font-display)", fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"var(--primary)", cursor:"pointer" }}>
-            TheScoreBoard
+      <div style={{ maxWidth:640, margin:"0 auto", padding:"18px 20px 22px", position:"relative" }}>
+        {/* Top row: TheScoreBoard brand + dark mode toggle */}
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <span style={{ fontFamily:"var(--font-display)", fontSize:11, fontWeight:900, textTransform:"uppercase", letterSpacing:2, lineHeight:1 }}>
+            <span style={{ color:"var(--primary)" }}>The</span><span style={{ color:"var(--ink)" }}>Score</span><span style={{ color:"var(--primary)" }}>Board</span>
           </span>
-          {tournament.org_name && (
-            <>
-              <span style={{ color:"var(--border-mid)", fontSize:12 }}>›</span>
-              <span style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:"var(--muted)" }}>{tournament.org_name}</span>
-            </>
+          <button
+            onClick={onToggleDark}
+            style={{ background:"none", border:"1px solid var(--border)", borderRadius:6, width:32, height:32, cursor:"pointer", color:"var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}
+          >
+            {!darkMode ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+            )}
+          </button>
+        </div>
+
+        {/* Status + sport pills */}
+        <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
+          <span style={{ display:"inline-flex", alignItems:"center", gap:5, background:stCfg.bg, color:stCfg.c, fontFamily:"var(--font-display)", fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:2, padding:"4px 11px", borderRadius:20, border:`1px solid ${stCfg.b}` }}>
+            {stCfg.dot && <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>}
+            {stCfg.label}
+          </span>
+          {sportIcon && sportLabel && (
+            <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"var(--accent-dim)", color:"var(--accent)", fontFamily:"var(--font-display)", fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:1, padding:"4px 11px", borderRadius:20, border:"1px solid var(--accent-border)" }}>
+              {sportIcon} {sportLabel}
+            </span>
           )}
         </div>
 
-        {/* Title + status */}
-        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:12, marginBottom:14 }}>
-          <h1 style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:900, textTransform:"uppercase", letterSpacing:-1, color:"var(--ink)", margin:0, lineHeight:1.1, flex:1 }}>
-            {tournament.name}
-          </h1>
-          <span style={{
-            display:"inline-flex", alignItems:"center", gap:6, flexShrink:0, marginTop:4,
-            background: isLive ? "var(--primary-dim)" : "var(--elevated)",
-            color: sc.color,
-            fontFamily:"var(--font-display)", fontSize:10, fontWeight:800,
-            textTransform:"uppercase", letterSpacing:2,
-            padding:"5px 12px", borderRadius:6,
-            border: isLive ? "1px solid rgba(255,107,53,0.3)" : "1px solid var(--border)",
-          }}>
-            {isLive && <span className="live-dot" style={{ background:"var(--primary)", width:6, height:6 }}/>}
-            {sc.label}
-          </span>
-        </div>
+        {/* Tournament name */}
+        <h1 style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:900, textTransform:"uppercase", letterSpacing:"-1.5px", color:"var(--ink)", lineHeight:1.05, marginBottom:12 }}>
+          {tournament.name}
+        </h1>
 
-        {/* Meta row */}
-        <div style={{ display:"flex", gap:14, flexWrap:"wrap", fontSize:12, color:"var(--muted)", marginBottom:16 }}>
-          {tournament.venue    && <span>🏟 {tournament.venue}</span>}
-          {tournament.city     && <span>📍 {tournament.city}{tournament.state ? `, ${tournament.state}` : ""}</span>}
-          {tournament.start_date && <span>📅 {tournament.start_date}</span>}
-          {tournament.end_date && tournament.end_date !== tournament.start_date && (
-            <span>→ {tournament.end_date}</span>
-          )}
-        </div>
+        {/* Meta: venue · city · dates */}
+        {metaParts.length > 0 && (
+          <div style={{ display:"flex", flexWrap:"wrap", fontSize:12, color:"var(--muted)", marginBottom:18, fontWeight:500 }}>
+            {metaParts.map((item, i) => (
+              <span key={i} style={{ display:"inline-flex", alignItems:"center" }}>
+                {i > 0 && <span style={{ margin:"0 8px", color:"var(--subtle)" }}>·</span>}
+                {item}
+              </span>
+            ))}
+            {tournament.end_date && tournament.end_date !== tournament.start_date && (
+              <span style={{ display:"inline-flex", alignItems:"center" }}>
+                <span style={{ margin:"0 8px", color:"var(--subtle)" }}>→</span>
+                {tournament.end_date}
+              </span>
+            )}
+          </div>
+        )}
 
         {tournament.description && (
           <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.6, marginBottom:16, maxWidth:540 }}>
@@ -509,24 +813,25 @@ function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, tota
           </p>
         )}
 
-        {/* Quick stat chips */}
+        {/* Stat chips */}
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           {totalPlayers > 0 && (
-            <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6, fontSize:12, fontWeight:700 }}>
-              <span style={{ color:"var(--primary)", fontFamily:"var(--font-display)", fontSize:14, fontWeight:900 }}>{totalPlayers}</span>
-              <span style={{ color:"var(--muted)" }}>Players</span>
+            <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
+              <span style={{ fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{totalPlayers}</span>
+              <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Players</span>
             </div>
           )}
           {totalMatches > 0 && (
-            <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6, fontSize:12, fontWeight:700 }}>
-              <span style={{ color:"var(--ink)", fontFamily:"var(--font-display)", fontSize:14, fontWeight:900 }}>{doneMatches}/{totalMatches}</span>
-              <span style={{ color:"var(--muted)" }}>Matches Done</span>
+            <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
+              <span style={{ fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{doneMatches}/{totalMatches}</span>
+              <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Matches</span>
             </div>
           )}
           {liveCount > 0 && (
-            <div style={{ background:"var(--primary-dim)", border:"1px solid rgba(255,107,53,0.3)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6, fontSize:12, fontWeight:700 }}>
-              <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)", flexShrink:0 }}/>
-              <span style={{ color:"var(--primary)" }}>{liveCount} Live Now</span>
+            <div style={{ background:"var(--primary-dim)", border:"1px solid rgba(255,107,53,.2)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
+              <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
+              <span style={{ fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
+              <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live Now</span>
             </div>
           )}
         </div>
@@ -573,27 +878,30 @@ function LiveStrip({ liveMatches }) {
 // ── Section nav ───────────────────────────────────────────────
 function SectionNav({ sections, activeId, onNav }) {
   return (
-    <div style={{ background:"var(--surface)", borderBottom:"2px solid var(--border)", position:"sticky", top:0, zIndex:100, overflowX:"auto", scrollbarWidth:"none" }}>
-      <div style={{ display:"flex", padding:"0 16px", maxWidth:1100, margin:"0 auto" }}>
-        {sections.map(s => (
-          <button key={s.id} onClick={() => onNav(s.id)} style={{
-            padding:"11px 16px", background:"none", border:"none",
-            borderBottom: activeId === s.id ? "2px solid var(--primary)" : "2px solid transparent",
-            marginBottom:-2,
-            color: activeId === s.id ? "var(--primary)" : "var(--muted)",
-            fontFamily:"var(--font-display)", fontSize:10, fontWeight:800,
-            textTransform:"uppercase", letterSpacing:1.5,
-            cursor:"pointer", whiteSpace:"nowrap", flexShrink:0,
-            transition:"color .15s, border-color .15s",
-          }}>
-            {s.label}
-            {s.count != null && s.count > 0 && (
-              <span style={{ marginLeft:6, background: activeId === s.id ? "var(--primary)" : "var(--elevated)", color: activeId === s.id ? "#fff" : "var(--muted)", borderRadius:10, padding:"1px 6px", fontSize:9, fontFamily:"var(--font-display)", fontWeight:900, verticalAlign:"middle" }}>
-                {s.count}
-              </span>
-            )}
-          </button>
-        ))}
+    <div style={{ background:"var(--surface)", borderBottom:"1px solid var(--border)", position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 12px rgba(0,0,0,.07)" }}>
+      <div style={{ overflowX:"auto", scrollbarWidth:"none", display:"flex", gap:4, padding:"8px 16px", maxWidth:640, margin:"0 auto" }}>
+        {sections.map(s => {
+          const active = activeId === s.id;
+          return (
+            <button key={s.id} onClick={() => onNav(s.id)} style={{
+              padding:"7px 14px", borderRadius:20, border:"none",
+              background: active ? "var(--primary)" : "var(--elevated)",
+              color: active ? "#fff" : "var(--muted)",
+              fontFamily:"var(--font-display)", fontSize:9, fontWeight:900,
+              textTransform:"uppercase", letterSpacing:1.5,
+              cursor:"pointer", whiteSpace:"nowrap", flexShrink:0,
+              transition:"background .15s, color .15s",
+              display:"flex", alignItems:"center", gap:5,
+            }}>
+              {s.label}
+              {s.count != null && s.count > 0 && (
+                <span style={{ background: active ? "rgba(255,255,255,.25)" : "var(--border-mid)", borderRadius:10, padding:"1px 5px", fontSize:9, fontWeight:900, minWidth:16, textAlign:"center" }}>
+                  {s.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -609,7 +917,7 @@ function RegisterSection({ events, tournament }) {
   const handleBack = () => { setPhase("browse"); setSelEvt(null); };
 
   return (
-    <Section id="register" title="Register Now" accent="#16a34a">
+    <Section id="register" title="Register Now" accent="var(--accent)">
       {phase === "success" && <SuccessView name={regName} event={selEvt} onBack={handleBack} />}
       {phase === "form" && selEvt && (() => {
         const mode = getRegMode(selEvt);
@@ -639,24 +947,30 @@ function RegisterSection({ events, tournament }) {
 
 // ── Fixtures section ──────────────────────────────────────────
 function FixturesSection({ events }) {
-  const allMatches = events.flatMap(ev => ev.all_matches || []);
-  const liveCt     = allMatches.filter(m => m.status === "live").length;
-  const doneCt     = allMatches.filter(m => m.status === "done").length;
-  const upcomingCt = allMatches.filter(m => m.status !== "live" && m.status !== "done").length;
+  const multiEvent = events.length > 1;
+  // Flatten all matches, tagging each with sport_key and event name
+  const allMatches = events.flatMap(ev =>
+    (ev.all_matches || []).map(m => ({ ...m, sport_key: ev.sport_key, _eventName: ev.name }))
+  );
+  const live     = allMatches.filter(m => m.status === "live");
+  const upcoming = allMatches.filter(m => m.status !== "live" && m.status !== "done");
+  const done     = allMatches.filter(m => m.status === "done");
+
+  const statsItems = [
+    { label:"Total",    val: allMatches.length, c:"var(--muted)"   },
+    { label:"Live",     val: live.length,        c:"var(--primary)" },
+    { label:"Done",     val: done.length,        c:"var(--green)"   },
+    { label:"Upcoming", val: upcoming.length,    c:"var(--muted)"   },
+  ].filter(s => s.val > 0);
 
   return (
-    <Section id="fixtures" title="Fixtures">
+    <Section id="fixtures" title="Fixtures" count={allMatches.length}>
       {/* Stats strip */}
-      <div style={{ display:"flex", gap:8, marginBottom:20, flexWrap:"wrap" }}>
-        {[
-          { label:"Total",    val: allMatches.length, color:"var(--muted)"   },
-          { label:"Live",     val: liveCt,            color:"var(--primary)" },
-          { label:"Done",     val: doneCt,            color:"var(--green)"   },
-          { label:"Upcoming", val: upcomingCt,        color:"var(--muted)"   },
-        ].map(s => (
-          <div key={s.label} style={{ background:"var(--surface)", border:"1.5px solid var(--border)", borderRadius:10, padding:"10px 16px", textAlign:"center", minWidth:68 }}>
-            <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:900, color:s.color, lineHeight:1 }}>{s.val}</div>
-            <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:"var(--muted)", marginTop:2 }}>{s.label}</div>
+      <div style={{ display:"flex", gap:6, marginBottom:20, flexWrap:"wrap" }}>
+        {statsItems.map(s => (
+          <div key={s.label} style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:10, padding:"6px 12px", textAlign:"center" }}>
+            <div style={{ fontFamily:"var(--font-display)", fontSize:17, fontWeight:900, color:s.c, lineHeight:1 }}>{s.val}</div>
+            <div style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:"var(--muted)", marginTop:3 }}>{s.label}</div>
           </div>
         ))}
       </div>
@@ -668,93 +982,68 @@ function FixturesSection({ events }) {
           <p style={{ fontSize:13, color:"var(--muted)", marginTop:8 }}>The draw will be published here once ready.</p>
         </div>
       ) : (
-        events.map(ev => {
-          const matches = ev.all_matches || [];
-          if (!matches.length) return null;
-
-          const stageMap = {};
-          for (const m of matches) {
-            const sk = m.stage || "main";
-            if (!stageMap[sk]) stageMap[sk] = {};
-            const r = m.round ?? 0;
-            if (!stageMap[sk][r]) stageMap[sk][r] = [];
-            stageMap[sk][r].push(m);
-          }
-          const stageOrder  = ["group", "knockout", "main", "finals"];
-          const stageLabels = { group:"Group Stage", knockout:"Knockout Stage", main:"Fixtures", finals:"Finals" };
-          const multiStage  = Object.keys(stageMap).length > 1;
-
-          return (
-            <div key={ev.event_id} style={{ marginBottom:32 }}>
-              {/* Event header */}
-              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:14, paddingBottom:10, borderBottom:"1px solid var(--border)" }}>
-                <div style={{ width:30, height:30, borderRadius:8, background:"var(--primary-dim)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"var(--font-display)", fontSize:10, fontWeight:900, color:"var(--primary)", flexShrink:0 }}>
-                  {sa(ev.sport_key)}
-                </div>
-                <span style={{ fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, textTransform:"uppercase", letterSpacing:-0.5, color:"var(--ink)", flex:1 }}>{ev.name}</span>
-                {ev.live_matches?.length > 0 && (
-                  <span className="pill pill-orange" style={{ fontSize:9, display:"flex", alignItems:"center", gap:3 }}>
-                    <span className="live-dot" style={{ width:5, height:5, background:"var(--primary)" }}/>
-                    {ev.live_matches.length} Live
-                  </span>
-                )}
-                <span style={{ fontSize:11, color:"var(--muted)" }}>
-                  {ev.completed_matches ?? doneCt}/{ev.total_matches ?? matches.length} done
-                </span>
+        <>
+          {live.length > 0 && (
+            <div style={{ marginBottom:20 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10, fontFamily:"var(--font-display)", fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:2, color:"var(--primary)" }}>
+                <span className="live-dot" style={{ width:7, height:7, background:"var(--primary)" }}/>Live Now
               </div>
-
-              {stageOrder.filter(sk => stageMap[sk]).map(sk => (
-                <div key={sk} style={{ marginBottom:12 }}>
-                  {multiStage && (
-                    <div style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"var(--muted)", marginBottom:10, marginTop:4, paddingLeft:4, borderLeft:"3px solid var(--border)" }}>
-                      {stageLabels[sk] || sk}
-                    </div>
-                  )}
-                  {Object.entries(stageMap[sk]).sort(([a],[b]) => Number(a)-Number(b)).map(([round, rMatches]) => (
-                    <div key={round} style={{ marginBottom:10 }}>
-                      {Object.keys(stageMap[sk]).length > 1 && Number(round) > 0 && (
-                        <div style={{ fontSize:10, color:"var(--muted)", fontWeight:700, marginBottom:5, paddingLeft:4 }}>
-                          Round {round}
-                        </div>
-                      )}
-                      {rMatches.map(m => <MatchCard key={m.match_id} match={m} />)}
-                    </div>
-                  ))}
+              {live.map(m => (
+                <div key={m.match_id}>
+                  {multiEvent && <div style={{ fontSize:9, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:3, paddingLeft:2 }}>{m._eventName}</div>}
+                  <MatchCard match={m} sportKey={m.sport_key} />
                 </div>
               ))}
             </div>
-          );
-        })
+          )}
+          {upcoming.length > 0 && (
+            <div style={{ marginBottom:20 }}>
+              <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"var(--muted)", marginBottom:10, fontFamily:"var(--font-display)" }}>Upcoming</div>
+              {upcoming.map(m => (
+                <div key={m.match_id}>
+                  {multiEvent && <div style={{ fontSize:9, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:3, paddingLeft:2 }}>{m._eventName}</div>}
+                  <MatchCard match={m} sportKey={m.sport_key} />
+                </div>
+              ))}
+            </div>
+          )}
+          {done.length > 0 && (
+            <div style={{ marginBottom:4 }}>
+              <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"var(--muted)", marginBottom:10, fontFamily:"var(--font-display)" }}>Completed</div>
+              {done.map(m => (
+                <div key={m.match_id}>
+                  {multiEvent && <div style={{ fontSize:9, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:3, paddingLeft:2 }}>{m._eventName}</div>}
+                  <MatchCard match={m} sportKey={m.sport_key} />
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </Section>
   );
 }
 
 // ── Leaderboard section ───────────────────────────────────────
+const RANK_COLORS = ["#f59e0b", "#94a3b8", "#b45309"];
 function LeaderboardSection({ events }) {
   const relevant = events.filter(ev => ev.format === "round_robin" || ev.format === "group_knockout");
   if (!relevant.length) return null;
 
   return (
-    <Section id="leaderboard" title="Leaderboard" accent="#eab308">
+    <Section id="leaderboard" title="Standings">
       {relevant.map(ev => {
-        const rows  = computeStandings(ev);
-        const isGK  = ev.format === "group_knockout";
-        const hasDrw = rows.some(r => r.d > 0);
-        const isFootball = ev.sport_key === "football";
-        const scoreLabel = isFootball ? "GF–GA" : "Sets";
-        const cols = hasDrw
-          ? "32px 1fr 32px 32px 32px 32px 56px"
-          : "32px 1fr 32px 32px 32px 56px";
-        const headers = hasDrw
-          ? ["#", isFootball ? "Team" : "Player", "P", "W", "D", "L", scoreLabel]
-          : ["#", isFootball ? "Team" : "Player", "P", "W", "L", scoreLabel];
+        const rows   = computeStandings(ev);
+        const isGK   = ev.format === "group_knockout";
+        const sp     = ev.sport_key;
+        const isFootball = sp === "football";
+        const isCricket  = sp === "cricket";
 
         return (
-          <div key={ev.event_id} style={{ marginBottom:28 }}>
+          <div key={ev.event_id} style={{ marginBottom:20 }}>
             {relevant.length > 1 && (
-              <div style={{ fontFamily:"var(--font-display)", fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:1, color:"var(--muted)", marginBottom:10 }}>
-                {ev.name}
+              <div style={{ fontFamily:"var(--font-display)", fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1, color:"var(--muted)", marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
+                {SPORT_META[sp]?.icon} {ev.name}
               </div>
             )}
 
@@ -762,36 +1051,42 @@ function LeaderboardSection({ events }) {
               <div style={{ textAlign:"center", padding:"28px 0", color:"var(--muted)", fontSize:13 }}>No matches played yet.</div>
             ) : (
               <>
-                <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, overflow:"hidden" }}>
-                  {/* Table header */}
-                  <div style={{ display:"grid", gridTemplateColumns:cols, padding:"8px 16px", background:"var(--elevated)", borderBottom:"1px solid var(--border)" }}>
-                    {headers.map((h, i) => (
-                      <span key={h} style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"var(--muted)", fontFamily:"var(--font-display)", textAlign: i > 1 ? "center" : "left" }}>{h}</span>
-                    ))}
-                  </div>
+                <div style={{ background:"var(--surface)", border:"1px solid var(--border)", borderRadius:14, overflow:"hidden", boxShadow:"var(--sh-sm)" }}>
                   {rows.map((row, i) => {
                     const advances = isGK && i < 2;
+                    const rc       = RANK_COLORS[i] || "var(--muted)";
+                    const prog     = row.p > 0 ? row.w / row.p : 0;
+                    const sec      = isCricket ? row.nrr : isFootball ? `${row.sf}–${row.sa}` : null;
                     return (
-                      <div key={row.name} style={{
-                        display:"grid", gridTemplateColumns:cols,
-                        padding:"11px 16px", alignItems:"center",
-                        borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none",
-                        background: advances ? "rgba(34,197,94,0.04)" : "transparent",
-                      }}>
-                        <span style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:900, color: advances ? "var(--green)" : "var(--muted)" }}>{i + 1}</span>
-                        <span style={{ fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{row.name}</span>
-                        <span style={{ textAlign:"center", fontSize:12, color:"var(--muted)" }}>{row.p}</span>
-                        <span style={{ textAlign:"center", fontSize:13, fontWeight:800, color: row.w > 0 ? "var(--green)" : "var(--muted)" }}>{row.w}</span>
-                        {hasDrw && <span style={{ textAlign:"center", fontSize:12, color:"var(--muted)" }}>{row.d}</span>}
-                        <span style={{ textAlign:"center", fontSize:12, color:"var(--muted)" }}>{row.l}</span>
-                        <span style={{ textAlign:"center", fontSize:11, color:"var(--muted)" }}>{row.sf}–{row.sa}</span>
+                      <div key={row.name} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 16px", borderBottom: i < rows.length - 1 ? "1px solid var(--border)" : "none", background: advances ? "rgba(22,163,74,.03)" : "transparent" }}>
+                        {/* Rank */}
+                        <div style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:900, color:rc, minWidth:28, textAlign:"center", lineHeight:1, flexShrink:0 }}>{i + 1}</div>
+                        {/* Name + progress bar */}
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:6 }}>
+                            {advances && <span style={{ color:"var(--green)", marginRight:4, fontSize:9 }}>▲</span>}
+                            {row.name}
+                          </div>
+                          <div style={{ height:3, borderRadius:2, background:"var(--elevated)", overflow:"hidden" }}>
+                            <div style={{ height:"100%", width:`${Math.max(5, prog * 100)}%`, background:"linear-gradient(90deg, var(--accent), var(--primary))", borderRadius:2 }} />
+                          </div>
+                        </div>
+                        {/* Points + record */}
+                        <div style={{ textAlign:"right", flexShrink:0 }}>
+                          <div style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:900, color:"var(--ink)", lineHeight:1, display:"flex", alignItems:"baseline", gap:3, justifyContent:"flex-end" }}>
+                            {row.pts}<span style={{ fontSize:9, color:"var(--muted)", fontWeight:700 }}>pts</span>
+                          </div>
+                          <div style={{ fontSize:10, color:"var(--muted)", marginTop:3 }}>
+                            {row.p}P · {row.w}W · {row.l}L{row.d > 0 ? ` · ${row.d}D` : ""}{sec ? ` · ${sec}` : ""}
+                          </div>
+                        </div>
                       </div>
                     );
                   })}
                 </div>
                 {isGK && rows.length >= 2 && (
                   <p style={{ fontSize:11, color:"var(--muted)", marginTop:8, paddingLeft:4 }}>
-                    ↑ Top 2 advance to knockout stage
+                    <span style={{ color:"var(--green)" }}>▲</span> Top 2 advance to knockout stage
                   </p>
                 )}
               </>
@@ -839,18 +1134,42 @@ export default function TournamentPublic() {
   const [error,       setError]       = useState(null);
   const [activeId,    setActiveId]    = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [darkMode,    setDarkMode]    = useState(
+    () => (localStorage.getItem("theme") || "light") === "dark"
+  );
+  const fetchingRef = useRef(false);
+
+  const toggleDark = () => {
+    const next = !darkMode;
+    setDarkMode(next);
+    document.documentElement.setAttribute("data-theme", next ? "dark" : "light");
+    localStorage.setItem("theme", next ? "dark" : "light");
+  };
 
   const fetchData = useCallback(async () => {
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     try {
       const d = sportUrl
         ? await getSportTournament(sportUrl, slug)
         : await getTournamentBySlug(slug);
       setData(d);
       setLastUpdated(new Date());
-    } catch(e) { setError(e.message || "Tournament not found."); }
+    } catch(e) {
+      setError(e.message || "Tournament not found.");
+    } finally {
+      fetchingRef.current = false;
+    }
   }, [slug, sportUrl]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Apply sport accent when data first loads
+  useEffect(() => {
+    if (!data) return;
+    const firstSportKey = data.events?.[0]?.sport_key;
+    if (firstSportKey) applyAccent(firstSportKey);
+  }, [data]);
 
   useEffect(() => {
     if (!data) return;
@@ -918,9 +1237,11 @@ export default function TournamentPublic() {
   const hasKO     = events.some(ev => ev.format === "direct_knockout" || ev.format === "group_knockout");
   const hasBoard  = events.some(ev => ev.format === "round_robin"     || ev.format === "group_knockout");
 
+  const primarySportKey = events[0]?.sport_key;
+
   if (status === "draft") return (
     <div className="app">
-      <TournamentHero tournament={t} liveCount={0} totalPlayers={0} doneMatches={0} totalMatches={0} />
+      <TournamentHero tournament={t} liveCount={0} totalPlayers={0} doneMatches={0} totalMatches={0} sportKey={primarySportKey} darkMode={darkMode} onToggleDark={toggleDark} />
       <DraftView tournament={t} />
     </div>
   );
@@ -944,6 +1265,9 @@ export default function TournamentPublic() {
         totalPlayers={totalPlayers}
         doneMatches={doneCt}
         totalMatches={allMatches.length}
+        sportKey={primarySportKey}
+        darkMode={darkMode}
+        onToggleDark={toggleDark}
       />
 
       {liveMatches.length > 0 && <LiveStrip liveMatches={liveMatches} />}
