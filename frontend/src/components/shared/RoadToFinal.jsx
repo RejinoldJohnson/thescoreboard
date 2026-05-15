@@ -12,6 +12,13 @@
  */
 import { useState, useEffect } from "react";
 
+// ── Layout constants ──────────────────────────────────────────
+const CARD_H    = 112; // approximate MatchCard height (header 26px + 2×player 42px + border 2px)
+const CARD_G    = 12;  // gap between cards in the first-stage column
+const BASE_UNIT = CARD_H + CARD_G; // vertical space one card claims in stage-0 column
+const HEADER_H  = 58;  // fixed header height — same for every column to keep rows aligned
+const COL_W     = 260; // column width
+
 // ── Stage metadata ────────────────────────────────────────────
 const STAGE_ORDER = ["preliminary", "round_of_32", "round_of_16", "quarter", "semi", "final"];
 
@@ -131,35 +138,44 @@ function MatchCard({ match: m, isFinal }) {
 }
 
 // ── Round Column (desktop) ────────────────────────────────────
-function RoundColumn({ stage, matches, isFinalStage, thirdPlaceMatches }) {
-  const label = STAGE_LABEL[stage] || stage.replace(/_/g, " ");
+// stageIndex=0 → first/earliest visible stage (most matches)
+// stageIndex=N-1 → final stage (1 match)
+// Each match card is centred in a slot of height 2^stageIndex × BASE_UNIT.
+// All columns share the same fixed-height header so match rows stay aligned.
+function RoundColumn({ stage, matches, isFinalStage, thirdPlaceMatches, stageIndex }) {
+  const label    = STAGE_LABEL[stage] || stage.replace(/_/g, " ");
+  const slotSize = Math.pow(2, stageIndex) * BASE_UNIT;
 
   return (
-    <div style={{ width:272, flexShrink:0 }}>
-      {/* Column header */}
-      <div style={{ textAlign:"center", marginBottom:18 }}>
-        {isFinalStage && (
-          <div style={{ fontSize:28, marginBottom:8, lineHeight:1 }}>🏆</div>
-        )}
+    <div style={{ width:COL_W, flexShrink:0 }}>
+      {/* Fixed-height header — same height on every column */}
+      <div style={{ height:HEADER_H, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", paddingBottom:10 }}>
+        {isFinalStage && <div style={{ fontSize:20, lineHeight:1, marginBottom:5 }}>🏆</div>}
         <span style={{
           display:"inline-block",
           fontFamily:"var(--font-display)",
           fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:2,
-          padding:"5px 14px", borderRadius:6,
-          color:      isFinalStage ? "#92700A"              : "var(--muted)",
-          background: isFinalStage ? "rgba(234,179,8,0.1)"  : "var(--elevated)",
+          padding:"4px 12px", borderRadius:6,
+          color:      isFinalStage ? "#92700A"             : "var(--muted)",
+          background: isFinalStage ? "rgba(234,179,8,0.1)" : "var(--elevated)",
           border:`1px solid ${isFinalStage ? "rgba(234,179,8,0.3)" : "var(--border)"}`,
         }}>
           {label}
         </span>
       </div>
 
-      {/* Main matches */}
-      <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-        {matches.map(m => <MatchCard key={m.match_id} match={m} isFinal={isFinalStage} />)}
+      {/* Match slots — each card centred vertically in its proportional slot */}
+      <div style={{ display:"flex", flexDirection:"column" }}>
+        {matches.map(m => (
+          <div key={m.match_id} style={{ height:slotSize, display:"flex", alignItems:"center" }}>
+            <div style={{ width:"100%" }}>
+              <MatchCard match={m} isFinal={isFinalStage} />
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* 3rd place — only in the Final column */}
+      {/* 3rd place — rendered below the Final column only */}
       {isFinalStage && thirdPlaceMatches?.length > 0 && (
         <div style={{ marginTop:24 }}>
           <div style={{ textAlign:"center", marginBottom:12 }}>
@@ -168,8 +184,7 @@ function RoundColumn({ stage, matches, isFinalStage, thirdPlaceMatches }) {
               fontFamily:"var(--font-display)",
               fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:2,
               padding:"5px 12px", borderRadius:6,
-              color:"#92400e",
-              background:"rgba(180,83,9,0.08)",
+              color:"#92400e", background:"rgba(180,83,9,0.08)",
               border:"1px solid rgba(180,83,9,0.22)",
             }}>
               🥉 3rd Place
@@ -305,14 +320,15 @@ function EventBracket({ event, isMobile }) {
   return (
     <div>
       <div style={{ overflowX:"auto", paddingBottom:8 }}>
-        <div style={{ display:"flex", gap:40, minWidth:"max-content", padding:"4px 2px 12px" }}>
-          {visibleStages.map(s => (
+        <div style={{ display:"flex", gap:32, minWidth:"max-content", padding:"4px 2px 12px", alignItems:"flex-start" }}>
+          {visibleStages.map((s, si) => (
             <RoundColumn
               key={s}
               stage={s}
               matches={byStage[s]}
               isFinalStage={s === finalStage}
               thirdPlaceMatches={s === finalStage ? thirdPlaceVisible : null}
+              stageIndex={si}
             />
           ))}
         </div>

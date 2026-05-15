@@ -36,8 +36,11 @@ class ScoreUpdate(BaseModel):
     cricket_live_state: Optional[dict] = None
 
     # Football
-    football_minute: Optional[int] = None
-    football_half:   Optional[int] = None
+    football_minute:     Optional[int]  = None
+    football_half:       Optional[int]  = None
+    football_pen_1:      Optional[int]  = None   # penalty goals team 1
+    football_pen_2:      Optional[int]  = None   # penalty goals team 2
+    football_live_state: Optional[dict] = None   # arbitrary live_state merge (pen_h1, pen_h2)
 
 
 class FinishMatch(BaseModel):
@@ -417,13 +420,20 @@ def update_score(
             ls.update(data.cricket_live_state)
         match.live_state = ls
 
-        # Update participant aggregate scores
+        # Update participant aggregate scores based on who batted in each innings
+        batting_first = ls.get("batting_first", 1)
         parts = sorted(match.participants, key=lambda p: p.position)
         if len(parts) == 2:
             inn1 = next((s for s in match.sets if s.set_number == 1), None)
             inn2 = next((s for s in match.sets if s.set_number == 2), None)
-            parts[0].score = inn1.score_p1 if inn1 else 0
-            parts[1].score = inn2.score_p1 if inn2 else 0
+            if batting_first == 1:
+                # pos 1 batted in inn1, pos 2 batted in inn2
+                parts[0].score = inn1.score_p1 if inn1 else 0
+                parts[1].score = inn2.score_p1 if inn2 else 0
+            else:
+                # pos 2 batted in inn1, pos 1 batted in inn2
+                parts[1].score = inn1.score_p1 if inn1 else 0
+                parts[0].score = inn2.score_p1 if inn2 else 0
 
     # ── FOOTBALL (goals) ──────────────────────────────────────
     elif sport == "football":
@@ -445,6 +455,12 @@ def update_score(
             live_state["minute"] = data.football_minute
         if data.football_half is not None:
             live_state["half"] = data.football_half
+        if data.football_pen_1 is not None:
+            live_state["pen_goals_1"] = data.football_pen_1
+        if data.football_pen_2 is not None:
+            live_state["pen_goals_2"] = data.football_pen_2
+        if data.football_live_state:
+            live_state.update(data.football_live_state)
         match.live_state = live_state
 
         parts = sorted(match.participants, key=lambda p: p.position)
@@ -503,34 +519,55 @@ def finish_match(
 
         all_sets  = sorted(match.sets, key=lambda s: s.set_number)
         completed = [s for s in all_sets if s.is_complete]
+        n         = len(completed)
+        batting_first = ls.get("batting_first", 1)
 
-        if len(completed) >= 2:
-            # Both innings done — determine winner
-            runs_p1 = all_sets[0].score_p1
-            runs_p2 = all_sets[1].score_p1
-            winner  = engine.check_match_winner(runs_p1, runs_p2, config)
+        if n > 0 and n % 2 == 0:
+            # Even number of completed innings — compare the last pair to decide winner.
+            # Odd innings = batting_first team, even innings = other team.
+            last1 = completed[-2]  # second-to-last (batting_first team's most recent innings)
+            last2 = completed[-1]  # last (other team's most recent innings)
+
+            inn1_runs = last1.score_p1
+            inn2_runs = last2.score_p1
+
+            # Who batted in last1? odd set_number → batting_first, even → other
+            first_of_pair_pos = batting_first if (last1.set_number % 2 == 1) else (3 - batting_first)
+
+            if inn1_runs > inn2_runs:
+                winner = first_of_pair_pos
+            elif inn2_runs > inn1_runs:
+                winner = 3 - first_of_pair_pos
+            else:
+                winner = None  # still tied
             _finish_match(match, winner, db)
-        elif len(completed) == 1:
-            # First innings done — set up second innings
-            ls["current_innings"] = 2
+
+        elif n % 2 == 1:
+            # Odd number of completed innings — set up next innings
+            next_num = n + 1
+            ls["current_innings"] = next_num
             ls["runs"]    = 0
             ls["wickets"] = 0
             ls["balls"]   = 0
             ls["ball_log"] = []
             match.live_state = ls
-            db.add(MatchSet(match_id=match.match_id, set_number=2))
+            db.add(MatchSet(match_id=match.match_id, set_number=next_num))
 
     # ── FOOTBALL ─────────────────────────────────────────────
     elif event.sport_key == "football":
         if current_set:
             current_set.is_complete     = True
             current_set.winner_position = data.winner_position if isinstance(data.winner_position, int) else None
-        all_sets = match.sets
-        if all_sets:
-            s      = all_sets[0]
+
+        # Use explicit winner when provided (e.g. from penalties).
+        # Fall back to goal calculation only when winner_position is not set.
+        if isinstance(data.winner_position, int):
+            winner = data.winner_position
+        elif match.sets:
+            s      = match.sets[0]
             winner = engine.check_match_winner(s.score_p1, s.score_p2, config)
         else:
-            winner = data.winner_position if isinstance(data.winner_position, int) else None
+            winner = None
         _finish_match(match, winner, db)
 
     db.commit()

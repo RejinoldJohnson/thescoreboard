@@ -15,8 +15,12 @@ const STATUS_META = {
   completed:    { label: "Completed",    pill: "pill-green"  },
 };
 
-const SPORT_ABBREV = { table_tennis:"TT", badminton:"BD", cricket:"CR", football:"FB" };
-const sportAbbrevs = (events=[]) => [...new Set(events.map(e=>e.sport_key))].map(k=>SPORT_ABBREV[k]||k.slice(0,2).toUpperCase()).join(" ");
+const SPORT_EMOJI  = { table_tennis:"🏓", badminton:"🏸", cricket:"🏏", football:"⚽" };
+const sportIcons   = (events=[]) => {
+  const keys = [...new Set(events.map(e => e.sport_key).filter(Boolean))];
+  if (!keys.length) return null;
+  return keys.map(k => SPORT_EMOJI[k] || "🏆").join(" ");
+};
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -317,7 +321,7 @@ export default function Dashboard() {
 
 function TournamentCard({ tournament:t, showKebab, onKebabToggle, onManage, onDelete, onCopy }) {
   const events  = t.events || [];
-  const icons   = sportAbbrevs(events);
+  const icons   = sportIcons(events);
   const sm      = STATUS_META[t.status] || STATUS_META.draft;
   const isLive  = t.status === "live";
   return (
@@ -340,9 +344,10 @@ function TournamentCard({ tournament:t, showKebab, onKebabToggle, onManage, onDe
           width: 42, height: 42, borderRadius: "var(--radius-md)",
           background: "var(--primary-dim)", border: "1px solid rgba(255,107,53,0.2)",
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 900,
-          color: "var(--primary)", flexShrink: 0, letterSpacing: -0.5,
-        }}>{icons || "??"}</div>
+          fontSize: icons ? 18 : 15, fontWeight: 900,
+          color: "var(--primary)", flexShrink: 0,
+          fontFamily: icons ? "inherit" : "var(--font-display)",
+        }}>{icons || t.name?.[0]?.toUpperCase() || "🏆"}</div>
         <div style={{ minWidth:0 }}>
           <div style={{
             fontFamily:"var(--font-display)", fontSize:14, fontWeight:900,
@@ -368,9 +373,6 @@ function TournamentCard({ tournament:t, showKebab, onKebabToggle, onManage, onDe
                 {events.length} event{events.length!==1?"s":""}
               </span>
             )}
-            <span style={{ fontSize:10, fontFamily:"monospace", color:"var(--subtle)", background:"var(--elevated)", padding:"2px 6px", borderRadius:3 }}>
-              /t/{t.slug}
-            </span>
           </div>
         </div>
       </div>
