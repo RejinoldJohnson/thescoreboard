@@ -16,8 +16,7 @@ from app.schemas.tournament import TournamentCreate, TournamentUpdate, Tournamen
 from app.utils.auth import get_current_user
 from app.utils.slug import generate_unique_slug
 from app.sports.registry import get_sport_engine
-from app.sports.table_tennis.knockout import build_bracket
-from app.sports.table_tennis.group_knockout import assign_players_to_groups
+from app.sports.bracket import build_bracket, assign_players_to_groups
 
 router = APIRouter()
 
@@ -475,16 +474,14 @@ def generate_fixtures(
     engine = get_sport_engine(event.sport_key)
     is_team_event = event.participant_type in ("team", "doubles_pair")
 
-    # Default sets_to_win comes from event config; organiser can override per match
-    default_sets_to_win = (event.sport_config or {}).get("sets_to_win", 3)
+    # Default sets_to_win comes from event config; organiser can override per match.
+    # We honour the configured value for ALL stages so that sport-specific defaults
+    # (e.g. badminton always BO3) are respected and not silently overridden.
+    default_sets_to_win = (event.sport_config or engine.get_default_config()).get("sets_to_win", 2)
 
-    # ── Helper: sets_to_win based on match stage ─────────────
-    def _sets_for_stage(stage: str, is_group: bool = False) -> int:
-        if is_group:
-            return 2  # group stage always best of 3
-        if stage in ("semi", "final", "third_place"):
-            return 3  # best of 5 for late stages
-        return 2  # quarter, round_of_16, preliminary → best of 3
+    # ── Helper: sets_to_win for a given match stage ───────────
+    def _sets_for_stage(stage: str, is_group: bool = False) -> int:  # noqa: ARG001
+        return default_sets_to_win
 
     # ── Helper: create one match between two participants ─────
     def _create_match(pid1, pid2, group_id, stage, round_num, table_num):
@@ -832,7 +829,7 @@ def generate_groups(
 
     is_team_event = event.participant_type in ("team", "doubles_pair")
     engine = get_sport_engine(event.sport_key)
-    default_sets_to_win = (event.sport_config or {}).get("sets_to_win", 3)
+    default_sets_to_win = (event.sport_config or engine.get_default_config()).get("sets_to_win", 2)
 
     # Refuse regeneration if any group match has been started
     started = (
@@ -926,7 +923,7 @@ def generate_groups(
                 stage=spec["stage"],
                 status="scheduled",
                 table_number=((table_counter - 1) % 2) + 1,
-                live_state={"sets_to_win": 2},  # group stage always best of 3
+                live_state={"sets_to_win": default_sets_to_win},
             )
             db.add(match)
             db.flush()
@@ -989,7 +986,7 @@ def generate_knockout_from_groups(
 
     is_team_event = event.participant_type in ("team", "doubles_pair")
     engine = get_sport_engine(event.sport_key)
-    default_sets_to_win = (event.sport_config or {}).get("sets_to_win", 3)
+    default_sets_to_win = (event.sport_config or engine.get_default_config()).get("sets_to_win", 2)
 
     # Must have groups
     groups = db.query(Group).filter(Group.event_id == event_id).all()
@@ -1078,7 +1075,7 @@ def generate_knockout_from_groups(
             stage=spec["stage"],
             status="scheduled",
             table_number=((table_counter - 1) % 2) + 1,
-            live_state={"sets_to_win": 3 if spec["stage"] in ("semi", "final", "third_place") else 2},
+            live_state={"sets_to_win": default_sets_to_win},
         )
         db.add(match)
         db.flush()

@@ -1,44 +1,65 @@
 """
 Badminton scoring engine.
-Rules: Best of 3 sets. Each set first to 21, win by 2.
-If tied at 29-29, next point wins (30 is the cap).
+
+Rules (BWF standard):
+  - Best of 3 games (sets_to_win = 2)
+  - Each game first to 21 points, win by 2
+  - At 29-all, next point wins (cap at 30)
+  - Rally scoring: server changes every point (tracked externally via current_server)
+
+Organiser-configurable options (via sport_config):
+  - sets_to_win: 1 (single game), 2 (best of 3, default), 3 (best of 5)
+  - points_per_set: 15 or 21 (default 21)
 """
 from typing import Optional
 from app.sports.base import BaseSport
 
 
+DEFAULT_CONFIG = {
+    "sets_to_win":          2,     # best of 3 → need 2 games
+    "points_per_set":       21,    # first to 21
+    "win_margin":           2,     # win by 2
+    "deuce_starts_at":      20,    # deuce kicks in at 20-all
+    "max_points":           30,    # cap: next point after 29-all wins
+    "serve_changes_on_point": True, # rally scoring — server changes each point
+}
+
+VALID_SETS_TO_WIN = [1, 2, 3]     # BO1, BO3, BO5
+
+
 class Badminton(BaseSport):
 
     def get_default_config(self) -> dict:
-        return {
-            "sets_to_win": 2,           # best of 3 → need 2 sets
-            "points_per_set": 21,       # first to 21
-            "win_margin": 2,            # win by 2
-            "deuce_starts_at": 20,      # deuce kicks in at 20-20
-            "max_points": 30,           # cap at 30 — next point wins
-            "serve_changes_on_point": True,  # server changes every point (rally scoring)
-        }
+        return DEFAULT_CONFIG.copy()
 
     def validate_config(self, config: dict) -> dict:
-        c = self.get_default_config()
-        c.update({k: v for k, v in config.items() if k in c})
-        if c["sets_to_win"] not in [2]:
-            raise ValueError("Badminton is best of 3 — sets_to_win must be 2")
-        if c["points_per_set"] not in [15, 21]:
-            raise ValueError("points_per_set must be 15 or 21")
-        return c
+        clean = DEFAULT_CONFIG.copy()
+
+        if "sets_to_win" in config:
+            stw = int(config["sets_to_win"])
+            if stw not in VALID_SETS_TO_WIN:
+                raise ValueError(f"sets_to_win must be one of {VALID_SETS_TO_WIN}")
+            clean["sets_to_win"] = stw
+
+        if "points_per_set" in config:
+            pps = int(config["points_per_set"])
+            if pps not in (15, 21):
+                raise ValueError("points_per_set must be 15 or 21")
+            clean["points_per_set"] = pps
+            clean["deuce_starts_at"] = pps - 1
+            # Adjust cap proportionally (15-pt game caps at 17; 21-pt caps at 30)
+            clean["max_points"] = 17 if pps == 15 else 30
+
+        return clean
 
     def check_set_winner(self, score_p1: int, score_p2: int, config: dict) -> Optional[int]:
         pts     = config.get("points_per_set", 21)
         margin  = config.get("win_margin", 2)
         max_pts = config.get("max_points", 30)
-        deuce   = config.get("deuce_starts_at", 20)
 
         for pos, mine, theirs in [(1, score_p1, score_p2), (2, score_p2, score_p1)]:
-            # Normal win: reached target and ahead by margin
             if mine >= pts and mine - theirs >= margin:
                 return pos
-            # Cap win: reached max points (e.g. 30)
             if mine >= max_pts and mine > theirs:
                 return pos
 
@@ -53,24 +74,58 @@ class Badminton(BaseSport):
         return None
 
     def check_instant_win(self, score_p1: int, score_p2: int, config: dict) -> Optional[int]:
-        # Badminton has no instant win rule
-        return None
+        return None  # Badminton has no instant-win rule
 
     def get_server(self, score_p1: int, score_p2: int, first_server: int, config: dict) -> Optional[int]:
-        # In rally scoring the server is whoever won the last point.
-        # We track this externally via current_server on the match.
+        # Rally scoring: server is whoever won the last point.
+        # The current_server is updated by the scorer on every point.
         return None
 
     def get_match_summary(self, match) -> dict:
-        return {}
+        """Build a badminton match summary — same structure as TT for API consistency."""
+        parts = sorted(match.participants, key=lambda p: p.position)
+        sets  = sorted(match.sets, key=lambda s: s.set_number) if match.sets else []
 
-    @property
-    def sport_key(self) -> str:
-        return "badminton"
+        p1 = parts[0] if len(parts) > 0 else None
+        p2 = parts[1] if len(parts) > 1 else None
 
-    @property
-    def display_name(self) -> str:
-        return "Badminton"
+        def _name(p):
+            if not p:
+                return "TBD"
+            if p.team:
+                return p.team.name
+            if p.player:
+                return p.player.name
+            return "TBD"
+
+        return {
+            "match_id":       match.match_id,
+            "status":         match.status,
+            "stage":          match.stage,
+            "round":          match.round,
+            "table_number":   match.table_number,
+            "current_server": match.current_server,
+            "player_1": {
+                "name":      _name(p1),
+                "score":     p1.score     if p1 else 0,
+                "is_winner": p1.is_winner if p1 else False,
+            },
+            "player_2": {
+                "name":      _name(p2),
+                "score":     p2.score     if p2 else 0,
+                "is_winner": p2.is_winner if p2 else False,
+            },
+            "sets": [
+                {
+                    "set_number":  s.set_number,
+                    "score_p1":    s.score_p1,
+                    "score_p2":    s.score_p2,
+                    "winner":      s.winner_position,
+                    "is_complete": s.is_complete,
+                }
+                for s in sets
+            ],
+        }
 
     @property
     def has_sets(self) -> bool:

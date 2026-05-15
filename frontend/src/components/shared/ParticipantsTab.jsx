@@ -554,34 +554,40 @@ export function TeamTab({ event, onAddTeam, onRemoveTeam, teams, flash }) {
 
   const [teamForm,    setTeamForm]    = useState({ name: "", contact_name: "", contact_phone: "" });
   const [teamMembers, setTeamMembers] = useState(() => {
-    // Pre-fill the right number of slots
     const slots = Math.min(totalRoster, 15);
     return Array.from({ length: slots }, (_, i) => ({
-      name: "", role: i === 0 ? "captain" : "player",
+      name: "", role: i === 0 ? "captain" : i === 1 ? "vice_captain" : "player",
+      jersey: "", age: "",
     }));
   });
 
   const updateMember = (i, field, val) =>
     setTeamMembers(prev => prev.map((m, idx) => idx === i ? { ...m, [field]: val } : m));
 
-  const addSlot = () => setTeamMembers(prev => [...prev, { name: "", role: "player" }]);
+  const addSlot = () => setTeamMembers(prev => [...prev, { name: "", role: "player", jersey: "", age: "" }]);
   const removeSlot = (i) => setTeamMembers(prev => prev.filter((_, idx) => idx !== i));
 
   const handleAdd = () => {
     if (!teamForm.name.trim()) return flash("Team name required.");
     const validMembers = teamMembers.filter(m => m.name.trim());
     if (!validMembers.length) return flash("Add at least one player.");
-    onAddTeam(teamForm, validMembers);
+    onAddTeam(teamForm, validMembers.map(m => ({
+      name: m.name.trim(),
+      role: m.role,
+      jersey_number: m.jersey ? parseInt(m.jersey) || null : null,
+      age: m.age ? parseInt(m.age) || null : null,
+    })));
     setTeamForm({ name: "", contact_name: "", contact_phone: "" });
     setTeamMembers(Array.from({ length: Math.min(totalRoster, 15) }, (_, i) => ({
-      name: "", role: i === 0 ? "captain" : "player",
+      name: "", role: i === 0 ? "captain" : i === 1 ? "vice_captain" : "player",
+      jersey: "", age: "",
     })));
   };
 
   const roleOptions = sportKey === "football"
-    ? ["captain", "player", "goalkeeper"]
+    ? ["captain", "vice_captain", "player"]
     : sportKey === "cricket"
-    ? ["captain", "player", "wicketkeeper", "bowler"]
+    ? ["captain", "vice_captain", "player", "wicketkeeper", "bowler"]
     : ["captain", "player"];
 
   return (
@@ -633,14 +639,29 @@ export function TeamTab({ event, onAddTeam, onRemoveTeam, teams, flash }) {
           Squad Roster ({teamMembers.filter(m => m.name.trim()).length}/{totalRoster})
         </div>
 
+        {/* Column headers */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 52px 140px 32px", gap: 6, marginBottom: 4 }}>
+          {["Name", "Jersey", "Age", "Role", ""].map(h => (
+            <span key={h} style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, color: "var(--muted)" }}>{h}</span>
+          ))}
+        </div>
+
         {teamMembers.map((m, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 140px 32px", gap: 6, marginBottom: 6, alignItems: "center" }}>
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 60px 52px 140px 32px", gap: 6, marginBottom: 6, alignItems: "center" }}>
             <input className="input"
-              placeholder={i === 0 ? "Captain name *" : `Player ${i + 1}`}
+              placeholder={i === 0 ? "Captain *" : i === 1 ? "Vice Captain" : `Player ${i + 1}`}
               value={m.name} onChange={e => updateMember(i, "name", e.target.value)} />
+            <input className="input" type="number" placeholder="#"
+              value={m.jersey} onChange={e => updateMember(i, "jersey", e.target.value)}
+              style={{ textAlign: "center" }} />
+            <input className="input" type="number" placeholder="Age" min="5" max="60"
+              value={m.age} onChange={e => updateMember(i, "age", e.target.value)}
+              style={{ textAlign: "center" }} />
             <select className="input" value={m.role} onChange={e => updateMember(i, "role", e.target.value)}>
               {roleOptions.map(r => (
-                <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
+                <option key={r} value={r}>
+                  {r === "vice_captain" ? "Vice Captain" : r.charAt(0).toUpperCase() + r.slice(1)}
+                </option>
               ))}
             </select>
             <button onClick={() => removeSlot(i)} disabled={teamMembers.length === 1}
@@ -686,8 +707,10 @@ export function TeamTab({ event, onAddTeam, onRemoveTeam, teams, flash }) {
             </div>
             <div className="roster">
               {(team.members || []).map(m => (
-                <span key={m.tm_id} className={`roster-chip${m.role === "captain" ? " captain" : ""}`}>
-                  {m.role === "captain" ? "© " : ""}{m.name}
+                <span key={m.tm_id} className={`roster-chip${m.role === "captain" ? " captain" : m.role === "vice_captain" ? " vc" : ""}`}>
+                  {m.role === "captain" ? "© " : m.role === "vice_captain" ? "VC " : ""}
+                  {m.name}
+                  {m.jersey_number != null ? ` #${m.jersey_number}` : ""}
                 </span>
               ))}
             </div>
