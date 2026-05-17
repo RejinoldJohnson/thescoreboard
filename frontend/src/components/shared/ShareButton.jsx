@@ -47,7 +47,7 @@ export function ShareButton({ type, slug, matchId, title }) {
   const [copied,  setCopied]  = useState(false);
   const [igState, setIgState] = useState(null); // null | "copied" | "shared"
   const ref                   = useRef(null);
-  const { share, shareInstagram, copyLink, nativeShare, canNativeShare } = useShare({ type, slug, matchId, title });
+  const { share, shareInstagram, copyLink, canNativeShare } = useShare({ type, slug, matchId, title });
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -60,11 +60,6 @@ export function ShareButton({ type, slug, matchId, title }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
     setOpen(false);
-  };
-
-  const handleNative = async () => {
-    const ok = await nativeShare();
-    if (!ok) setOpen(true);
   };
 
   const handleInstagram = async () => {
@@ -87,7 +82,7 @@ export function ShareButton({ type, slug, matchId, title }) {
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button
-        onClick={canNativeShare ? handleNative : () => setOpen((o) => !o)}
+        onClick={() => setOpen((o) => !o)}
         style={{
           display:"flex", alignItems:"center", gap:6, padding:"7px 14px",
           background:"var(--elevated)", border:"1px solid var(--border)",
