@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getWorkspace, transitionTournament, clearToken, getMe } from "../../../api/client";
+import { getWorkspace, transitionTournament, updateTournament, clearToken, getMe } from "../../../api/client";
 import OrgHeader from "../../../components/shared/OrgHeader";
 import SportSetupModal from "../../../components/organiser/SportSetupModal";
+import { ShareButton } from "../../../components/shared/ShareButton";
+import { MediaUpload } from "../../../components/shared/MediaUpload";
 
 const LIFECYCLE = ["draft", "registration", "fixtures", "live", "completed"];
 const LIFECYCLE_LABELS = {
@@ -216,19 +218,78 @@ export default function TournamentOverview() {
 
         {/* ── SHARE LINK ── */}
         <div className="card share-link-card"
-          style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
-          <div style={{ flex: 1, fontFamily: "monospace", fontSize: 13,
-            color: "var(--muted)", wordBreak: "break-all" }}>
-            {window.location.origin}/t/{t.slug}
+          style={{ marginBottom: 28 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)", marginBottom: 10 }}>
+            Share Tournament
           </div>
-          <button className="btn btn-primary btn-sm" onClick={() => {
-            navigator.clipboard.writeText(`${window.location.origin}/t/${t.slug}`);
-            flash("Copied!");
-          }}>Copy Link</button>
-          <button className="btn btn-outline btn-sm"
-            onClick={() => window.open(`/t/${t.slug}`, "_blank")}>
-            View ↗
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, fontFamily: "monospace", fontSize: 12,
+              color: "var(--muted)", wordBreak: "break-all", minWidth: 0 }}>
+              {window.location.origin}/t/{t.slug}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+              <ShareButton
+                type="tournament"
+                slug={t.slug}
+                title={`${t.name} — Live on TheScoreBoard`}
+              />
+              <button className="btn btn-outline btn-sm"
+                onClick={() => window.open(`/t/${t.slug}`, "_blank")}>
+                View ↗
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── BRANDING ── */}
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-title" style={{ marginBottom: 2 }}>Branding</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>
+            Images are automatically cropped to the correct size before upload.
+          </div>
+
+          {/* Banner — full width, 16:9 */}
+          <MediaUpload
+            label="Banner"
+            hint="Any image · auto-cropped to 16:9 landscape · shown as hero on tournament page"
+            bucket="tournament-posters"
+            resourceType="tournaments"
+            resourceId={t.tournament_id}
+            filename="poster"
+            enforceAspect="16:9"
+            maxWidth={1920}
+            previewUrl={t.poster_url}
+            onUploaded={async (url) => {
+              try {
+                await updateTournament(t.org_id, t.tournament_id, { poster_url: url });
+                flash("Banner updated!");
+                loadData();
+              } catch (e) { flash("Error saving banner: " + e.message); }
+            }}
+          />
+
+          {/* Logo — square, shown as circle on public page */}
+          <div style={{ marginTop: 16, maxWidth: 180 }}>
+            <MediaUpload
+              label="Logo"
+              hint="Any image · auto-cropped to 1:1 · shown as circle over banner"
+              bucket="logos"
+              resourceType="tournaments"
+              resourceId={t.tournament_id}
+              filename="logo"
+              enforceAspect="1:1"
+              maxWidth={800}
+              previewUrl={t.logo_url}
+              previewStyle={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }}
+              onUploaded={async (url) => {
+                try {
+                  await updateTournament(t.org_id, t.tournament_id, { logo_url: url });
+                  flash("Logo updated!");
+                  loadData();
+                } catch (e) { flash("Error saving logo: " + e.message); }
+              }}
+            />
+          </div>
         </div>
 
         {/* ── EVENTS ── */}

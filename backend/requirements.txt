@@ -7,3 +7,8 @@ passlib[bcrypt]==1.7.4
 python-dotenv==1.0.1
 pydantic[email]==2.9.2
 alembic==1.13.3
+
+# Media & uploads
+httpx==0.27.0
+python-multipart==0.0.12
+Pillow==10.4.0

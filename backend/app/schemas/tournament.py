@@ -44,6 +44,9 @@ class TournamentUpdate(BaseModel):
     state: Optional[str] = None
     primary_color: Optional[str] = None
     secondary_color: Optional[str] = None
+    poster_url: Optional[str] = None
+    logo_url: Optional[str] = None
+    og_image_url: Optional[str] = None
     status: Optional[str] = None
     is_active: Optional[bool] = None
     is_published: Optional[bool] = None
@@ -70,7 +73,7 @@ class TournamentOut(BaseModel):
     start_date: Optional[date]
     end_date: Optional[date]
     poster_url: Optional[str]
-    banner_url: Optional[str]
+    logo_url: Optional[str]
     primary_color: Optional[str]
     secondary_color: Optional[str]
     venue: Optional[str]

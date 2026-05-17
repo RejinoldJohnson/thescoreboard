@@ -30,10 +30,12 @@ class Tournament(Base):
     end_date = Column(Date, nullable=True)
 
     # Branding
-    poster_url = Column(String(500), nullable=True)
-    banner_url = Column(String(500), nullable=True)
-    primary_color = Column(String(7), nullable=True)
-    secondary_color = Column(String(7), nullable=True)
+    poster_url   = Column(String(500), nullable=True)  # primary visual asset
+    logo_url     = Column(String(500), nullable=True)  # square logo
+    og_image_url = Column(String(500), nullable=True)
+    primary_color    = Column(String(7), nullable=True)
+    secondary_color  = Column(String(7), nullable=True)
+    # banner_url kept in DB for backward compat — not exposed in API
 
     # Location
     venue = Column(String(255), nullable=True)

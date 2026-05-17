@@ -23,13 +23,41 @@ class Settings:
     # CORS
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
-    # Supabase Storage (for posters/banners)
+    # Public base URL — used to build absolute share / OG-image URLs.
+    # In production set to: https://api.yourdomain.com
+    APP_URL: str = os.getenv("APP_URL", "http://localhost:8000")
+
+    # The canonical frontend SPA URL — used in share-page redirects.
+    # In production set to: https://app.yourdomain.com
+    SITE_URL: str = os.getenv("SITE_URL", "http://localhost:5173")
+
+    # Supabase Storage (service key stays backend-only — never exposed to browser)
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
     SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")
+
+    # Supabase anon/public key — safe to expose to the browser via VITE_ prefix.
+    # The frontend uses it only for signed-upload PUT requests.
+    SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
+
+    # Storage bucket names
+    BUCKET_LOGOS: str = "logos"
+    BUCKET_TEAM_BANNERS: str = "team-banners"
+    BUCKET_TOURNAMENT_POSTERS: str = "tournament-posters"
+    BUCKET_OG_CACHE: str = "og-cache"
+
+    # Per-bucket upload size limits (bytes)
+    MAX_LOGO_SIZE: int = 2 * 1024 * 1024        # 2 MB
+    MAX_POSTER_SIZE: int = 5 * 1024 * 1024       # 5 MB
+
+    ALLOWED_IMAGE_TYPES: list = ["image/jpeg", "image/png", "image/webp"]
 
     @property
     def is_prod(self) -> bool:
         return self.ENV == "prod"
+
+    @property
+    def supabase_configured(self) -> bool:
+        return bool(self.SUPABASE_URL and self.SUPABASE_SERVICE_KEY)
 
 
 settings = Settings()
