@@ -49,18 +49,11 @@ export function useShare({ type, slug, matchId, title = "Check this out on TheSc
   }, [getUrl]);
 
   const shareInstagram = useCallback(async () => {
-    const url = getUrl();
-    if (navigator.share) {
-      try {
-        await navigator.share({ title, url, text: title });
-        return "native";
-      } catch {
-        // user cancelled or browser blocked — fall through to copy
-      }
-    }
+    // Instagram has no web share URL — copy link then open the app so user can paste.
     await copyLink();
+    window.open("https://www.instagram.com/", "_blank", "noopener");
     return "copied";
-  }, [getUrl, title, copyLink]);
+  }, [copyLink]);
 
   const nativeShare = useCallback(async () => {
     if (!navigator.share) return false;
