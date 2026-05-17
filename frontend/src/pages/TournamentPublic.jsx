@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getTournamentBySlug, getSportTournament } from "../api/client";
 import RoadToFinal from "../components/shared/RoadToFinal";
+import { ShareButton } from "../components/shared/ShareButton";
 
 const POLL_MS  = 8000;
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
@@ -724,129 +725,243 @@ function Section({ id, title, count, accent, children, wide, action }) {
 }
 
 // ── Tournament hero ───────────────────────────────────────────
-function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, totalMatches, sportKey, darkMode, onToggleDark }) {
-  const sc = STATUS_CFG[tournament.status] || STATUS_CFG.draft;
-  const isLive = tournament.status === "live";
-  const sportIcon = SPORT_META[sportKey]?.icon;
+function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, totalMatches, sportKey, darkMode, onToggleDark, slug }) {
+  const sportIcon  = SPORT_META[sportKey]?.icon;
   const sportLabel = SPORT_META[sportKey]?.label;
 
   const stCfg = ({
-    live:         { label:"Live Now",           bg:"var(--primary-dim)",    c:"var(--primary)",  b:"rgba(255,107,53,.25)", dot:true  },
-    registration: { label:"Registration Open",  bg:"rgba(22,163,74,.1)",    c:"#16a34a",          b:"rgba(22,163,74,.25)",  dot:false },
-    completed:    { label:"Completed",          bg:"var(--elevated)",       c:"var(--muted)",    b:"var(--border)",         dot:false },
-    draft:        { label:"Coming Soon",        bg:"var(--elevated)",       c:"var(--muted)",    b:"var(--border)",         dot:false },
-    fixtures:     { label:"Fixtures Set",       bg:"rgba(37,99,235,.1)",    c:"#2563eb",          b:"rgba(37,99,235,.25)",  dot:false },
-  })[tournament.status] || { label:sc.label, bg:"var(--elevated)", c:"var(--muted)", b:"var(--border)", dot:false };
+    live:         { label:"Live Now",           bg:"var(--primary-dim)",  c:"var(--primary)", b:"rgba(255,107,53,.25)", dot:true  },
+    registration: { label:"Registration Open",  bg:"rgba(22,163,74,.1)", c:"#16a34a",         b:"rgba(22,163,74,.25)",  dot:false },
+    completed:    { label:"Completed",          bg:"var(--elevated)",    c:"var(--muted)",    b:"var(--border)",         dot:false },
+    draft:        { label:"Coming Soon",        bg:"var(--elevated)",    c:"var(--muted)",    b:"var(--border)",         dot:false },
+    fixtures:     { label:"Fixtures Set",       bg:"rgba(37,99,235,.1)", c:"#2563eb",         b:"rgba(37,99,235,.25)",  dot:false },
+  })[tournament.status] || { label:"", bg:"var(--elevated)", c:"var(--muted)", b:"var(--border)", dot:false };
 
-  const metaParts = [tournament.venue, tournament.city ? `${tournament.city}${tournament.state ? `, ${tournament.state}` : ""}` : null, tournament.start_date].filter(Boolean);
+  const metaParts = [
+    tournament.venue,
+    tournament.city ? `${tournament.city}${tournament.state ? `, ${tournament.state}` : ""}` : null,
+    tournament.start_date,
+  ].filter(Boolean);
 
-  return (
-    <div style={{ background:"linear-gradient(160deg, rgba(var(--accent-rgb),.07) 0%, var(--bg) 55%)", borderBottom:"1px solid var(--border)", position:"relative", overflow:"hidden" }}>
-      {/* Accent radial glow */}
-      <div style={{ position:"absolute", top:-100, right:-60, width:380, height:380, borderRadius:"50%", background:"radial-gradient(circle, rgba(var(--accent-rgb),.14) 0%, transparent 65%)", pointerEvents:"none" }}/>
+  const hasBanner = !!tournament.poster_url;
+  const hasLogo   = !!tournament.logo_url;
+  const initials  = tournament.name.split(" ").slice(0, 2).map(w => w[0] || "").join("").toUpperCase() || "T";
 
-      <div style={{ maxWidth:640, margin:"0 auto", padding:"18px 20px 22px", position:"relative" }}>
-        {/* Top row: TheScoreBoard brand + dark mode toggle */}
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
-          <span style={{ fontFamily:"var(--font-display)", fontSize:11, fontWeight:900, textTransform:"uppercase", letterSpacing:2, lineHeight:1 }}>
-            <span style={{ color:"var(--primary)" }}>The</span><span style={{ color:"var(--ink)" }}>Score</span><span style={{ color:"var(--primary)" }}>Board</span>
+  // Reusable logo circle (different sizes for mobile vs desktop)
+  const logoCircle = (size, border = 4) => (
+    <div style={{
+      width:size, height:size, borderRadius:"50%",
+      border:`${border}px solid var(--bg)`,
+      boxShadow:"0 4px 20px rgba(0,0,0,.28)",
+      background:"var(--elevated)",
+      overflow:"hidden", flexShrink:0,
+      display:"flex", alignItems:"center", justifyContent:"center",
+    }}>
+      {hasLogo
+        ? <img src={tournament.logo_url} alt="logo"
+            style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+        : <span style={{ fontFamily:"var(--font-display)", fontSize: size * 0.28,
+            fontWeight:900, color:"var(--primary)", lineHeight:1, userSelect:"none" }}>
+            {initials}
           </span>
-          <button
-            onClick={onToggleDark}
-            style={{ background:"none", border:"1px solid var(--border)", borderRadius:6, width:32, height:32, cursor:"pointer", color:"var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}
-          >
-            {!darkMode ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="5"/>
-                <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-              </svg>
-            )}
-          </button>
-        </div>
+      }
+    </div>
+  );
 
-        {/* Status + sport pills */}
-        <div style={{ display:"flex", gap:6, marginBottom:14, flexWrap:"wrap" }}>
-          <span style={{ display:"inline-flex", alignItems:"center", gap:5, background:stCfg.bg, color:stCfg.c, fontFamily:"var(--font-display)", fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:2, padding:"4px 11px", borderRadius:20, border:`1px solid ${stCfg.b}` }}>
-            {stCfg.dot && <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>}
-            {stCfg.label}
+  // Reusable action buttons (share + dark mode)
+  const darkBtn = (glass) => (
+    <button onClick={onToggleDark} style={{
+      background: glass ? "rgba(255,255,255,.15)" : "none",
+      border: glass ? "1px solid rgba(255,255,255,.25)" : "1px solid var(--border)",
+      backdropFilter: glass ? "blur(6px)" : "none",
+      borderRadius:6, width:32, height:32, cursor:"pointer",
+      color: glass ? "#fff" : "var(--ink)",
+      display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
+    }}>
+      {!darkMode
+        ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      }
+    </button>
+  );
+
+  // Shared chips + meta + stats block (used in both layouts)
+  const infoBody = (
+    <>
+      {/* Status + sport chips */}
+      <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
+        <span style={{ display:"inline-flex", alignItems:"center", gap:5,
+          background:stCfg.bg, color:stCfg.c,
+          fontFamily:"var(--font-display)", fontSize:9, fontWeight:900,
+          textTransform:"uppercase", letterSpacing:2, padding:"4px 11px",
+          borderRadius:20, border:`1px solid ${stCfg.b}` }}>
+          {stCfg.dot && <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>}
+          {stCfg.label}
+        </span>
+        {sportIcon && sportLabel && (
+          <span style={{ display:"inline-flex", alignItems:"center", gap:4,
+            background:"var(--accent-dim)", color:"var(--accent)",
+            fontFamily:"var(--font-display)", fontSize:9, fontWeight:900,
+            textTransform:"uppercase", letterSpacing:1, padding:"4px 11px",
+            borderRadius:20, border:"1px solid var(--accent-border)" }}>
+            {sportIcon} {sportLabel}
           </span>
-          {sportIcon && sportLabel && (
-            <span style={{ display:"inline-flex", alignItems:"center", gap:4, background:"var(--accent-dim)", color:"var(--accent)", fontFamily:"var(--font-display)", fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:1, padding:"4px 11px", borderRadius:20, border:"1px solid var(--accent-border)" }}>
-              {sportIcon} {sportLabel}
+        )}
+      </div>
+
+      {/* Meta: venue · city · dates */}
+      {metaParts.length > 0 && (
+        <div style={{ display:"flex", flexWrap:"wrap", fontSize:13,
+          color:"var(--muted)", marginBottom:12, fontWeight:500, gap:2 }}>
+          {metaParts.map((item, i) => (
+            <span key={i} style={{ display:"inline-flex", alignItems:"center" }}>
+              {i > 0 && <span style={{ margin:"0 8px", opacity:.4 }}>·</span>}
+              {item}
+            </span>
+          ))}
+          {tournament.end_date && tournament.end_date !== tournament.start_date && (
+            <span style={{ display:"inline-flex", alignItems:"center" }}>
+              <span style={{ margin:"0 8px", opacity:.4 }}>→</span>
+              {tournament.end_date}
             </span>
           )}
         </div>
+      )}
 
-        {/* Tournament name */}
-        <h1 style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:900, textTransform:"uppercase", letterSpacing:"-1.5px", color:"var(--ink)", lineHeight:1.05, marginBottom:12 }}>
+      {tournament.description && (
+        <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.65, marginBottom:14, maxWidth:520 }}>
+          {tournament.description}
+        </p>
+      )}
+
+      {/* Stat chips */}
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+        {totalPlayers > 0 && (
+          <div style={{ background:"var(--elevated)", border:"1px solid var(--border)",
+            borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
+            <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900,
+              color:"var(--ink)", lineHeight:1 }}>{totalPlayers}</span>
+            <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Players</span>
+          </div>
+        )}
+        {totalMatches > 0 && (
+          <div style={{ background:"var(--elevated)", border:"1px solid var(--border)",
+            borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
+            <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900,
+              color:"var(--ink)", lineHeight:1 }}>{doneMatches}/{totalMatches}</span>
+            <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Matches</span>
+          </div>
+        )}
+        {liveCount > 0 && (
+          <div style={{ background:"rgba(255,107,53,.15)", border:"1px solid rgba(255,107,53,.35)",
+            borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
+            <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
+            <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900,
+              color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
+            <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live Now</span>
+          </div>
+        )}
+      </div>
+
+      {/* Sponsors */}
+      {tournament.sponsors?.length > 0 && (
+        <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:14, flexWrap:"wrap" }}>
+          <span style={{ fontSize:10, color:"var(--muted)", fontWeight:700,
+            textTransform:"uppercase", letterSpacing:1 }}>Sponsors</span>
+          {tournament.sponsors.map((s, i) => (
+            <span key={i} style={{ background:"var(--elevated)", border:"1px solid var(--border)",
+              borderRadius:6, padding:"3px 10px", fontSize:11, color:"var(--muted)", fontWeight:600 }}>
+              {s.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <div style={{ borderBottom:"1px solid var(--border)" }}>
+
+      {/* ══════════ MOBILE ONLY: banner + floating logo ══════════ */}
+      <div className="hero-mobile-only" style={{ position:"relative" }}>
+        {/* Banner image — overflow:hidden scoped here only */}
+        <div style={{
+          position:"relative", height: hasBanner ? 300 : 140, overflow:"hidden",
+          background: hasBanner ? "#111" : "linear-gradient(135deg, rgba(var(--accent-rgb),.1) 0%, var(--bg) 70%)",
+        }}>
+          {hasBanner && (
+            <img src={tournament.poster_url} alt=""
+              style={{ position:"absolute", inset:0, width:"100%", height:"100%",
+                objectFit:"cover", objectPosition:"top center", display:"block" }} />
+          )}
+          <div style={{ position:"absolute", inset:0, pointerEvents:"none",
+            background:"linear-gradient(to bottom, rgba(0,0,0,.52) 0%, transparent 38%, transparent 58%, rgba(0,0,0,.5) 100%)" }} />
+
+          {/* Top bar over banner */}
+          <div style={{ position:"absolute", top:0, left:0, right:0, zIndex:2 }}>
+            <div style={{ maxWidth:900, margin:"0 auto", padding:"16px 20px",
+              display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontFamily:"var(--font-display)", fontSize:11, fontWeight:900,
+                textTransform:"uppercase", letterSpacing:2, lineHeight:1 }}>
+                <span style={{ color:"var(--primary)" }}>The</span>
+                <span style={{ color:"#fff" }}>Score</span>
+                <span style={{ color:"var(--primary)" }}>Board</span>
+              </span>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <ShareButton type="tournament" slug={slug} title={`${tournament.name} — Live on TheScoreBoard`} />
+                {darkBtn(true)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Logo — outside overflow:hidden, straddles banner bottom */}
+        <div style={{ position:"absolute", bottom:-36, left:0, right:0, zIndex:10, pointerEvents:"none" }}>
+          <div style={{ maxWidth:900, margin:"0 auto", padding:"0 20px" }}>
+            <div style={{ pointerEvents:"all" }}>{logoCircle(72)}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════ DESKTOP ONLY: simple top bar (no banner) ══════════ */}
+      <div className="hero-desktop-only">
+        <div style={{ maxWidth:900, margin:"0 auto", padding:"18px 24px",
+          display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:900,
+            textTransform:"uppercase", letterSpacing:2, lineHeight:1 }}>
+            <span style={{ color:"var(--primary)" }}>The</span>
+            <span style={{ color:"var(--ink)" }}>Score</span>
+            <span style={{ color:"var(--primary)" }}>Board</span>
+          </span>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <ShareButton type="tournament" slug={slug} title={`${tournament.name} — Live on TheScoreBoard`} />
+            {darkBtn(false)}
+          </div>
+        </div>
+      </div>
+
+      {/* ══════════ INFO ZONE (both layouts) ══════════ */}
+      {/* hero-info-zone CSS: mobile padding-top=52px, desktop padding-top=0 */}
+      <div className="hero-info-zone" style={{ maxWidth:900, margin:"0 auto" }}>
+
+        {/* Desktop: logo circle + tournament name side-by-side */}
+        <div className="hero-desktop-namerow">
+          {logoCircle(64, 3)}
+          <h1 style={{ fontFamily:"var(--font-display)", fontSize:32, fontWeight:900,
+            textTransform:"uppercase", letterSpacing:"-1.5px",
+            color:"var(--ink)", lineHeight:1.05, margin:0 }}>
+            {tournament.name}
+          </h1>
+        </div>
+
+        {/* Mobile: tournament name (logo floats above) */}
+        <h1 className="hero-mobile-name" style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:900,
+          textTransform:"uppercase", letterSpacing:"-1.5px",
+          color:"var(--ink)", lineHeight:1.05, marginBottom:10 }}>
           {tournament.name}
         </h1>
 
-        {/* Meta: venue · city · dates */}
-        {metaParts.length > 0 && (
-          <div style={{ display:"flex", flexWrap:"wrap", fontSize:12, color:"var(--muted)", marginBottom:18, fontWeight:500 }}>
-            {metaParts.map((item, i) => (
-              <span key={i} style={{ display:"inline-flex", alignItems:"center" }}>
-                {i > 0 && <span style={{ margin:"0 8px", color:"var(--subtle)" }}>·</span>}
-                {item}
-              </span>
-            ))}
-            {tournament.end_date && tournament.end_date !== tournament.start_date && (
-              <span style={{ display:"inline-flex", alignItems:"center" }}>
-                <span style={{ margin:"0 8px", color:"var(--subtle)" }}>→</span>
-                {tournament.end_date}
-              </span>
-            )}
-          </div>
-        )}
-
-        {tournament.description && (
-          <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.6, marginBottom:16, maxWidth:540 }}>
-            {tournament.description}
-          </p>
-        )}
-
-        {/* Stat chips */}
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-          {totalPlayers > 0 && (
-            <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{totalPlayers}</span>
-              <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Players</span>
-            </div>
-          )}
-          {totalMatches > 0 && (
-            <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{doneMatches}/{totalMatches}</span>
-              <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Matches</span>
-            </div>
-          )}
-          {liveCount > 0 && (
-            <div style={{ background:"var(--primary-dim)", border:"1px solid rgba(255,107,53,.2)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
-              <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:14, fontWeight:900, color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
-              <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live Now</span>
-            </div>
-          )}
-        </div>
-
-        {/* Sponsors */}
-        {tournament.sponsors?.length > 0 && (
-          <div style={{ display:"flex", alignItems:"center", gap:10, marginTop:16, flexWrap:"wrap" }}>
-            <span style={{ fontSize:10, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:1 }}>Sponsors</span>
-            {tournament.sponsors.map((s, i) => (
-              <span key={i} style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:6, padding:"3px 10px", fontSize:11, color:"var(--muted)", fontWeight:600 }}>
-                {s.name}
-              </span>
-            ))}
-          </div>
-        )}
+        {infoBody}
       </div>
     </div>
   );
@@ -1241,7 +1356,7 @@ export default function TournamentPublic() {
 
   if (status === "draft") return (
     <div className="app">
-      <TournamentHero tournament={t} liveCount={0} totalPlayers={0} doneMatches={0} totalMatches={0} sportKey={primarySportKey} darkMode={darkMode} onToggleDark={toggleDark} />
+      <TournamentHero tournament={t} liveCount={0} totalPlayers={0} doneMatches={0} totalMatches={0} sportKey={primarySportKey} darkMode={darkMode} onToggleDark={toggleDark} slug={slug} />
       <DraftView tournament={t} />
     </div>
   );
@@ -1268,6 +1383,7 @@ export default function TournamentPublic() {
         sportKey={primarySportKey}
         darkMode={darkMode}
         onToggleDark={toggleDark}
+        slug={slug}
       />
 
       {liveMatches.length > 0 && <LiveStrip liveMatches={liveMatches} />}

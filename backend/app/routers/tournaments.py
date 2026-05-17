@@ -322,6 +322,8 @@ def get_workspace(
             "status":         t.status,
             "primary_color":  t.primary_color,
             "is_published":   t.is_published,
+            "poster_url":     t.poster_url or getattr(t, "banner_url", None),
+            "logo_url":       t.logo_url,
         },
         "events": events_data,
         "stats": {

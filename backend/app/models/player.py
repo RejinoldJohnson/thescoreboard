@@ -41,6 +41,8 @@ class Team(Base):
 
     seed_level = Column(String(20), nullable=True)  # beginner / intermediate / advanced / pro
 
+    logo_url   = Column(String(500), nullable=True)
+
     org = relationship("Organization")
     members              = relationship("TeamMember", back_populates="team",
                                         cascade="all, delete-orphan")

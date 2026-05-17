@@ -106,4 +106,11 @@ export const publicRegisterTeam = (tournamentId, d) =>
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.detail || r.status); }
     return r.json();
   });
-//
+
+// Media upload (direct — file goes to backend, backend proxies to Supabase)
+
+// Share URLs (no auth needed — these are public links)
+export const shareUrl = {
+  tournament: (slug) => `${BASE}/share/t/${slug}`,
+  match:      (matchId) => `${BASE}/share/m/${matchId}`,
+};
