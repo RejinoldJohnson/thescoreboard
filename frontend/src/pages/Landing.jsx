@@ -12,7 +12,7 @@ const SPORTS_CONFIG = [
   { key: "badminton",    url: "badminton",    color: "#38bdf8" },
 ];
 
-const POLL_INTERVAL = 10000;
+const POLL_INTERVAL = 5000;
 
 export default function Landing() {
   const navigate = useNavigate();

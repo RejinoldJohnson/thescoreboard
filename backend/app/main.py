@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, organizations, tournaments, events, players, matches, public, teams, media, share
+from app.routers import auth, organizations, tournaments, events, players, matches, public, teams, media, share, ws as ws_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,6 +29,16 @@ except Exception as _mig_err:
     Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title=f"{settings.APP_NAME} API", version=settings.VERSION)
+
+
+@app.on_event("startup")
+async def _capture_event_loop():
+    """Give the WS manager a reference to the running event loop so it can
+    broadcast from sync route handlers via run_coroutine_threadsafe."""
+    import asyncio
+    from app.ws.manager import manager
+    manager.set_loop(asyncio.get_event_loop())
+    logger.info("WS manager ready — route: /api/ws/tournament/{slug}")
 
 
 @app.exception_handler(Exception)
@@ -75,6 +85,9 @@ app.include_router(media.router,         prefix="/api/media",   tags=["media"])
 
 # ── Social share (no auth — crawlers must reach these) ────────
 app.include_router(share.router,         prefix="/api/share",   tags=["share"])
+
+# ── WebSocket (no auth — spectators connect here) ─────────────
+app.include_router(ws_router.router,     prefix="/api/ws",      tags=["websocket"])
 
 
 @app.get("/api/health")

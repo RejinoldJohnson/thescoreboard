@@ -24,6 +24,7 @@ async function request(method, path, body) {
 // Auth
 export const register = (d) => request("POST", "/auth/register", d);
 export const login = (d) => request("POST", "/auth/login", d);
+export const googleAuth = (accessToken) => request("POST", "/auth/google", { access_token: accessToken });
 export const getMe = () => request("GET", "/auth/me");
 
 // Orgs
@@ -109,12 +110,12 @@ export const publicRegisterTeam = (tournamentId, d) =>
 
 // Media upload (direct — file goes to backend, backend proxies to Supabase)
 
-// Share URLs — always point to the frontend origin, never the API domain.
-// window.location.origin resolves to the correct domain in every environment:
-//   dev  → http://localhost:5173
-//   prod → https://thescoreboard.in
+// Share URLs point to the backend share route (/api/share/…) on the same origin.
+// WhatsApp and other crawlers hit this route and get proper OG meta tags (og:image,
+// og:title, og:description). Human users are JS-redirected to the frontend SPA.
+// The /api prefix is proxied to the FastAPI backend in both dev (Vite) and prod (nginx).
 const SITE_ORIGIN = typeof window !== "undefined" ? window.location.origin : "";
 export const shareUrl = {
-  tournament: (slug)    => `${SITE_ORIGIN}/t/${slug}`,
-  match:      (matchId) => `${SITE_ORIGIN}/t/match/${matchId}`,
+  tournament: (slug)    => `${SITE_ORIGIN}/api/share/t/${slug}`,
+  match:      (matchId) => `${SITE_ORIGIN}/api/share/m/${matchId}`,
 };
