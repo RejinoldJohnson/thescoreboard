@@ -47,7 +47,7 @@ export function ShareButton({ type, slug, matchId, title }) {
   const [copied,  setCopied]  = useState(false);
   const [igState, setIgState] = useState(null); // null | "copied" | "shared"
   const ref                   = useRef(null);
-  const { share, shareInstagram, copyLink, canNativeShare } = useShare({ type, slug, matchId, title });
+  const { share, shareInstagram, copyLink } = useShare({ type, slug, matchId, title });
 
   useEffect(() => {
     const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -63,16 +63,12 @@ export function ShareButton({ type, slug, matchId, title }) {
   };
 
   const handleInstagram = async () => {
-    const result = await shareInstagram();
-    // "native" = Web Share API sheet opened (Instagram appears as an option there)
-    // "copied" = desktop fallback, link is now in clipboard
-    setIgState(result);
-    setTimeout(() => setIgState(null), 3000);
-    if (result === "copied") return; // keep dropdown open to show the hint
-    setOpen(false);
+    await shareInstagram(); // always copies link + opens instagram.com
+    setIgState("copied");
+    setTimeout(() => { setIgState(null); setOpen(false); }, 2500);
   };
 
-  const igLabel = igState === "shared" ? "Shared!" : igState === "copied" ? "Link copied — paste in Instagram" : "Instagram";
+  const igLabel = igState === "copied" ? "Link copied — paste in Instagram!" : "Instagram";
   const igColor = igState ? "var(--green)" : "#E1306C";
 
   const ROW = { display:"flex", alignItems:"center", gap:10, width:"100%", padding:"9px 12px",
@@ -121,7 +117,7 @@ export function ShareButton({ type, slug, matchId, title }) {
             onMouseLeave={(e) => e.currentTarget.style.background = "none"}>
             <span style={{ color: igColor, flexShrink:0 }}>{IG_ICON}</span>
             <span style={{ flex:1 }}>{igLabel}</span>
-            {!canNativeShare && !igState && (
+            {!igState && (
               <span style={{ fontSize:10, color:"var(--muted)", marginLeft:4 }}>copy link</span>
             )}
           </button>
