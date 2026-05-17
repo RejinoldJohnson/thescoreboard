@@ -103,11 +103,12 @@ def share_tournament(slug: str, db: Session = Depends(get_db)):
     desc_parts = [p for p in [sport_label, t.city, t.venue] if p]
     description = " · ".join(desc_parts) if desc_parts else "Live tournament on TheScoreBoard"
 
+    # og:url and redirect both point to the canonical frontend URL.
+    # The OG image itself lives on the backend — that's fine, images can be cross-origin.
     image_url  = f"{settings.APP_URL}/api/share/og/tournament/{slug}.png"
-    share_url  = f"{settings.APP_URL}/api/share/t/{slug}"
-    spa_url    = f"{settings.SITE_URL}/t/{slug}"
+    frontend_url = f"{settings.SITE_URL}/t/{slug}"
 
-    return HTMLResponse(_og_redirect_html(title, description, image_url, spa_url, share_url))
+    return HTMLResponse(_og_redirect_html(title, description, image_url, frontend_url, frontend_url))
 
 
 # ── Tournament OG image ───────────────────────────────────────────────────────
@@ -170,11 +171,10 @@ def share_match(match_id: int, db: Session = Depends(get_db)):
 
     tournament_slug = match.event.tournament.slug if (match.event and match.event.tournament) else "tournament"
 
-    image_url  = f"{settings.APP_URL}/api/share/og/match/{match_id}.png"
-    share_url  = f"{settings.APP_URL}/api/share/m/{match_id}"
-    spa_url    = f"{settings.SITE_URL}/t/{tournament_slug}"
+    image_url    = f"{settings.APP_URL}/api/share/og/match/{match_id}.png"
+    frontend_url = f"{settings.SITE_URL}/t/{tournament_slug}"
 
-    return HTMLResponse(_og_redirect_html(title, description, image_url, spa_url, share_url))
+    return HTMLResponse(_og_redirect_html(title, description, image_url, frontend_url, frontend_url))
 
 
 # ── Match OG image ────────────────────────────────────────────────────────────
