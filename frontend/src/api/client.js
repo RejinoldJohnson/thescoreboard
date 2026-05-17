@@ -109,8 +109,12 @@ export const publicRegisterTeam = (tournamentId, d) =>
 
 // Media upload (direct — file goes to backend, backend proxies to Supabase)
 
-// Share URLs (no auth needed — these are public links)
+// Share URLs — always point to the frontend origin, never the API domain.
+// window.location.origin resolves to the correct domain in every environment:
+//   dev  → http://localhost:5173
+//   prod → https://thescoreboard.in
+const SITE_ORIGIN = typeof window !== "undefined" ? window.location.origin : "";
 export const shareUrl = {
-  tournament: (slug) => `${BASE}/share/t/${slug}`,
-  match:      (matchId) => `${BASE}/share/m/${matchId}`,
+  tournament: (slug)    => `${SITE_ORIGIN}/t/${slug}`,
+  match:      (matchId) => `${SITE_ORIGIN}/t/match/${matchId}`,
 };
