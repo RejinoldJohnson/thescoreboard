@@ -52,12 +52,32 @@ class TournamentUpdate(BaseModel):
     is_published: Optional[bool] = None
 
 
+class SponsorCreate(BaseModel):
+    name:          str
+    tier:          str = "partner"  # title | gold | silver | bronze | partner
+    logo_url:      Optional[str] = None
+    website:       Optional[str] = None
+    contact_phone: Optional[str] = None
+    description:   Optional[str] = None
+
+
+class SponsorUpdate(BaseModel):
+    name:          Optional[str] = None
+    tier:          Optional[str] = None
+    logo_url:      Optional[str] = None
+    website:       Optional[str] = None
+    contact_phone: Optional[str] = None
+    description:   Optional[str] = None
+
+
 class SponsorOut(BaseModel):
-    sponsor_id: int
-    name: str
-    logo_url: Optional[str]
-    tier: str
-    website: Optional[str]
+    sponsor_id:    int
+    name:          str
+    logo_url:      Optional[str]
+    tier:          str
+    website:       Optional[str]
+    contact_phone: Optional[str]
+    description:   Optional[str]
 
     class Config:
         from_attributes = True

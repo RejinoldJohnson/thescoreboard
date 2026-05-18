@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMyOrgs, createOrg, createTournament } from "../../api/client";
+import PageLoader from "../../components/shared/PageLoader";
 import CitySelect, { CITY_STATE_MAP } from "../../components/shared/CitySelect";
 import DatePicker from "../../components/shared/DatePicker";
 
@@ -309,13 +310,7 @@ export default function CreateTournament() {
   const displaySteps = isMultiSport ? STEPS_MULTI : STEPS_SINGLE;
   const displayStep  = isMultiSport ? (MULTI_DISPLAY[step] || 1) : step;
 
-  if (loadingOrgs) {
-    return (
-      <div style={{ minHeight: "100vh", background: c.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ color: c.muted, fontFamily: "var(--font-display)", fontSize: 12, letterSpacing: 2, textTransform: "uppercase" }}>Loading…</div>
-      </div>
-    );
-  }
+  if (loadingOrgs) return <PageLoader />;
 
   return (
     <div style={{ minHeight: "100vh", background: c.bg, fontFamily: "var(--font-body)" }}>

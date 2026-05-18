@@ -42,7 +42,7 @@ const CHANNELS = [
  *   title:     share text
  */
 // Instagram status: null | "copied" | "shared"
-export function ShareButton({ type, slug, matchId, title }) {
+export function ShareButton({ type, slug, matchId, title, upward = false }) {
   const [open,    setOpen]    = useState(false);
   const [copied,  setCopied]  = useState(false);
   const [igState, setIgState] = useState(null); // null | "copied" | "shared"
@@ -96,10 +96,14 @@ export function ShareButton({ type, slug, matchId, title }) {
 
       {open && (
         <div style={{
-          position:"absolute", top:"calc(100% + 8px)", right:0,
+          position:"absolute",
+          ...(upward
+            ? { bottom:"calc(100% + 8px)", top:"auto" }
+            : { top:"calc(100% + 8px)", bottom:"auto" }),
+          right:0,
           background:"var(--surface)", border:"1px solid var(--border)",
           borderRadius:12, padding:8, minWidth:220,
-          boxShadow:"var(--sh-md)", zIndex:200,
+          boxShadow:"var(--sh-md)", zIndex:400,
         }}>
           {/* WhatsApp, Twitter, Facebook */}
           {CHANNELS.map((ch) => (

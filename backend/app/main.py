@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, organizations, tournaments, events, players, matches, public, teams, media, share, ws as ws_router
+from app.routers import auth, organizations, tournaments, events, players, matches, public, teams, media, share, ws as ws_router, dashboard
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ app.add_middleware(
 )
 
 # ── Authenticated routes (organizers) ─────────────────────────
+app.include_router(dashboard.router,     prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(auth.router,          prefix="/api/auth",    tags=["auth"])
 app.include_router(organizations.router, prefix="/api/orgs",    tags=["organizations"])
 app.include_router(tournaments.router,   prefix="/api/orgs",    tags=["tournaments"])

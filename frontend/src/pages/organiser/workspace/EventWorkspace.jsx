@@ -8,6 +8,7 @@ import {
   updateMatchStatus, updateScore, undoSet, rematchMatch, deleteMatch, walkoverMatch,
   getMe, clearToken,
 } from "../../../api/client";
+import PageLoader from "../../../components/shared/PageLoader";
 import TTScorer        from "../../../components/scoring/TTScorer";
 import BadmintonScorer from "../../../components/scoring/BadmintonScorer";
 import CricketScorer   from "../../../components/scoring/CricketScorer";
@@ -84,11 +85,7 @@ export default function EventWorkspace() {
     if (ev?.format === "round_robin") loadStandings();
   }, [data, eventId, loadTeams, loadStandings]);
 
-  if (!data) return (
-    <div className="auth-wrap">
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)" }}>Loading…</div>
-    </div>
-  );
+  if (!data) return <PageLoader />;
 
   const { tournament: t, events } = data;
   const currentEvent = events.find(e => e.event_id === parseInt(eventId)) || events[0];

@@ -11,11 +11,42 @@ from app.models.tournament import Tournament
 from app.models.event import Event
 from app.models.match import Match, MatchParticipant, MatchSet
 from app.models.group import EventParticipant
-from app.models.player import Player
+from app.models.player import Player, Team
 
 from pydantic import BaseModel
 
 router = APIRouter()
+
+
+def _serialize_participants(event_id: int, db: Session) -> list:
+    eps = (
+        db.query(EventParticipant)
+        .filter(EventParticipant.event_id == event_id)
+        .options(
+            joinedload(EventParticipant.player),
+            joinedload(EventParticipant.team),
+            joinedload(EventParticipant.group),
+        )
+        .all()
+    )
+    result = []
+    for ep in eps:
+        if ep.team:
+            result.append({
+                "id":      ep.team.team_id,
+                "name":    ep.team.name,
+                "type":    "team",
+                "logo_url": ep.team.logo_url,
+                "group":   ep.group.name if ep.group else None,
+            })
+        elif ep.player:
+            result.append({
+                "id":    ep.player.player_id,
+                "name":  ep.player.name,
+                "type":  "player",
+                "group": ep.group.name if ep.group else None,
+            })
+    return result
 
 
 # ── Schemas ───────────────────────────────────────────────────
@@ -47,14 +78,113 @@ def _sport_key_from_url(url_slug: str) -> str:
     return key
 
 
-def _tournament_summary(t: Tournament, db: Session, sport_filter: str = None):
-    """Build a tournament card summary. Optionally filter events by sport."""
+def _serialize_match(m: Match) -> dict:
+    parts = sorted(m.participants, key=lambda p: p.position)
+    p1 = parts[0] if len(parts) > 0 else None
+    p2 = parts[1] if len(parts) > 1 else None
+    sets = sorted(m.sets, key=lambda s: s.set_number) if m.sets else []
+
+    def _name(p):
+        if not p:
+            return "TBD"
+        if p.team:
+            return p.team.name
+        if p.player:
+            return p.player.name
+        return "TBD"
+
+    return {
+        "match_id":       m.match_id,
+        "event_id":       m.event_id,
+        "stage":          m.stage,
+        "round":          m.round,
+        "status":         m.status,
+        "table_number":   m.table_number,
+        "current_server": m.current_server,
+        "player_1": {
+            "name":      _name(p1),
+            "score":     p1.score      if p1 else 0,
+            "is_winner": p1.is_winner  if p1 else False,
+        },
+        "player_2": {
+            "name":      _name(p2),
+            "score":     p2.score      if p2 else 0,
+            "is_winner": p2.is_winner  if p2 else False,
+        },
+        "sets": [
+            {
+                "set_number": s.set_number,
+                "score_p1":   s.score_p1,
+                "score_p2":   s.score_p2,
+                "winner":     s.winner_position,
+                "is_complete":s.is_complete,
+            }
+            for s in sets
+        ],
+    }
+
+
+def _bulk_event_stats(event_ids: list, db: Session) -> dict:
+    """
+    Run 3 bulk queries to get match counts and participant counts for a list
+    of event IDs. Returns a dict keyed by event_id with pre-computed stats.
+    Replaces the per-event query loop that caused N×4 round trips.
+    """
+    if not event_ids:
+        return {}
+
+    # 1. Match counts grouped by (event_id, status)
+    rows = (
+        db.query(Match.event_id, Match.status, func.count(Match.match_id).label("n"))
+        .filter(Match.event_id.in_(event_ids))
+        .group_by(Match.event_id, Match.status)
+        .all()
+    )
+    stats: dict = {eid: {"live": 0, "done": 0, "total": 0, "players": 0, "live_matches": []} for eid in event_ids}
+    for eid, status, n in rows:
+        stats[eid]["total"] += n
+        if status == "live":
+            stats[eid]["live"] = n
+        elif status == "done":
+            stats[eid]["done"] = n
+
+    # 2. Participant counts grouped by event_id
+    p_rows = (
+        db.query(EventParticipant.event_id, func.count(EventParticipant.ep_id).label("n"))
+        .filter(EventParticipant.event_id.in_(event_ids))
+        .group_by(EventParticipant.event_id)
+        .all()
+    )
+    for eid, n in p_rows:
+        if eid in stats:
+            stats[eid]["players"] = n
+
+    # 3. Live match details (only if any are live)
+    live_eids = [eid for eid, s in stats.items() if s["live"] > 0]
+    if live_eids:
+        live_ms = (
+            db.query(Match)
+            .filter(Match.event_id.in_(live_eids), Match.status == "live")
+            .options(
+                joinedload(Match.participants).joinedload(MatchParticipant.player),
+                joinedload(Match.sets),
+            )
+            .all()
+        )
+        for m in live_ms:
+            stats[m.event_id]["live_matches"].append(_serialize_match(m))
+
+    return stats
+
+
+def _build_tournament_card(t: Tournament, stats: dict, sport_filter: str = None) -> dict:
+    """
+    Build a tournament card using pre-loaded stats (no extra DB queries).
+    `stats` is the dict returned by _bulk_event_stats, keyed by event_id.
+    """
     events_summary = []
-    t_live = 0
-    t_total = 0
-    t_done = 0
-    t_players = 0
-    sport_keys = set()
+    t_live = t_total = t_done = t_players = 0
+    sport_keys: set = set()
 
     for event in t.events:
         if not event.is_active:
@@ -63,74 +193,63 @@ def _tournament_summary(t: Tournament, db: Session, sport_filter: str = None):
             continue
 
         sport_keys.add(event.sport_key)
-        live_count = db.query(Match).filter(
-            Match.event_id == event.event_id, Match.status == "live").count()
-        total_count = db.query(Match).filter(
-            Match.event_id == event.event_id).count()
-        done_count = db.query(Match).filter(
-            Match.event_id == event.event_id, Match.status == "done").count()
-        player_count = db.query(EventParticipant).filter(
-            EventParticipant.event_id == event.event_id).count()
-
-        live_matches = []
-        if live_count > 0:
-            live_ms = (
-                db.query(Match)
-                .filter(Match.event_id == event.event_id, Match.status == "live")
-                .options(
-                    joinedload(Match.participants).joinedload(MatchParticipant.player),
-                    joinedload(Match.sets))
-                .all()
-            )
-            live_matches = [_serialize_match(m) for m in live_ms]
+        s = stats.get(event.event_id, {"live": 0, "done": 0, "total": 0, "players": 0, "live_matches": []})
 
         events_summary.append({
-            "event_id":     event.event_id,
-            "name":         event.name,
-            "sport_key":    event.sport_key,
-            "format":       event.format,
-            "live_count":   live_count,
-            "total_matches":total_count,
-            "done_matches": done_count,
-            "player_count": player_count,
-            "live_matches": live_matches,
+            "event_id":      event.event_id,
+            "name":          event.name,
+            "sport_key":     event.sport_key,
+            "format":        event.format,
+            "live_count":    s["live"],
+            "total_matches": s["total"],
+            "done_matches":  s["done"],
+            "player_count":  s["players"],
+            "live_matches":  s["live_matches"],
         })
 
-        t_live   += live_count
-        t_total  += total_count
-        t_done   += done_count
-        t_players += player_count
+        t_live    += s["live"]
+        t_total   += s["total"]
+        t_done    += s["done"]
+        t_players += s["players"]
 
-    status = "upcoming"
     if t_live > 0:
         status = "live"
     elif t_done > 0 and t_done == t_total and t_total > 0:
         status = "completed"
     elif t_done > 0:
         status = "live"
+    else:
+        status = "upcoming"
 
     return {
-        "tournament_id":      t.tournament_id,
-        "name":               t.name,
-        "slug":               t.slug,
-        "description":        t.description,
-        "venue":              t.venue,
-        "city":               t.city,
-        "state":              t.state,
-        "start_date":         str(t.start_date) if t.start_date else None,
-        "poster_url":         t.poster_url,
-        "primary_color":      t.primary_color,
-        "org_name":           t.organization.name if t.organization else None,
-        "sports":             list(sport_keys),
-        "sport_urls":         [SPORT_KEY_TO_URL.get(s, s) for s in sport_keys],
-        "status":             status,
-        "is_live":            t_live > 0,
-        "live_count":         t_live,
-        "total_matches":      t_total,
-        "completed_matches":  t_done,
-        "total_players":      t_players,
-        "events":             events_summary,
+        "tournament_id":     t.tournament_id,
+        "name":              t.name,
+        "slug":              t.slug,
+        "description":       t.description,
+        "venue":             t.venue,
+        "city":              t.city,
+        "state":             t.state,
+        "start_date":        str(t.start_date) if t.start_date else None,
+        "poster_url":        t.poster_url,
+        "primary_color":     t.primary_color,
+        "org_name":          t.organization.name if t.organization else None,
+        "sports":            list(sport_keys),
+        "sport_urls":        [SPORT_KEY_TO_URL.get(s, s) for s in sport_keys],
+        "status":            status,
+        "is_live":           t_live > 0,
+        "live_count":        t_live,
+        "total_matches":     t_total,
+        "completed_matches": t_done,
+        "total_players":     t_players,
+        "events":            events_summary,
     }
+
+
+def _tournament_summary(t: Tournament, db: Session, sport_filter: str = None):
+    """Thin wrapper kept for compatibility with single-tournament callers (sport page, search)."""
+    event_ids = [e.event_id for e in t.events if e.is_active]
+    stats = _bulk_event_stats(event_ids, db)
+    return _build_tournament_card(t, stats, sport_filter)
 
 
 # ── Homepage ──────────────────────────────────────────────────
@@ -160,14 +279,17 @@ def homepage_data(
             or (t.venue and q_lower in t.venue.lower())
         ]
 
+    # Single bulk query for all event stats across all tournaments
+    all_event_ids = [e.event_id for t in tournaments for e in t.events if e.is_active]
+    stats = _bulk_event_stats(all_event_ids, db)
+
     sports_data = {}
     all_cards = []
 
     for t in tournaments:
-        card = _tournament_summary(t, db)
-        if card["total_matches"] == 0 and card["total_players"] == 0:
-            if not card["events"]:
-                continue
+        card = _build_tournament_card(t, stats)
+        if not card["events"]:
+            continue
         all_cards.append(card)
 
         for sport_key in card["sports"]:
@@ -182,8 +304,8 @@ def homepage_data(
             sports_data[sport_key]["tournament_count"] += 1
             if card["is_live"]:
                 sports_data[sport_key]["live_count"] += 1
-
-            sport_card = _tournament_summary(t, db, sport_filter=sport_key)
+            # Build sport-filtered card from the same pre-loaded stats (no extra DB call)
+            sport_card = _build_tournament_card(t, stats, sport_filter=sport_key)
             if sport_card["events"]:
                 sports_data[sport_key]["tournaments"].append(sport_card)
 
@@ -242,7 +364,9 @@ def sport_page_data(
             or (t.venue and q_lower in t.venue.lower())
         ]
 
-    cards = [_tournament_summary(t, db, sport_filter=sport_key) for t in tournaments]
+    all_event_ids = [e.event_id for t in tournaments for e in t.events if e.is_active]
+    stats = _bulk_event_stats(all_event_ids, db)
+    cards = [_build_tournament_card(t, stats, sport_filter=sport_key) for t in tournaments]
     cards = [c for c in cards if c["events"]]
 
     order = {"live": 0, "upcoming": 1, "completed": 2}
@@ -299,6 +423,7 @@ def get_tournament_page(slug: str, db: Session = Depends(get_db)):
             "completed_matches": sum(1 for m in matches if m.status == "done"),
             "live_matches":      [_serialize_match(m) for m in matches if m.status == "live"],
             "all_matches":       [_serialize_match(m) for m in matches],
+            "participants":      _serialize_participants(event.event_id, db),
         })
 
     return {
@@ -316,9 +441,10 @@ def get_tournament_page(slug: str, db: Session = Depends(get_db)):
             "secondary_color": tournament.secondary_color,
             "venue":           tournament.venue,
             "city":            tournament.city,
+            "state":           tournament.state,
             "org_name":        tournament.organization.name if tournament.organization else None,
             "sponsors": [
-                {"name": s.name, "logo_url": s.logo_url, "tier": s.tier}
+                {"sponsor_id": s.sponsor_id, "name": s.name, "logo_url": s.logo_url, "tier": s.tier}
                 for s in tournament.sponsors
             ],
         },
@@ -373,6 +499,7 @@ def get_tournament_by_sport(
             "completed_matches": sum(1 for m in matches if m.status == "done"),
             "live_matches":      [_serialize_match(m) for m in matches if m.status == "live"],
             "all_matches":       [_serialize_match(m) for m in matches],
+            "participants":      _serialize_participants(event.event_id, db),
         })
 
     return {
@@ -387,9 +514,11 @@ def get_tournament_by_sport(
             "primary_color": tournament.primary_color,
             "venue":         tournament.venue,
             "city":          tournament.city,
+            "state":         tournament.state,
+            "end_date":      str(tournament.end_date) if tournament.end_date else None,
             "org_name":      tournament.organization.name if tournament.organization else None,
             "sponsors": [
-                {"name": s.name, "logo_url": s.logo_url, "tier": s.tier}
+                {"sponsor_id": s.sponsor_id, "name": s.name, "logo_url": s.logo_url, "tier": s.tier}
                 for s in tournament.sponsors
             ],
         },
@@ -500,52 +629,4 @@ def public_register(
         "name":           player.name,
         "enrolled_events":enrolled,
         "message":        f"Successfully registered for {tournament.name}",
-    }
-
-
-# ── Serialization ─────────────────────────────────────────────
-
-def _serialize_match(m: Match) -> dict:
-    parts = sorted(m.participants, key=lambda p: p.position)
-    p1 = parts[0] if len(parts) > 0 else None
-    p2 = parts[1] if len(parts) > 1 else None
-    sets = sorted(m.sets, key=lambda s: s.set_number) if m.sets else []
-
-    def _name(p):
-        if not p:
-            return "TBD"
-        if p.team:
-            return p.team.name
-        if p.player:
-            return p.player.name
-        return "TBD"
-
-    return {
-        "match_id":       m.match_id,
-        "event_id":       m.event_id,
-        "stage":          m.stage,
-        "round":          m.round,
-        "status":         m.status,
-        "table_number":   m.table_number,
-        "current_server": m.current_server,
-        "player_1": {
-            "name":      _name(p1),
-            "score":     p1.score      if p1 else 0,
-            "is_winner": p1.is_winner  if p1 else False,
-        },
-        "player_2": {
-            "name":      _name(p2),
-            "score":     p2.score      if p2 else 0,
-            "is_winner": p2.is_winner  if p2 else False,
-        },
-        "sets": [
-            {
-                "set_number": s.set_number,
-                "score_p1":   s.score_p1,
-                "score_p2":   s.score_p2,
-                "winner":     s.winner_position,
-                "is_complete":s.is_complete,
-            }
-            for s in sets
-        ],
     }

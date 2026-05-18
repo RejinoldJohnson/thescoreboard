@@ -1824,28 +1824,37 @@
 }
 .hero-poster-active .hero-stat-chip span { color: #fff !important; }
 
-/* ── Tournament hero — responsive layout ────────────────── */
+/* ── Tournament hero — unified layout (no banner on any screen) ─ */
 
-/* Mobile default: banner + floating logo visible, desktop sections hidden */
-.hero-mobile-only   { display: block; }
-.hero-desktop-only  { display: none;  }
-.hero-desktop-namerow { display: none !important; }
-.hero-mobile-name   { display: block; }
-/* padding-top = LOGO_HALF(36) + gap(16) = 52px */
-.hero-info-zone     { padding: 52px 20px 28px; }
+/* Banner section no longer shown on any screen size */
+.hero-mobile-only   { display: none; }
+/* Sticky nav bar shown on all screens */
+.hero-desktop-only  { display: block; }
+/* Logo + name row shown on all screens */
+.hero-desktop-namerow {
+  display: flex !important;
+  align-items: center;
+  gap: 14px;
+  padding-top: 20px;
+  margin-bottom: 12px;
+}
+/* Mobile name hidden — name is in namerow */
+.hero-mobile-name   { display: none !important; }
+/* Info zone: consistent padding, no offset needed */
+.hero-info-zone     { padding: 0 20px 28px; }
+
+.hero-logo-desktop { display: none; }
+.hero-logo-mobile  { display: block; }
 
 @media (min-width: 768px) {
-  .hero-mobile-only  { display: none; }
-  .hero-desktop-only { display: block; }
   .hero-desktop-namerow {
-    display: flex !important;
-    align-items: center;
     gap: 18px;
     padding-top: 28px;
     margin-bottom: 14px;
   }
-  .hero-mobile-name  { display: none !important; }
-  .hero-info-zone    { padding: 0 24px 32px; }
+  .hero-info-zone    { padding: 0 32px 32px; }
+  .hero-logo-desktop { display: block; }
+  .hero-logo-mobile  { display: none; }
 }
 
 /* ── Dashboard (organiser) — mobile org bar ──────────────── */

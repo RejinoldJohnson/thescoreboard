@@ -21,6 +21,9 @@ async function request(method, path, body) {
   return res.status === 204 ? null : res.json();
 }
 
+// Dashboard (aggregated — replaces getMe + getMyOrgs + getTournaments)
+export const getDashboard = () => request("GET", "/dashboard");
+
 // Auth
 export const register = (d) => request("POST", "/auth/register", d);
 export const login = (d) => request("POST", "/auth/login", d);
@@ -41,6 +44,11 @@ export const deleteTournament = (orgId, tournamentId) =>
   request("DELETE", `/orgs/${orgId}/tournaments/${tournamentId}`);
 export const getWorkspace = (tId) => request("GET", `/orgs/tournaments/${tId}/workspace`);
 export const transitionTournament = (tId, status) => request("POST", `/orgs/tournaments/${tId}/transition?target_status=${status}`);
+
+// Sponsors
+export const createSponsor = (tId, d)         => request("POST",   `/orgs/tournaments/${tId}/sponsors`, d);
+export const updateSponsor = (tId, sId, d)     => request("PATCH",  `/orgs/tournaments/${tId}/sponsors/${sId}`, d);
+export const deleteSponsor = (tId, sId)        => request("DELETE", `/orgs/tournaments/${tId}/sponsors/${sId}`);
 
 // Events
 export const createEvent = (tId, d) => request("POST", `/tournaments/${tId}/events`, d);

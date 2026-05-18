@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getWorkspace, transitionTournament, updateTournament, clearToken, getMe } from "../../../api/client";
 import OrgHeader from "../../../components/shared/OrgHeader";
+import PageLoader from "../../../components/shared/PageLoader";
 import SportSetupModal from "../../../components/organiser/SportSetupModal";
 import { ShareButton } from "../../../components/shared/ShareButton";
 import { MediaUpload } from "../../../components/shared/MediaUpload";
+import SponsorsSection from "../../../components/organiser/SponsorsSection";
 
 const LIFECYCLE = ["draft", "registration", "fixtures", "live", "completed"];
 const LIFECYCLE_LABELS = {
@@ -57,14 +59,7 @@ export default function TournamentOverview() {
     flash(`${updatedEvent.name} configured!`);
   };
 
-  if (!data) return (
-    <div className="auth-wrap">
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800,
-        textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)" }}>
-        Loading…
-      </div>
-    </div>
-  );
+  if (!data) return <PageLoader />;
 
   const { tournament: t, events, stats } = data;
   const currentIdx = LIFECYCLE.indexOf(t.status);
@@ -291,6 +286,14 @@ export default function TournamentOverview() {
             />
           </div>
         </div>
+
+        {/* ── SPONSORS ── */}
+        <SponsorsSection
+          tournamentId={t.tournament_id}
+          sponsors={t.sponsors || []}
+          onRefresh={loadData}
+          flash={flash}
+        />
 
         {/* ── EVENTS ── */}
         <div style={{ fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 800,

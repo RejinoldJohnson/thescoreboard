@@ -9,10 +9,11 @@ from app.database import get_db
 from app.models.user import User
 from app.models.organization import Organization, OrgMember
 from app.models.tournament import Tournament, Sponsor, TOURNAMENT_STATUSES
+from typing import List
 from app.models.event import Event
 from app.models.match import Match, MatchParticipant, MatchSet
 from app.models.group import Group, EventParticipant
-from app.schemas.tournament import TournamentCreate, TournamentUpdate, TournamentOut
+from app.schemas.tournament import TournamentCreate, TournamentUpdate, TournamentOut, SponsorCreate, SponsorUpdate, SponsorOut
 from app.utils.auth import get_current_user
 from app.utils.slug import generate_unique_slug
 from app.sports.registry import get_sport_engine
@@ -307,6 +308,8 @@ def get_workspace(
             "matches": [_serialize_match(m) for m in matches],
         })
 
+    sponsors = db.query(Sponsor).filter(Sponsor.tournament_id == t.tournament_id).all()
+
     return {
         "tournament": {
             "tournament_id":  t.tournament_id,
@@ -324,6 +327,18 @@ def get_workspace(
             "is_published":   t.is_published,
             "poster_url":     t.poster_url or getattr(t, "banner_url", None),
             "logo_url":       t.logo_url,
+            "sponsors": [
+                {
+                    "sponsor_id":    s.sponsor_id,
+                    "name":          s.name,
+                    "tier":          s.tier,
+                    "logo_url":      s.logo_url,
+                    "website":       s.website,
+                    "contact_phone": s.contact_phone,
+                    "description":   s.description,
+                }
+                for s in sponsors
+            ],
         },
         "events": events_data,
         "stats": {
@@ -403,6 +418,72 @@ def delete_tournament(
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
     db.delete(t)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Sponsor CRUD ─────────────────────────────────────────────
+
+@router.post("/tournaments/{tournament_id}/sponsors", response_model=SponsorOut)
+def create_sponsor(
+    tournament_id: int,
+    data: SponsorCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    t = _check_tournament_access(tournament_id, user, db)
+    sponsor = Sponsor(
+        tournament_id = t.tournament_id,
+        name          = data.name,
+        tier          = data.tier,
+        logo_url      = data.logo_url,
+        website       = data.website,
+        contact_phone = data.contact_phone,
+        description   = data.description,
+    )
+    db.add(sponsor)
+    db.commit()
+    db.refresh(sponsor)
+    return sponsor
+
+
+@router.patch("/tournaments/{tournament_id}/sponsors/{sponsor_id}", response_model=SponsorOut)
+def update_sponsor(
+    tournament_id: int,
+    sponsor_id: int,
+    data: SponsorUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _check_tournament_access(tournament_id, user, db)
+    s = db.query(Sponsor).filter(
+        Sponsor.sponsor_id == sponsor_id,
+        Sponsor.tournament_id == tournament_id,
+    ).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sponsor not found")
+    for field, val in data.model_dump(exclude_unset=True).items():
+        setattr(s, field, val)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+@router.delete("/tournaments/{tournament_id}/sponsors/{sponsor_id}")
+def delete_sponsor(
+    tournament_id: int,
+    sponsor_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    _check_tournament_access(tournament_id, user, db)
+    s = db.query(Sponsor).filter(
+        Sponsor.sponsor_id == sponsor_id,
+        Sponsor.tournament_id == tournament_id,
+    ).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Sponsor not found")
+    db.delete(s)
     db.commit()
     return {"ok": True}
 

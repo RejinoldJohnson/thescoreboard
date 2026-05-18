@@ -59,11 +59,13 @@ class Tournament(Base):
 class Sponsor(Base):
     __tablename__ = "sponsors"
 
-    sponsor_id = Column(Integer, primary_key=True)
+    sponsor_id    = Column(Integer, primary_key=True)
     tournament_id = Column(Integer, ForeignKey("tournaments.tournament_id", ondelete="CASCADE"), nullable=False)
-    name = Column(String(255), nullable=False)
-    logo_url = Column(String(500), nullable=True)
-    tier = Column(String(50), default="partner")
-    website = Column(String(500), nullable=True)
+    name          = Column(String(255), nullable=False)
+    logo_url      = Column(String(500), nullable=True)
+    tier          = Column(String(50),  default="partner")  # title | gold | silver | bronze | partner
+    website       = Column(String(500), nullable=True)
+    contact_phone = Column(String(50),  nullable=True)
+    description   = Column(Text,        nullable=True)
 
     tournament = relationship("Tournament", back_populates="sponsors")
