@@ -9,7 +9,7 @@ import io
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,6 +21,26 @@ from app.services import storage, og_generator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _origin(request: Request) -> str:
+    """
+    Return the public-facing scheme+host the request arrived on.
+    Respects X-Forwarded-Proto / X-Forwarded-Host set by reverse proxies
+    (nginx, Render, Vite dev proxy) so the OG image URL is always reachable
+    by WhatsApp / social crawlers.
+    Falls back to APP_URL if headers are absent (e.g. direct local calls).
+    """
+    host   = (request.headers.get("x-forwarded-host")
+              or request.headers.get("host")
+              or "")
+    scheme = (request.headers.get("x-forwarded-proto")
+              or request.url.scheme
+              or "https")
+    if host:
+        return f"{scheme}://{host}"
+    # Last resort: use APP_URL from settings
+    return settings.APP_URL.rstrip("/")
 
 SPORT_LABELS = {
     "cricket":      "Cricket",
@@ -91,7 +111,7 @@ def _cached_png(cache_key: str, generate_fn) -> bytes:
 # ── Tournament share page ─────────────────────────────────────────────────────
 
 @router.get("/t/{slug}", response_class=HTMLResponse)
-def share_tournament(slug: str, db: Session = Depends(get_db)):
+def share_tournament(request: Request, slug: str, db: Session = Depends(get_db)):
     t = db.query(Tournament).filter(Tournament.slug == slug, Tournament.is_active == True).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
@@ -103,9 +123,11 @@ def share_tournament(slug: str, db: Session = Depends(get_db)):
     desc_parts = [p for p in [sport_label, t.city, t.venue] if p]
     description = " · ".join(desc_parts) if desc_parts else "Live tournament on TheScoreBoard"
 
-    # og:url and redirect both point to the canonical frontend URL.
-    # The OG image itself lives on the backend — that's fine, images can be cross-origin.
-    image_url  = f"{settings.APP_URL}/api/share/og/tournament/{slug}.png"
+    # og:image must be an absolute URL reachable by social crawlers.
+    # We derive the origin from the incoming request so it works across
+    # dev tunnels, staging domains, and production without any extra env vars.
+    origin       = _origin(request)
+    image_url    = f"{origin}/api/share/og/tournament/{slug}.png"
     frontend_url = f"{settings.SITE_URL}/t/{slug}"
 
     return HTMLResponse(_og_redirect_html(title, description, image_url, frontend_url, frontend_url))
@@ -148,7 +170,7 @@ def og_tournament_image(slug: str, db: Session = Depends(get_db)):
 # ── Match share page ──────────────────────────────────────────────────────────
 
 @router.get("/m/{match_id}", response_class=HTMLResponse)
-def share_match(match_id: int, db: Session = Depends(get_db)):
+def share_match(request: Request, match_id: int, db: Session = Depends(get_db)):
     match = (
         db.query(Match)
         .options(
@@ -171,7 +193,8 @@ def share_match(match_id: int, db: Session = Depends(get_db)):
 
     tournament_slug = match.event.tournament.slug if (match.event and match.event.tournament) else "tournament"
 
-    image_url    = f"{settings.APP_URL}/api/share/og/match/{match_id}.png"
+    origin       = _origin(request)
+    image_url    = f"{origin}/api/share/og/match/{match_id}.png"
     frontend_url = f"{settings.SITE_URL}/t/{tournament_slug}"
 
     return HTMLResponse(_og_redirect_html(title, description, image_url, frontend_url, frontend_url))

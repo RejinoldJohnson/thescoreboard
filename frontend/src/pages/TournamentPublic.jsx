@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getTournamentBySlug, getSportTournament } from "../api/client";
 import RoadToFinal from "../components/shared/RoadToFinal";
+import PageLoader from "../components/shared/PageLoader";
 import { ShareButton } from "../components/shared/ShareButton";
 import { useShare } from "../hooks/useShare";
 
@@ -1640,28 +1641,14 @@ function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, tota
           </p>
         )}
 
-        {/* Stats row */}
-        {(totalPlayers > 0 || totalMatches > 0 || liveCount > 0) && (
+        {/* Stats row — only Live chip kept; Matches chip removed */}
+        {liveCount > 0 && (
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:16 }}>
-            {totalPlayers > 0 && (
-              <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
-                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{totalPlayers}</span>
-                <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Players</span>
-              </div>
-            )}
-            {totalMatches > 0 && (
-              <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
-                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{doneMatches}/{totalMatches}</span>
-                <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Matches</span>
-              </div>
-            )}
-            {liveCount > 0 && (
-              <div style={{ background:"rgba(255,107,53,.12)", border:"1px solid rgba(255,107,53,.3)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
-                <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
-                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
-                <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live</span>
-              </div>
-            )}
+            <div style={{ background:"rgba(255,107,53,.12)", border:"1px solid rgba(255,107,53,.3)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
+              <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
+              <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
+              <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live</span>
+            </div>
           </div>
         )}
 
@@ -2083,11 +2070,7 @@ export default function TournamentPublic() {
   };
 
   // ── Loading ──
-  if (!data && !error) return (
-    <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <div style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:800, textTransform:"uppercase", letterSpacing:3, color:"var(--muted)" }}>Loading…</div>
-    </div>
-  );
+  if (!data && !error) return <PageLoader />;
 
   // ── Error ──
   if (error) return (

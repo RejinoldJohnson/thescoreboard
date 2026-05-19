@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMe, getPlayerProfile, savePlayerProfile, clearToken } from "../../api/client";
 import OrgHeader from "../../components/shared/OrgHeader";
+import PageLoader from "../../components/shared/PageLoader";
 
 export default function PlayerDashboard() {
   const navigate = useNavigate();
@@ -63,11 +64,7 @@ export default function PlayerDashboard() {
     marginBottom:5, textTransform:"uppercase", letterSpacing:0.5,
   };
 
-  if (!user) return (
-    <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
-      <div style={{ fontFamily:"var(--font-display)", fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:3, color:"var(--muted)" }}>Loading…</div>
-    </div>
-  );
+  if (!user) return <PageLoader />;
 
   return (
     <div className="app">

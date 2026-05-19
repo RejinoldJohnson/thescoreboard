@@ -540,9 +540,13 @@ def update_score(
             parts[0].score = data.score_p1
             parts[1].score = data.score_p2
 
+    # Flush writes to DB but keeps objects live in the session so we can
+    # serialize them without a second SELECT.  Commit happens after serialization.
+    db.flush()
+    result = _serialize_match(match)
     db.commit()
     background_tasks.add_task(_push_ws_update, event_id)
-    return _serialize_match(_load_match(match_id, db))
+    return result
 
 
 @router.post("/matches/{match_id}/finish")

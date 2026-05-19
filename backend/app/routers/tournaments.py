@@ -275,8 +275,9 @@ def get_workspace(
             .all()
         )
 
-        participant_count = db.query(EventParticipant).filter(
-            EventParticipant.event_id == event.event_id).count()
+        # Derive count from already-loaded data — avoids an extra COUNT(*) query per event
+        grouped_count = sum(len(g["participants"]) for g in groups_data)
+        participant_count = grouped_count + len(ungrouped)
         match_count  = len(matches)
         live_count   = sum(1 for m in matches if m.status == "live")
         done_count   = sum(1 for m in matches if m.status == "done")
