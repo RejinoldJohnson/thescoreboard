@@ -3,7 +3,7 @@ Tournament — the top-level shareable entity.
 Lifecycle: draft → registration → fixtures → live → completed
 """
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text,
+    Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text, Float, JSON,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -28,6 +28,8 @@ class Tournament(Base):
     # Dates
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
+    registration_start_date = Column(Date, nullable=True)
+    registration_end_date   = Column(Date, nullable=True)
 
     # Branding
     poster_url   = Column(String(500), nullable=True)  # primary visual asset
@@ -39,8 +41,13 @@ class Tournament(Base):
 
     # Location
     venue = Column(String(255), nullable=True)
-    city = Column(String(100), nullable=True)
+    city  = Column(String(100), nullable=True)
     state = Column(String(100), nullable=True)
+    venue_lat = Column(Float, nullable=True)   # coordinates from OpenStreetMap picker
+    venue_lng = Column(Float, nullable=True)
+
+    # Info & Rules sections (JSON dict keyed by section name)
+    tournament_info = Column(JSON, nullable=True)
 
     # Lifecycle: draft → registration → fixtures → live → completed
     status = Column(String(50), default="draft", nullable=False)

@@ -230,6 +230,9 @@ def _build_tournament_card(t: Tournament, stats: dict, sport_filter: str = None)
         "venue":             t.venue,
         "city":              t.city,
         "state":             t.state,
+        "venue_lat":         t.venue_lat,
+        "venue_lng":         t.venue_lng,
+        "tournament_info":   t.tournament_info,
         "start_date":        str(t.start_date) if t.start_date else None,
         "poster_url":        t.poster_url,
         "primary_color":     t.primary_color,
@@ -443,6 +446,9 @@ def get_tournament_page(slug: str, db: Session = Depends(get_db)):
             "venue":           tournament.venue,
             "city":            tournament.city,
             "state":           tournament.state,
+            "venue_lat":       tournament.venue_lat,
+            "venue_lng":       tournament.venue_lng,
+            "tournament_info": tournament.tournament_info,
             "org_name":        tournament.organization.name if tournament.organization else None,
             "sponsors": [
                 {"sponsor_id": s.sponsor_id, "name": s.name, "logo_url": s.logo_url, "tier": s.tier}
@@ -516,8 +522,11 @@ def get_tournament_by_sport(
             "venue":         tournament.venue,
             "city":          tournament.city,
             "state":         tournament.state,
-            "end_date":      str(tournament.end_date) if tournament.end_date else None,
-            "org_name":      tournament.organization.name if tournament.organization else None,
+            "venue_lat":       tournament.venue_lat,
+            "venue_lng":       tournament.venue_lng,
+            "tournament_info": tournament.tournament_info,
+            "end_date":        str(tournament.end_date) if tournament.end_date else None,
+            "org_name":        tournament.organization.name if tournament.organization else None,
             "sponsors": [
                 {"sponsor_id": s.sponsor_id, "name": s.name, "logo_url": s.logo_url, "tier": s.tier}
                 for s in tournament.sponsors

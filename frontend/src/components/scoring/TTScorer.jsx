@@ -16,12 +16,13 @@
  */
 import { useState } from "react";
 
-export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover, onClose }) {
+export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover, onGoLive, onPause, onReset, onClose }) {
   const p1   = match.player_1;
   const p2   = match.player_2;
   const sets = (match.sets || []).slice().sort((a, b) => a.set_number - b.set_number);
   const currentSet = sets.find(s => !s.is_complete) || sets[sets.length - 1];
   const isDone     = match.status === "done";
+  const isPreLive  = match.status === "scheduled";
 
   const setsToWin = match.live_state?.sets_to_win ?? config?.sets_to_win ?? 2;
   const totalSets = setsToWin * 2 - 1;
@@ -33,6 +34,8 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover
   const [pendingSet,     setPendingSet]     = useState(null);
   const [walkoverPending, setWalkoverPending] = useState(false);
   const [baseSwap,       setBaseSwap]       = useState(false);
+  const [confirmPause,   setConfirmPause]   = useState(false);
+  const [confirmReset,   setConfirmReset]   = useState(false);
 
   const pts      = config?.points_per_set  || 11;
   const margin   = config?.win_margin      || 2;
@@ -209,24 +212,25 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover
         padding:"10px 16px",
         background: c.surface,
         borderBottom: `2px solid ${c.border}`,
-        gap:10,
+        gap:"8px 12px",
+        flexWrap:"wrap",
       }}>
-        {/* Live badge + set counter */}
-        <div style={{ display:"flex", alignItems:"center", gap:10, flexShrink:0 }}>
+        {/* Left: Status badge + set counter */}
+        <div style={{ display:"flex", alignItems:"center", gap:10, flex:"1 1 auto", minWidth:0 }}>
           <span style={{
             display:"inline-flex", alignItems:"center", gap:6,
-            background: isDone ? c.gold : c.green,
+            background: isDone ? c.gold : isPreLive ? "#f59e0b" : c.green,
             color: "#000",
             fontFamily:"'Space Grotesk', sans-serif",
             fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase",
-            padding:"3px 10px", borderRadius:4,
+            padding:"3px 10px", borderRadius:4, whiteSpace:"nowrap",
           }}>
             <span className="tt-pulse" style={{
               width:7, height:7, borderRadius:"50%",
               background:"#000",
               display: isDone ? "none" : "inline-block",
             }}/>
-            {isDone ? "Final" : `Set ${currentSet?.set_number || 1} of ${totalSets}`}
+            {isDone ? "Final" : isPreLive ? "Ready" : `Set ${currentSet?.set_number || 1} of ${totalSets}`}
           </span>
           <span style={{ fontSize:11, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>
             <strong style={{ color:c.green }}>{setsWon1}</strong>
@@ -235,34 +239,53 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover
           </span>
         </div>
 
-        {/* Swap button — centre */}
-        <button
-          className="tt-btn-swap"
-          onClick={() => canSwap && setBaseSwap(b => !b)}
-          disabled={!canSwap}
-          title={canSwap ? "Swap player sides" : "Cannot swap after match starts"}
-          style={{
-            display:"flex", alignItems:"center", gap:6,
-            padding:"6px 14px", borderRadius:8, cursor: canSwap ? "pointer" : "not-allowed",
-            background: "transparent",
-            color:  canSwap ? c.green : c.muted,
-            border: `1px solid ${canSwap ? c.green + "66" : c.border}`,
-            fontSize:12, fontWeight:700, fontFamily:"inherit",
-            opacity: canSwap ? 1 : 0.45,
-            transition:"all .15s",
-          }}
-        >
-          ⇌ Swap Sides
-        </button>
+        {/* Right: Swap + Pause / Reset + Close — all in one wrappable group */}
+        <div style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end", flex:"0 0 auto" }}>
+          {/* Swap button */}
+          <button
+            className="tt-btn-swap"
+            onClick={() => canSwap && setBaseSwap(b => !b)}
+            disabled={!canSwap}
+            title={canSwap ? "Swap player sides" : "Cannot swap after match starts"}
+            style={{
+              display:"flex", alignItems:"center", gap:5,
+              padding:"6px 12px", borderRadius:8, cursor: canSwap ? "pointer" : "not-allowed",
+              background: "transparent",
+              color:  canSwap ? c.green : c.muted,
+              border: `1px solid ${canSwap ? c.green + "66" : c.border}`,
+              fontSize:12, fontWeight:700, fontFamily:"inherit",
+              opacity: canSwap ? 1 : 0.45,
+              transition:"all .15s", whiteSpace:"nowrap",
+            }}
+          >
+            ⇌ Swap Sides
+          </button>
 
-        {/* Close */}
-        <button onClick={onClose} style={{
-          background:"transparent", color:c.muted,
-          border:`1px solid ${c.border}`,
-          borderRadius:6, padding:"5px 14px", cursor:"pointer",
-          fontSize:12, fontWeight:700, fontFamily:"inherit",
-          flexShrink:0,
-        }}>✕ Close</button>
+          {/* Pause / Reset / Close with inline confirmations */}
+          {confirmPause ? (
+            <>
+              <span style={{ fontSize:11, color:c.mutedHi, fontWeight:600, whiteSpace:"nowrap" }}>Pause this match?</span>
+              <button onClick={() => setConfirmPause(false)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 10px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Cancel</button>
+              <button onClick={() => { setConfirmPause(false); onPause(); }} style={{ background:"#f59e0b22", color:"#f59e0b", border:"1px solid #f59e0b", borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Pause</button>
+            </>
+          ) : confirmReset ? (
+            <>
+              <span style={{ fontSize:11, color:c.mutedHi, fontWeight:600, whiteSpace:"nowrap" }}>Reset all scores?</span>
+              <button onClick={() => setConfirmReset(false)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 10px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Cancel</button>
+              <button onClick={() => { setConfirmReset(false); onReset(); }} style={{ background:`${c.red}22`, color:c.red, border:`1px solid ${c.red}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Reset</button>
+            </>
+          ) : (
+            <>
+              {!isDone && !isPreLive && onPause && (
+                <button onClick={() => setConfirmPause(true)} style={{ background:"transparent", color:c.mutedHi, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Pause</button>
+              )}
+              {!isDone && !isPreLive && onReset && (
+                <button onClick={() => setConfirmReset(true)} style={{ background:"transparent", color:c.mutedHi, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Reset</button>
+              )}
+              <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* ── AUTO-SWAP INDICATOR ── */}
@@ -445,8 +468,29 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover
           </div>
         )}
 
-        {/* ── POINT BUTTONS ── */}
-        {!isDone && (
+        {/* ── PRE-LIVE: GO LIVE ── */}
+        {isPreLive && (
+          <div style={{ textAlign:"center", padding:"8px 0 16px" }}>
+            <div style={{ fontSize:12, color:c.muted, marginBottom:18, lineHeight:1.5 }}>
+              Select who serves first, then start the match.
+            </div>
+            <button
+              onClick={onGoLive}
+              style={{
+                width:"100%", padding:"20px 0", borderRadius:12,
+                fontSize:15, fontWeight:900, letterSpacing:1, textTransform:"uppercase",
+                background:c.green, color:"#000", border:"none",
+                cursor:"pointer", fontFamily:"inherit",
+                boxShadow:`0 0 32px ${c.green}44`,
+              }}
+            >
+              ▶ GO LIVE
+            </button>
+          </div>
+        )}
+
+        {/* ── POINT BUTTONS (live only) ── */}
+        {!isDone && !isPreLive && (
           <div style={{ display:"flex", gap:10 }}>
             {[
               { pos: leftPos,  score: leftScore  },
@@ -492,8 +536,8 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover
           </div>
         )}
 
-        {/* ── UNDO SET ── */}
-        {!isDone && sets.length > 0 && !pendingSet && !walkoverPending && (
+        {/* ── UNDO SET (live only) ── */}
+        {!isDone && !isPreLive && sets.length > 0 && !pendingSet && !walkoverPending && (
           <button onClick={onUndoSet} style={{
             width:"100%", padding:"10px 0", background:"transparent",
             color:c.muted, border:`1px solid ${c.border}`, borderRadius:8,
@@ -503,8 +547,8 @@ export default function TTScorer({ match, config, onScore, onUndoSet, onWalkover
           </button>
         )}
 
-        {/* ── WALKOVER / NO SHOW ── */}
-        {!isDone && !pendingSet && !walkoverPending && (
+        {/* ── WALKOVER / NO SHOW (live only) ── */}
+        {!isDone && !isPreLive && !pendingSet && !walkoverPending && (
           <button
             onClick={() => setWalkoverPending(true)}
             style={{

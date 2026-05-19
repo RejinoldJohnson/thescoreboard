@@ -59,6 +59,8 @@ export const updateEvent = (eId, d) => request("PATCH", `/events/${eId}`, d);
 export const configureEvent = (eId, d) => request("POST", `/events/${eId}/configure`, d);
 export const generateFixtures = (eId, thirdPlace = false) =>
   request("POST", `/orgs/events/${eId}/generate-fixtures${thirdPlace ? "?third_place=true" : ""}`);
+export const generateGroupMatches = (eId) =>
+  request("POST", `/events/${eId}/generate-group-matches`);
 export const getStandings = (eId) => request("GET", `/orgs/events/${eId}/standings`);
 
 // Players

@@ -58,17 +58,11 @@ const SPORT_SETUP = {
     subformats: null,             // Cricket is always team vs team
     teamConfig: [
       { key: "squad_size", label: "Squad Size", type: "number", default: 11, min: 6, max: 15,
-        hint: "Total players per team including substitutes" },
+        hint: "Players per team (wickets = squad size − 1)" },
+      { key: "overs", label: "Overs per Innings", type: "number", default: 20, min: 1, max: 50,
+        hint: "e.g. 5 (T5), 10 (T10), 20 (T20), 50 (ODI)" },
     ],
-    scoring: [
-      { key: "overs", label: "Overs per Innings", type: "select",
-        options: [
-          { v: 10, label: "T10 (10 overs)" },
-          { v: 20, label: "T20 (20 overs)" },
-          { v: 50, label: "ODI (50 overs)" },
-        ],
-        default: 20 },
-    ],
+    scoring: [],
   },
 
   football: {
@@ -145,8 +139,10 @@ export default function SportSetupModal({ event, onClose, onSetupComplete }) {
 
       // Cricket
       if (event.sport_key === "cricket") {
-        payload.squad_size  = parseInt(form.teamConfig["squad_size"] ?? 11);
-        payload.sport_config = { ...payload.sport_config, overs: form.scoring["overs"] ?? 20 };
+        const squadSize = parseInt(form.teamConfig["squad_size"] ?? 11);
+        const overs     = parseInt(form.teamConfig["overs"]      ?? 20);
+        payload.squad_size   = squadSize;
+        payload.sport_config = { overs, wickets: squadSize - 1 };
       }
 
       // Football

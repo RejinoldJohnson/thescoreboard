@@ -34,12 +34,13 @@ function PenSlot({ result, isCurrent }) {
   );
 }
 
-export default function FootballScorer({ match, config, onScore, onFinish, onWalkover, onClose }) {
+export default function FootballScorer({ match, config, onScore, onFinish, onWalkover, onGoLive, onPause, onReset, onClose }) {
   const p1 = match.player_1 || {};
   const p2 = match.player_2 || {};
   const sets = match.sets || [];
   const currentSet = sets.find(s => !s.is_complete) || sets[0];
-  const isDone = match.status === "done";
+  const isDone    = match.status === "done";
+  const isPreLive = match.status === "scheduled";
   const ls     = match.live_state || {};
 
   const isKnockout = !!(match.stage && !["group"].includes(match.stage));
@@ -59,6 +60,8 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
   const [penH1,        setPenH1]        = useState(ls.pen_h1 || []);
   const [penH2,        setPenH2]        = useState(ls.pen_h2 || []);
   const [showWalkover, setShowWalkover] = useState(false);
+  const [confirmPause, setConfirmPause] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   const isLeading = goals1 > goals2 ? 1 : goals2 > goals1 ? 2 : 0;
   const isDraw    = goals1 === goals2;
@@ -190,7 +193,7 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
         <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:80, fontWeight:900, lineHeight:1, color: winner ? c.gold : leading&&!isDone ? c.orange : c.ink, marginBottom:12, transition:"color .3s" }}>
           {score}
         </div>
-        {!isDone && phase !== "penalties" && (
+        {!isDone && !isPreLive && phase !== "penalties" && (
           <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
             <button onClick={() => removeGoal(pos)}
               style={{ width:48, height:48, borderRadius:10, background:"transparent", border:`2px solid ${c.border}`, color:c.muted, fontSize:22, cursor:"pointer", fontFamily:"'Unbounded',sans-serif", fontWeight:900 }}>
@@ -212,23 +215,63 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
     <div style={{ position:"fixed", inset:0, zIndex:9999, background:c.bg, display:"flex", flexDirection:"column", overflow:"hidden", fontFamily:"'Space Grotesk',sans-serif" }}>
 
       {/* TOP BAR */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 20px", background:c.surface, borderBottom:`2px solid ${phase==="penalties"?c.blue:phase==="extra_time"?c.blue:c.green}` }}>
-        <span style={{ display:"inline-flex", alignItems:"center", gap:6, background: phase==="penalties"?c.blue:phase==="extra_time"?c.blue:c.green, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 16px", background:c.surface, borderBottom:`2px solid ${isPreLive ? "#f59e0b" : phase==="penalties"?c.blue:phase==="extra_time"?c.blue:c.green}`, gap:"8px 12px", flexWrap:"wrap" }}>
+        <span style={{ display:"inline-flex", alignItems:"center", gap:6, background: isPreLive ? "#f59e0b" : phase==="penalties"?c.blue:phase==="extra_time"?c.blue:c.green, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4, whiteSpace:"nowrap", flex:"1 1 auto" }}>
           <span style={{ width:7, height:7, borderRadius:"50%", background:c.bg, animation:"pulse 1.5s infinite", display:"inline-block" }} />
-          {isDone ? "Full Time" : phaseLabel}
+          {isDone ? "Full Time" : isPreLive ? "Ready" : phaseLabel}
         </span>
-        <div style={{ display:"flex", gap:8 }}>
-          {!isDone && onWalkover && (
-            <button onClick={() => setShowWalkover(true)}
-              style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>
-              Walkover
-            </button>
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end", flex:"0 0 auto" }}>
+          {confirmPause ? (
+            <>
+              <span style={{ fontSize:11, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>Pause this match?</span>
+              <button onClick={() => setConfirmPause(false)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 10px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Cancel</button>
+              <button onClick={() => { setConfirmPause(false); onPause(); }} style={{ background:"#f59e0b22", color:"#f59e0b", border:"1px solid #f59e0b", borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Pause</button>
+            </>
+          ) : confirmReset ? (
+            <>
+              <span style={{ fontSize:11, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>Reset all scores?</span>
+              <button onClick={() => setConfirmReset(false)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 10px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Cancel</button>
+              <button onClick={() => { setConfirmReset(false); onReset(); }} style={{ background:"#ef444422", color:"#ef4444", border:"1px solid #ef4444", borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Reset</button>
+            </>
+          ) : (
+            <>
+              {!isDone && !isPreLive && onWalkover && (
+                <button onClick={() => setShowWalkover(true)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Walkover</button>
+              )}
+              {!isDone && !isPreLive && onPause && (
+                <button onClick={() => setConfirmPause(true)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Pause</button>
+              )}
+              {!isDone && !isPreLive && onReset && (
+                <button onClick={() => setConfirmReset(true)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Reset</button>
+              )}
+              <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
+            </>
           )}
-          <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
         </div>
       </div>
 
       <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", justifyContent:"center", padding:"16px 20px 24px", gap:20, maxWidth:600, margin:"0 auto", width:"100%" }}>
+
+        {/* ── PRE-LIVE: GO LIVE ── */}
+        {isPreLive && (
+          <div style={{ textAlign:"center", padding:"24px 0" }}>
+            <div style={{ fontSize:12, color:c.muted, marginBottom:20, lineHeight:1.5 }}>
+              Match is ready. Press Go Live to begin.
+            </div>
+            <button
+              onClick={onGoLive}
+              style={{
+                width:"100%", padding:"20px 0", borderRadius:12,
+                fontFamily:"'Unbounded',sans-serif", fontSize:15, fontWeight:900,
+                letterSpacing:1, textTransform:"uppercase",
+                background:c.green, color:c.bg, border:"none",
+                cursor:"pointer", boxShadow:`0 0 32px ${c.green}44`,
+              }}
+            >
+              ▶ GO LIVE
+            </button>
+          </div>
+        )}
 
         {/* SCORE ROW */}
         <div style={{ display:"flex", alignItems:"center", gap:20 }}>
@@ -243,7 +286,7 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
         </div>
 
         {/* HALF SELECTOR — Normal */}
-        {!isDone && phase === "normal" && (
+        {!isDone && !isPreLive && phase === "normal" && (
           <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
             {[1, 2].map(h => (
               <button key={h} onClick={() => changeHalf(h)}
@@ -255,7 +298,7 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
         )}
 
         {/* HALF SELECTOR — Extra Time */}
-        {!isDone && phase === "extra_time" && (
+        {!isDone && !isPreLive && phase === "extra_time" && (
           <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
             {[3, 4].map(h => (
               <button key={h} onClick={() => changeHalf(h)}
@@ -267,7 +310,7 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
         )}
 
         {/* PENALTIES UI */}
-        {!isDone && phase === "penalties" && (
+        {!isDone && !isPreLive && phase === "penalties" && (
           <div style={{ background:c.surface, borderRadius:14, border:`2px solid ${c.blue}33`, padding:"20px 16px" }}>
             {/* Penalty slot grids */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:12, alignItems:"start", marginBottom:20 }}>
@@ -340,8 +383,8 @@ export default function FootballScorer({ match, config, onScore, onFinish, onWal
           </div>
         )}
 
-        {/* ACTION BUTTONS */}
-        {!isDone && (
+        {/* ACTION BUTTONS (live only) */}
+        {!isDone && !isPreLive && (
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
             {phase !== "penalties" ? (
               <>

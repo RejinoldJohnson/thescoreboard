@@ -116,6 +116,8 @@ def create_tournament(
         venue=data.venue,
         city=data.city,
         state=data.state,
+        venue_lat=data.venue_lat,
+        venue_lng=data.venue_lng,
         start_date=data.start_date,
         end_date=data.end_date,
         is_multi_sport=data.is_multi_sport,
@@ -320,12 +322,16 @@ def get_workspace(
             "is_multi_sport": t.is_multi_sport,
             "venue":          t.venue,
             "city":           t.city,
+            "state":          t.state,
+            "venue_lat":      t.venue_lat,
+            "venue_lng":      t.venue_lng,
             "start_date":     str(t.start_date) if t.start_date else None,
             "end_date":       str(t.end_date)   if t.end_date   else None,
             "status":         t.status,
             "primary_color":  t.primary_color,
-            "is_published":   t.is_published,
-            "poster_url":     t.poster_url or getattr(t, "banner_url", None),
+            "is_published":     t.is_published,
+            "tournament_info":  t.tournament_info,
+            "poster_url":       t.poster_url or getattr(t, "banner_url", None),
             "logo_url":       t.logo_url,
             "sponsors": [
                 {
@@ -1034,6 +1040,101 @@ def generate_groups(
         "matches_created": matches_created,
         "participants_per_group": [len(g) for g in assigned_groups],
     }
+
+
+# ── Phase 1b: generate bracket matches for manually-assigned groups ──
+
+@router.post("/events/{event_id}/generate-group-matches")
+def generate_group_matches(
+    event_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """
+    Generate single-elimination bracket matches for groups that were assigned
+    manually (instead of going through generate-groups which randomises everything).
+
+    Requires:
+     - Groups already exist for the event
+     - Each group has ≥ 2 participants assigned
+     - No group matches exist yet (safe guard against accidental duplication)
+    """
+    event = db.query(Event).filter(Event.event_id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    t = db.query(Tournament).filter(Tournament.tournament_id == event.tournament_id).first()
+    _check_org_access(t.org_id, user, db)
+
+    is_team_event = event.participant_type in ("team", "doubles_pair")
+    engine        = get_sport_engine(event.sport_key)
+    default_stw   = (event.sport_config or engine.get_default_config()).get("sets_to_win", 2)
+
+    groups = db.query(Group).filter(Group.event_id == event_id).all()
+    if not groups:
+        raise HTTPException(
+            status_code=400,
+            detail="No groups found. Create groups and assign participants first.",
+        )
+
+    # Refuse if group matches already exist
+    existing = (
+        db.query(Match)
+        .filter(Match.event_id == event_id, Match.group_id != None)
+        .count()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="Group matches already exist. Reset groups first.",
+        )
+
+    matches_created = 0
+    table_counter   = 0
+
+    for group in groups:
+        eps = db.query(EventParticipant).filter(
+            EventParticipant.event_id == event_id,
+            EventParticipant.group_id == group.group_id,
+        ).all()
+        if len(eps) < 2:
+            continue
+
+        ids   = [ep.team_id if is_team_event else ep.player_id for ep in eps]
+        specs = build_bracket(ids, shuffle=False, third_place=False)
+
+        for spec in specs:
+            table_counter += 1
+            match = Match(
+                event_id=event_id,
+                group_id=group.group_id,
+                round=spec["round"],
+                stage=spec["stage"],
+                status="scheduled",
+                table_number=((table_counter - 1) % 2) + 1,
+                live_state={"sets_to_win": default_stw},
+            )
+            db.add(match)
+            db.flush()
+
+            to_add = []
+            for pos, pid in ((1, spec["pid1"]), (2, spec["pid2"])):
+                if pid is None:
+                    continue
+                if is_team_event:
+                    to_add.append(MatchParticipant(match_id=match.match_id, team_id=pid, position=pos))
+                else:
+                    to_add.append(MatchParticipant(match_id=match.match_id, player_id=pid, position=pos))
+            if to_add:
+                db.add_all(to_add)
+
+            if hasattr(engine, "check_set_winner"):
+                db.add(MatchSet(match_id=match.match_id, set_number=1))
+
+            matches_created += 1
+
+    db.commit()
+    return {"ok": True, "matches_created": matches_created}
 
 
 # ── Phase 2: generate knockout bracket from group standings ───

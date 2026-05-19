@@ -26,6 +26,8 @@ class TournamentCreate(BaseModel):
     venue: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    venue_lat: Optional[float] = None
+    venue_lng: Optional[float] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     is_multi_sport: bool = False
@@ -39,9 +41,13 @@ class TournamentUpdate(BaseModel):
     description: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    registration_start_date: Optional[date] = None
+    registration_end_date: Optional[date] = None
     venue: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    venue_lat: Optional[float] = None
+    venue_lng: Optional[float] = None
     primary_color: Optional[str] = None
     secondary_color: Optional[str] = None
     poster_url: Optional[str] = None
@@ -50,6 +56,7 @@ class TournamentUpdate(BaseModel):
     status: Optional[str] = None
     is_active: Optional[bool] = None
     is_published: Optional[bool] = None
+    tournament_info: Optional[dict] = None
 
 
 class SponsorCreate(BaseModel):
@@ -92,6 +99,8 @@ class TournamentOut(BaseModel):
     is_multi_sport: bool
     start_date: Optional[date]
     end_date: Optional[date]
+    registration_start_date: Optional[date] = None
+    registration_end_date: Optional[date] = None
     poster_url: Optional[str]
     logo_url: Optional[str]
     primary_color: Optional[str]
@@ -99,9 +108,12 @@ class TournamentOut(BaseModel):
     venue: Optional[str]
     city: Optional[str]
     state: Optional[str]
+    venue_lat: Optional[float] = None
+    venue_lng: Optional[float] = None
     status: str
     is_active: bool
     is_published: bool
+    tournament_info: Optional[dict] = None
     created_at: datetime
     sponsors: List[SponsorOut] = []
 

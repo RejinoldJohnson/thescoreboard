@@ -459,34 +459,48 @@ function CricketCard({ m, sponsorFooter }) {
   const isDone = m.status === "done";
   const ls     = m.live_state || {};
   const battingFirst   = ls.batting_first   || 1;
+  const soFirst        = ls.super_over_batting_first || battingFirst;
   const currentInnings = ls.current_innings || 1;
   const completedSets  = (m.sets || []).filter(s => s.is_complete).sort((a, b) => a.set_number - b.set_number);
   const p1Name = m.player_1?.name || "TBD";
   const p2Name = m.player_2?.name || "TBD";
   const maxInn = isDone ? completedSets.length : (isLive ? currentInnings : 0);
   const inningsData = Array.from({ length: maxInn }, (_, idx) => {
-    const innNum    = idx + 1;
-    const battingPos = (innNum % 2 === 1) ? battingFirst : (3 - battingFirst);
-    const teamName   = battingPos === 1 ? p1Name : p2Name;
-    const isP1       = battingPos === 1;
-    const set        = completedSets.find(s => s.set_number === innNum);
-    const isActiveLive = isLive && innNum === currentInnings;
+    const innNum         = idx + 1;
+    const isSuperOverInnings = innNum >= 3;
+    const effectiveBatFirst  = isSuperOverInnings ? soFirst : battingFirst;
+    const battingPos     = (innNum % 2 === 1) ? effectiveBatFirst : (3 - effectiveBatFirst);
+    const teamName       = battingPos === 1 ? p1Name : p2Name;
+    const isP1           = battingPos === 1;
+    const set            = completedSets.find(s => s.set_number === innNum);
+    const isActiveLive   = isLive && innNum === currentInnings;
     const runs    = set ? set.score_p1 : (isActiveLive ? ls.runs    || 0 : 0);
     const wickets = set ? set.score_p2 : (isActiveLive ? ls.wickets || 0 : 0);
     const overs   = isActiveLive ? ls.overs : null;
     const isWinner = isDone && (isP1 ? m.player_1?.is_winner : m.player_2?.is_winner);
-    return { innNum, teamName, isP1, runs, wickets, overs, isComplete: !!set, isActiveLive, isWinner };
+    return { innNum, teamName, isP1, runs, wickets, overs, isComplete: !!set, isActiveLive, isWinner, isSuperOverInnings };
   });
   const target = inningsData[0] ? inningsData[0].runs + 1 : null;
 
+  const inn1 = completedSets.find(s => s.set_number === 1);
+  const inn2 = completedSets.find(s => s.set_number === 2);
+  const inn3 = completedSets.find(s => s.set_number === 3);
+  const inn4 = completedSets.find(s => s.set_number === 4);
+  const hasSO   = !!inn3;
+  const soTied  = hasSO && inn4 && inn3.score_p1 === inn4.score_p1;
+
   let winMargin = null;
-  if (isDone && completedSets.length === 2) {
-    const inn1 = completedSets.find(s => s.set_number === 1);
-    const inn2 = completedSets.find(s => s.set_number === 2);
-    if (inn1 && inn2) {
+  if (isDone && completedSets.length >= 2) {
+    if (hasSO && soTied) {
+      winMargin = "🪙 Decided by Coin Toss";
+    } else if (hasSO && inn4) {
+      const soBat2ndWon = (soFirst === 1 ? 2 : 1) === 1 ? m.player_1?.is_winner : m.player_2?.is_winner;
+      if (soBat2ndWon) { const w = 2 - inn4.score_p2; winMargin = `⚡ Super Over — Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
+      else              { const r = inn3.score_p1 - inn4.score_p1; winMargin = `⚡ Super Over — Won by ${r} run${r !== 1 ? "s" : ""}`; }
+    } else if (inn1 && inn2) {
       const bat2ndWon = battingFirst === 1 ? m.player_2?.is_winner : m.player_1?.is_winner;
       if (bat2ndWon) { const w = 10 - inn2.score_p2; winMargin = `Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
-      else { const r = inn1.score_p1 - inn2.score_p1; winMargin = `Won by ${r} run${r !== 1 ? "s" : ""}`; }
+      else           { const r = inn1.score_p1 - inn2.score_p1; winMargin = `Won by ${r > 0 ? r : 0} run${r !== 1 ? "s" : ""}`; }
     }
   }
 
@@ -508,21 +522,34 @@ function CricketCard({ m, sponsorFooter }) {
         {inningsData.map((inn, idx) => {
           const isChasing  = idx === 1 && target !== null;
           const runsNeeded = isChasing && !isDone ? target - inn.runs : null;
+          const showSoLabel = inn.isSuperOverInnings && (idx === 0 || !inningsData[idx-1].isSuperOverInnings);
+          const soColor = "#f59e0b";
           return (
-            <div key={inn.innNum} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderTop: idx > 0 ? "1px solid var(--border)" : "none" }}>
-              <span style={{ width:6, height:6, borderRadius:"50%", flexShrink:0, background: inn.isActiveLive ? "var(--primary)" : "transparent" }} />
-              <span style={{ flex:1, fontSize:13, fontWeight: inn.isWinner ? 800 : 600, color: inn.isWinner ? "#16a34a" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{inn.teamName}</span>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:17, fontWeight:900, color: inn.isActiveLive ? "var(--primary)" : inn.isWinner ? "#16a34a" : "var(--ink)", lineHeight:1 }}>
-                {inn.runs}<span style={{ fontSize:11, fontWeight:600, color:"var(--muted)" }}>/{inn.wickets}</span>
-              </span>
-              <span style={{ fontSize:10, color:"var(--muted)", minWidth:40, textAlign:"right", flexShrink:0 }}>
-                {inn.overs ? `(${inn.overs})` : ""}
-                {isChasing && inn.isActiveLive && runsNeeded != null && <span style={{ display:"block", fontSize:9 }}>need {runsNeeded}</span>}
-              </span>
+            <div key={inn.innNum}>
+              {showSoLabel && (
+                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 0 3px", borderTop:"1px solid rgba(245,158,11,.25)" }}>
+                  <span style={{ fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, color:soColor, fontFamily:"var(--font-display)" }}>⚡ Super Over</span>
+                </div>
+              )}
+              <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderTop: idx > 0 && !showSoLabel ? "1px solid var(--border)" : "none" }}>
+                <span style={{ width:6, height:6, borderRadius:"50%", flexShrink:0, background: inn.isActiveLive ? "var(--primary)" : inn.isSuperOverInnings ? soColor+"66" : "transparent" }} />
+                <span style={{ flex:1, fontSize:13, fontWeight: inn.isWinner ? 800 : 600, color: inn.isWinner ? "#16a34a" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{inn.teamName}</span>
+                <span style={{ fontFamily:"var(--font-display)", fontSize:17, fontWeight:900, color: inn.isActiveLive ? "var(--primary)" : inn.isWinner ? "#16a34a" : inn.isSuperOverInnings ? soColor : "var(--ink)", lineHeight:1 }}>
+                  {inn.runs}<span style={{ fontSize:11, fontWeight:600, color:"var(--muted)" }}>/{inn.wickets}</span>
+                </span>
+                <span style={{ fontSize:10, color:"var(--muted)", minWidth:40, textAlign:"right", flexShrink:0 }}>
+                  {inn.overs ? `(${inn.overs})` : ""}
+                  {isChasing && inn.isActiveLive && runsNeeded != null && <span style={{ display:"block", fontSize:9 }}>need {runsNeeded}</span>}
+                </span>
+              </div>
             </div>
           );
         })}
-        {winMargin && <div style={{ fontSize:11, color:"#16a34a", fontWeight:700, marginTop:6, paddingTop:6, borderTop:"1px solid var(--border)" }}>{winMargin}</div>}
+        {winMargin && (
+          <div style={{ fontSize:11, fontWeight:700, marginTop:6, paddingTop:6, borderTop:"1px solid var(--border)", color: winMargin.includes("Coin") ? "var(--primary)" : winMargin.includes("Super") ? "#f59e0b" : "#16a34a" }}>
+            {winMargin}
+          </div>
+        )}
       </div>
       {sponsorFooter}
     </div>
@@ -693,6 +720,161 @@ function CardSponsorFooter({ sponsor }) {
         }
       </div>
       <span style={{ fontSize:10, fontWeight:600, color:"var(--muted)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{sponsor.name}</span>
+    </div>
+  );
+}
+
+// ── Tournament Info & Rules display ───────────────────────────
+const MONTHS_FULL = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function formatDeadline(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${MONTHS_FULL[m - 1]} ${d}, ${y}`;
+}
+
+function TournamentInfoDisplay({ info }) {
+  if (!info) return null;
+
+  const hasOverview = !!info.overview?.trim();
+  const hasPrizes   = info.prize_pool?.length > 0;
+  const hasRules    = !!info.rules?.trim();
+  const hasContact  = !!(
+    info.contact?.entry_fee?.trim() ||
+    info.contact?.reg_deadline?.trim() ||
+    info.contact?.persons?.length > 0
+  );
+
+  if (!hasOverview && !hasPrizes && !hasRules && !hasContact) return null;
+
+  const sectionHead = {
+    fontSize: 10, fontWeight: 800, textTransform: "uppercase",
+    letterSpacing: 1.5, color: "var(--muted)", marginBottom: 10,
+  };
+  const card = {
+    background: "var(--surface)", border: "1.5px solid var(--border)",
+    borderRadius: 12, padding: "14px 16px",
+  };
+
+  // Render text preserving intentional line breaks cleanly
+  const renderText = (text) => (
+    <div style={{ fontSize: 13, color: "var(--ink)", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
+      {text.trim()}
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+        {/* Overview */}
+        {hasOverview && (
+          <div style={card}>
+            <div style={sectionHead}>📋 Overview</div>
+            {renderText(info.overview)}
+          </div>
+        )}
+
+        {/* Prize Pool */}
+        {hasPrizes && (
+          <div style={card}>
+            <div style={sectionHead}>🏆 Prize Pool</div>
+            {/* Group by category */}
+            {(() => {
+              const categories = [...new Set(info.prize_pool.map(p => p.category || ""))];
+              return categories.map(cat => (
+                <div key={cat || "_"} style={{ marginBottom: categories.length > 1 ? 14 : 0 }}>
+                  {cat && (
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--primary, #FF6B35)",
+                      textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+                      {cat}
+                    </div>
+                  )}
+                  {info.prize_pool.filter(p => (p.category || "") === cat).map((prize, i) => (
+                    <div key={i} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "7px 0",
+                      borderBottom: i < info.prize_pool.filter(p => (p.category || "") === cat).length - 1
+                        ? "1px solid var(--border)" : "none",
+                    }}>
+                      <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
+                        {prize.position}
+                      </span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "var(--ink)",
+                        fontFamily: "var(--font-display)" }}>
+                        {prize.amount}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+
+        {/* Rules */}
+        {hasRules && (
+          <div style={card}>
+            <div style={sectionHead}>📏 Rules & Regulations</div>
+            {renderText(info.rules)}
+          </div>
+        )}
+
+        {/* Registration & Contact */}
+        {hasContact && (
+          <div style={card}>
+            <div style={sectionHead}>📞 Registration & Contact</div>
+            {(info.contact.entry_fee || info.contact.reg_deadline) && (
+              <div style={{ display: "flex", gap: 24, marginBottom: info.contact.persons?.length ? 14 : 0,
+                flexWrap: "wrap" }}>
+                {info.contact.entry_fee && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 2 }}>
+                      Entry Fee
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "var(--ink)",
+                      fontFamily: "var(--font-display)" }}>
+                      {info.contact.entry_fee}
+                    </div>
+                  </div>
+                )}
+                {info.contact.reg_deadline && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 2 }}>
+                      Deadline
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "var(--ink)",
+                      fontFamily: "var(--font-display)" }}>
+                      {formatDeadline(info.contact.reg_deadline) || info.contact.reg_deadline}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {info.contact.persons?.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 8 }}>
+                  Contact
+                </div>
+                {info.contact.persons.map((p, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between",
+                    alignItems: "center", padding: "7px 0",
+                    borderBottom: i < info.contact.persons.length - 1 ? "1px solid var(--border)" : "none" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{p.name}</span>
+                    {p.phone && (
+                      <a href={`tel:${p.phone}`}
+                        style={{ fontSize: 13, color: "var(--primary, #FF6B35)", fontWeight: 700,
+                          textDecoration: "none" }}>
+                        {p.phone}
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
     </div>
   );
 }
@@ -883,29 +1065,43 @@ function MatchDetailModal({ match: m, onClose }) {
 
   // Cricket
   const battingFirst   = ls.batting_first   || 1;
+  const soFirst        = ls.super_over_batting_first || battingFirst;
   const currentInnings = ls.current_innings || 1;
   const maxInn = isDone ? completedSets.length : (isLive ? currentInnings : 0);
   const inningsData = Array.from({ length: maxInn }, (_, idx) => {
-    const innNum     = idx + 1;
-    const battingPos = innNum % 2 === 1 ? battingFirst : (3 - battingFirst);
-    const isP1       = battingPos === 1;
-    const set        = completedSets.find(s => s.set_number === innNum);
-    const isActiveLive = isLive && innNum === currentInnings;
+    const innNum         = idx + 1;
+    const isSuperOverInnings = innNum >= 3;
+    const effectiveBatFirst  = isSuperOverInnings ? soFirst : battingFirst;
+    const battingPos     = innNum % 2 === 1 ? effectiveBatFirst : (3 - effectiveBatFirst);
+    const isP1           = battingPos === 1;
+    const set            = completedSets.find(s => s.set_number === innNum);
+    const isActiveLive   = isLive && innNum === currentInnings;
     const runs    = set ? set.score_p1 : (isActiveLive ? ls.runs    ?? 0 : 0);
     const wickets = set ? set.score_p2 : (isActiveLive ? ls.wickets ?? 0 : 0);
     const overs   = isActiveLive ? ls.overs : (isDone && innNum === maxInn && ls.overs ? ls.overs : null);
     const isWinner = isDone && (isP1 ? p1Win : p2Win);
-    return { innNum, teamName: isP1 ? (m.player_1?.name||"TBD") : (m.player_2?.name||"TBD"), isP1, runs, wickets, overs, isComplete: !!set, isActiveLive, isWinner };
+    return { innNum, teamName: isP1 ? (m.player_1?.name||"TBD") : (m.player_2?.name||"TBD"), isP1, runs, wickets, overs, isComplete: !!set, isActiveLive, isWinner, isSuperOverInnings };
   });
+
+  const mdInn1 = completedSets.find(s => s.set_number === 1);
+  const mdInn2 = completedSets.find(s => s.set_number === 2);
+  const mdInn3 = completedSets.find(s => s.set_number === 3);
+  const mdInn4 = completedSets.find(s => s.set_number === 4);
+  const hasSO  = !!mdInn3;
+  const soTied = hasSO && mdInn4 && mdInn3.score_p1 === mdInn4.score_p1;
 
   let winMargin = null;
   if (isCricket && isDone && completedSets.length >= 2) {
-    const inn1 = completedSets.find(s => s.set_number === 1);
-    const inn2 = completedSets.find(s => s.set_number === 2);
-    if (inn1 && inn2) {
+    if (hasSO && soTied) {
+      winMargin = "🪙 Decided by Coin Toss";
+    } else if (hasSO && mdInn4) {
+      const soBat2ndWon = (soFirst === 1 ? 2 : 1) === 1 ? p1Win : p2Win;
+      if (soBat2ndWon) { const w = 2 - mdInn4.score_p2; winMargin = `⚡ Super Over — Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
+      else              { const r = mdInn3.score_p1 - mdInn4.score_p1; winMargin = `⚡ Super Over — Won by ${r} run${r !== 1 ? "s" : ""}`; }
+    } else if (mdInn1 && mdInn2) {
       const bat2ndWon = battingFirst === 1 ? p2Win : p1Win;
-      if (bat2ndWon) { const w = 10 - inn2.score_p2; winMargin = `Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
-      else { const r = inn1.score_p1 - inn2.score_p1; winMargin = `Won by ${r > 0 ? r : 0} run${r !== 1 ? "s" : ""}`; }
+      if (bat2ndWon) { const w = 10 - mdInn2.score_p2; winMargin = `Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
+      else           { const r = mdInn1.score_p1 - mdInn2.score_p1; winMargin = `Won by ${r > 0 ? r : 0} run${r !== 1 ? "s" : ""}`; }
     }
   }
 
@@ -1075,55 +1271,65 @@ function MatchDetailModal({ match: m, onClose }) {
             )}
 
             {/* Cricket: match narrative */}
-            {isCricket && isDone && completedSets.length >= 2 && (() => {
-              const inn1 = completedSets.find(s => s.set_number === 1);
-              const inn2 = completedSets.find(s => s.set_number === 2);
-              if (!inn1 || !inn2) return null;
-              const bat1stName = battingFirst === 1 ? m.player_1?.name : m.player_2?.name;
-              const bat2ndName = battingFirst === 1 ? m.player_2?.name : m.player_1?.name;
-              const bat2ndWon  = battingFirst === 1 ? p2Win : p1Win;
-              const target     = inn1.score_p1 + 1;
-              const shortfall  = target - 1 - inn2.score_p1;
-              const wktsLeft   = 10 - inn2.score_p2;
-              const chaseOvers = ls.overs || null;
+            {isCricket && isDone && mdInn1 && mdInn2 && (() => {
+              const bat1stName  = battingFirst === 1 ? m.player_1?.name : m.player_2?.name;
+              const bat2ndName  = battingFirst === 1 ? m.player_2?.name : m.player_1?.name;
+              const regularTied = mdInn1.score_p1 === mdInn2.score_p1;
+              const bat2ndWon   = !hasSO && (battingFirst === 1 ? p2Win : p1Win);
+              const target      = mdInn1.score_p1 + 1;
+              const shortfall   = target - 1 - mdInn2.score_p1;
+              const wktsLeft    = 10 - mdInn2.score_p2;
+              const soBat1stName = soFirst === 1 ? m.player_1?.name : m.player_2?.name;
+              const soBat2ndName = soFirst === 1 ? m.player_2?.name : m.player_1?.name;
+              const winnerName   = p1Win ? m.player_1?.name : p2Win ? m.player_2?.name : null;
+              const soWinnerResult = hasSO && mdInn4 && !soTied && (() => {
+                const soBat2ndWon = (soFirst === 1 ? 2 : 1) === 1 ? p1Win : p2Win;
+                if (soBat2ndWon) { const w = 2 - mdInn4.score_p2; return `by ${w} wicket${w !== 1 ? "s" : ""}`; }
+                const r = mdInn3.score_p1 - mdInn4.score_p1;
+                return `by ${r} run${r !== 1 ? "s" : ""}`;
+              })();
+
               return (
                 <div style={{ marginBottom:14, display:"flex", flexDirection:"column", gap:6 }}>
-                  <div style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"10px 13px",
-                    background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:10 }}>
-                    <div style={{ width:6, height:6, borderRadius:"50%", background:"var(--border)", flexShrink:0, marginTop:4 }}/>
-                    <div style={{ fontSize:12, color:"var(--muted)", lineHeight:1.55 }}>
-                      <span style={{ fontWeight:700, color:"var(--ink)" }}>{bat1stName}</span>
-                      {" batted first and set a target of "}
-                      <span style={{ fontWeight:900, color:"var(--primary)", fontSize:13 }}>{target}</span>
-                      {" runs"}
-                    </div>
+                  {/* Regular innings summary */}
+                  <div style={{ padding:"10px 13px", background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:10, fontSize:12, color:"var(--muted)", lineHeight:1.6 }}>
+                    <strong style={{ color:"var(--ink)" }}>{bat1stName}</strong>{" batted first — scored "}
+                    <strong style={{ color:"var(--ink)" }}>{mdInn1.score_p1}/{mdInn1.score_p2}</strong>
+                    {". "}
+                    <strong style={{ color:"var(--ink)" }}>{bat2ndName}</strong>{" replied with "}
+                    <strong style={{ color:"var(--ink)" }}>{mdInn2.score_p1}/{mdInn2.score_p2}</strong>
+                    {regularTied
+                      ? " — match tied after regulation."
+                      : bat2ndWon
+                      ? <>{"."} <span style={{ color:"#16a34a" }}>{bat2ndName} won with {wktsLeft} wicket{wktsLeft !== 1 ? "s" : ""} to spare.</span></>
+                      : <>{"."} <span style={{ color:"var(--primary)" }}>{bat1stName} defended — {bat2ndName} fell short by {shortfall} run{shortfall !== 1 ? "s" : ""}.</span></>}
                   </div>
-                  <div style={{ display:"flex", alignItems:"flex-start", gap:10, padding:"10px 13px",
-                    background: bat2ndWon ? "rgba(22,163,74,.06)" : "rgba(255,107,53,.05)",
-                    border:`1px solid ${bat2ndWon ? "rgba(22,163,74,.2)" : "rgba(255,107,53,.2)"}`,
-                    borderRadius:10 }}>
-                    <div style={{ width:6, height:6, borderRadius:"50%", background: bat2ndWon ? "#16a34a" : "var(--primary)", flexShrink:0, marginTop:4 }}/>
-                    <div style={{ fontSize:12, color:"var(--muted)", lineHeight:1.55 }}>
-                      {bat2ndWon ? (
-                        <>
-                          <span style={{ fontWeight:700, color:"#16a34a" }}>{bat2ndName}</span>
-                          {" chased it down"}
-                          {chaseOvers ? <>{" in "}<span style={{ fontWeight:700, color:"var(--ink)" }}>{chaseOvers} overs</span></> : ""}
-                          {" with "}
-                          <span style={{ fontWeight:700, color:"var(--ink)" }}>{wktsLeft} wicket{wktsLeft !== 1 ? "s" : ""} to spare</span>
-                        </>
-                      ) : (
-                        <>
-                          <span style={{ fontWeight:700, color:"var(--primary)" }}>{bat1stName}</span>
-                          {" defended — "}
-                          <span style={{ fontWeight:700, color:"var(--ink)" }}>{bat2ndName}</span>
-                          {" fell short by "}
-                          <span style={{ fontWeight:700, color:"var(--ink)" }}>{shortfall} run{shortfall !== 1 ? "s" : ""}</span>
-                          {chaseOvers ? <>{" (in "}<span style={{ fontWeight:700, color:"var(--ink)" }}>{chaseOvers} overs)</span></> : ""}
-                        </>
-                      )}
+
+                  {/* Super over */}
+                  {hasSO && mdInn3 && (
+                    <div style={{ padding:"10px 13px", background:"rgba(245,158,11,.06)", border:"1px solid rgba(245,158,11,.25)", borderRadius:10, fontSize:12, color:"var(--muted)", lineHeight:1.6 }}>
+                      <div style={{ fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, color:"#f59e0b", marginBottom:5, fontFamily:"var(--font-display)" }}>⚡ Super Over</div>
+                      <strong style={{ color:"var(--ink)" }}>{soBat1stName}</strong>{" scored "}
+                      <strong style={{ color:"#f59e0b" }}>{mdInn3.score_p1}/{mdInn3.score_p2}</strong>
+                      {mdInn4 ? (
+                        <>{". "}<strong style={{ color:"var(--ink)" }}>{soBat2ndName}</strong>{" replied with "}
+                        <strong style={{ color:"#f59e0b" }}>{mdInn4.score_p1}/{mdInn4.score_p2}</strong>
+                        {soTied ? " — super over tied." : "."}</>
+                      ) : "."}
                     </div>
-                  </div>
+                  )}
+
+                  {/* Final result */}
+                  {winnerName && (
+                    <div style={{ padding:"10px 13px", background: soTied ? "rgba(249,115,22,.07)" : "rgba(22,163,74,.06)", border:`1px solid ${soTied ? "rgba(249,115,22,.3)" : "rgba(22,163,74,.2)"}`, borderRadius:10, fontSize:12, lineHeight:1.6 }}>
+                      <strong style={{ color: soTied ? "var(--primary)" : "#16a34a", fontSize:13 }}>{winnerName}</strong>
+                      {soTied
+                        ? " won by Coin Toss 🪙"
+                        : hasSO && soWinnerResult
+                        ? <>{" won "}<strong>{soWinnerResult}</strong>{" in the Super Over"}</>
+                        : " won"}
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -1133,27 +1339,46 @@ function MatchDetailModal({ match: m, onClose }) {
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"var(--muted)", marginBottom:8 }}>Innings</div>
                 <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:12, overflow:"hidden" }}>
-                  {inningsData.map((inn, idx) => (
-                    <div key={inn.innNum} style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px",
-                      borderBottom: idx < inningsData.length - 1 ? "1px solid var(--border)" : "none",
-                      background: inn.isActiveLive ? "var(--primary-dim)" : "transparent" }}>
-                      <div style={{ width:22, height:22, borderRadius:"50%", background: inn.isActiveLive ? "var(--primary)" : "var(--elevated)", border:"1px solid var(--border)", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center" }}>
-                        <span style={{ fontSize:9, fontWeight:900, color: inn.isActiveLive ? "#fff" : "var(--muted)" }}>{inn.innNum}</span>
-                      </div>
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontSize:13, fontWeight: inn.isWinner ? 800 : 600, color: inn.isWinner ? "#16a34a" : "var(--ink)" }}>{inn.teamName}</div>
-                        {inn.overs != null && <div style={{ fontSize:10, color:"var(--muted)", marginTop:1 }}>{inn.overs} overs</div>}
-                      </div>
-                      <div style={{ textAlign:"right" }}>
-                        <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:900, color: inn.isActiveLive ? "var(--primary)" : "var(--ink)", lineHeight:1 }}>
-                          {inn.runs}<span style={{ fontSize:12, color:"var(--muted)", fontWeight:600 }}>/{inn.wickets}</span>
+                  {inningsData.map((inn, idx) => {
+                    const showSoHeader = inn.isSuperOverInnings && (idx === 0 || !inningsData[idx-1].isSuperOverInnings);
+                    const soC = "#f59e0b";
+                    return (
+                      <div key={inn.innNum}>
+                        {showSoHeader && (
+                          <div style={{ padding:"7px 14px", background:"rgba(245,158,11,.07)", borderTop:"1px solid rgba(245,158,11,.2)", borderBottom:"1px solid rgba(245,158,11,.15)" }}>
+                            <span style={{ fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, color:soC, fontFamily:"var(--font-display)" }}>⚡ Super Over</span>
+                          </div>
+                        )}
+                        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px",
+                          borderBottom: idx < inningsData.length - 1 ? `1px solid ${inn.isSuperOverInnings ? "rgba(245,158,11,.15)" : "var(--border)"}` : "none",
+                          background: inn.isActiveLive ? "var(--primary-dim)" : inn.isSuperOverInnings ? "rgba(245,158,11,.03)" : "transparent" }}>
+                          <div style={{ width:22, height:22, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center",
+                            background: inn.isActiveLive ? "var(--primary)" : inn.isSuperOverInnings ? "rgba(245,158,11,.15)" : "var(--elevated)",
+                            border:`1px solid ${inn.isActiveLive ? "var(--primary)" : inn.isSuperOverInnings ? "rgba(245,158,11,.4)" : "var(--border)"}` }}>
+                            <span style={{ fontSize:8, fontWeight:900, color: inn.isActiveLive ? "#fff" : inn.isSuperOverInnings ? soC : "var(--muted)" }}>
+                              {inn.isSuperOverInnings ? "SO" : inn.innNum}
+                            </span>
+                          </div>
+                          <div style={{ flex:1 }}>
+                            <div style={{ fontSize:13, fontWeight: inn.isWinner ? 800 : 600, color: inn.isWinner ? "#16a34a" : "var(--ink)" }}>{inn.teamName}</div>
+                            {inn.overs != null && <div style={{ fontSize:10, color:"var(--muted)", marginTop:1 }}>{inn.overs} overs</div>}
+                          </div>
+                          <div style={{ textAlign:"right" }}>
+                            <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:900, lineHeight:1,
+                              color: inn.isActiveLive ? "var(--primary)" : inn.isSuperOverInnings ? soC : "var(--ink)" }}>
+                              {inn.runs}<span style={{ fontSize:12, color:"var(--muted)", fontWeight:600 }}>/{inn.wickets}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {winMargin && (
-                  <div style={{ marginTop:8, background:"rgba(22,163,74,.08)", border:"1px solid rgba(22,163,74,.25)", borderRadius:8, padding:"8px 12px", textAlign:"center", fontSize:12, fontWeight:700, color:"#16a34a" }}>
+                  <div style={{ marginTop:8, borderRadius:8, padding:"8px 12px", textAlign:"center", fontSize:12, fontWeight:700,
+                    background: winMargin.includes("Coin") ? "rgba(249,115,22,.08)" : winMargin.includes("Super") ? "rgba(245,158,11,.08)" : "rgba(22,163,74,.08)",
+                    border: winMargin.includes("Coin") ? "1px solid rgba(249,115,22,.25)" : winMargin.includes("Super") ? "1px solid rgba(245,158,11,.25)" : "1px solid rgba(22,163,74,.25)",
+                    color: winMargin.includes("Coin") ? "var(--primary)" : winMargin.includes("Super") ? "#f59e0b" : "#16a34a" }}>
                     {winMargin}
                   </div>
                 )}
@@ -1372,17 +1597,31 @@ function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, tota
                       {dateStr}
                     </span>
                   )}
-                  {locationStr && (
+                  {(locationStr || tournament.venue) && (
                     <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:mutedC }}>
                       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                      {locationStr}
+                      {[tournament.venue, locationStr].filter(Boolean).join(" · ")}
                     </span>
                   )}
-                  {tournament.venue && (
-                    <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:mutedC }}>
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                      {tournament.venue}
-                    </span>
+                  {/* Google Maps button — only shown when coordinates are saved */}
+                  {tournament.venue_lat && tournament.venue_lng && (
+                    <a
+                      href={`https://www.google.com/maps?q=${tournament.venue_lat},${tournament.venue_lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display:"inline-flex", alignItems:"center", gap:4,
+                        fontSize:11, fontWeight:700,
+                        color: primaryC || "var(--primary, #FF6B35)",
+                        textDecoration:"none",
+                        padding:"3px 8px", borderRadius:6,
+                        border:`1px solid ${primaryC || "var(--primary, #FF6B35)"}44`,
+                        background:`${primaryC || "var(--primary, #FF6B35)"}10`,
+                      }}
+                    >
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                      Open in Maps
+                    </a>
                   )}
                 </div>
               )}
@@ -1391,58 +1630,61 @@ function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, tota
         </div>
       </div>
 
-      {/* ══ Below-fold: description · stats · CTA · sponsors ══ */}
-      <div style={{ maxWidth:900, margin:"0 auto", padding:"16px 20px 24px" }}>
+      {/* ══ Below-fold ══════════════════════════════════════════ */}
+      <div style={{ maxWidth:900, margin:"0 auto", padding:"20px 20px 32px" }}>
 
+        {/* Description */}
         {tournament.description && (
-          <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.65, marginBottom:16, maxWidth:520 }}>
+          <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:"0 0 16px", maxWidth:560 }}>
             {tournament.description}
           </p>
         )}
 
-        {/* Stats + Register row */}
-        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-          {totalPlayers > 0 && (
-            <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{totalPlayers}</span>
-              <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Players</span>
-            </div>
-          )}
-          {totalMatches > 0 && (
-            <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{doneMatches}/{totalMatches}</span>
-              <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Matches</span>
-            </div>
-          )}
-          {liveCount > 0 && (
-            <div style={{ background:"rgba(255,107,53,.12)", border:"1px solid rgba(255,107,53,.3)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
-              <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
-              <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live</span>
-            </div>
-          )}
+        {/* Stats row */}
+        {(totalPlayers > 0 || totalMatches > 0 || liveCount > 0) && (
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:16 }}>
+            {totalPlayers > 0 && (
+              <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{totalPlayers}</span>
+                <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Players</span>
+              </div>
+            )}
+            {totalMatches > 0 && (
+              <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{doneMatches}/{totalMatches}</span>
+                <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Matches</span>
+              </div>
+            )}
+            {liveCount > 0 && (
+              <div style={{ background:"rgba(255,107,53,.12)", border:"1px solid rgba(255,107,53,.3)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
+                <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
+                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
+                <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live</span>
+              </div>
+            )}
+          </div>
+        )}
 
-          {/* Register CTA — sits inline with stats on wide screens, wraps on narrow */}
-          {status === "registration" && onRegister && (
-            <button onClick={onRegister} style={{
-              display:"inline-flex", alignItems:"center", gap:7,
-              padding:"7px 18px", borderRadius:20, border:"none", cursor:"pointer",
-              background:"var(--primary)", color:"#fff",
-              fontFamily:"var(--font-display)", fontSize:10, fontWeight:900,
-              textTransform:"uppercase", letterSpacing:1,
-              boxShadow:"0 3px 12px rgba(255,107,53,.4)",
-              flexShrink:0,
-            }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-                <circle cx="9" cy="7" r="4"/>
-                <line x1="19" y1="8" x2="19" y2="14"/>
-                <line x1="22" y1="11" x2="16" y2="11"/>
-              </svg>
-              Register Now
-            </button>
-          )}
-        </div>
+        {/* Register CTA — full-width prominent button, separate from stats */}
+        {status === "registration" && onRegister && (
+          <button onClick={onRegister} style={{
+            display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+            width:"100%", padding:"13px 20px", borderRadius:12, border:"none",
+            cursor:"pointer", background:"var(--primary)", color:"#fff",
+            fontFamily:"var(--font-display)", fontSize:13, fontWeight:900,
+            textTransform:"uppercase", letterSpacing:1.2,
+            boxShadow:"0 4px 16px rgba(255,107,53,.35)",
+            marginBottom:24,
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <line x1="19" y1="8" x2="19" y2="14"/>
+              <line x1="22" y1="11" x2="16" y2="11"/>
+            </svg>
+            Register Now
+          </button>
+        )}
 
         {/* Sponsors */}
         {tournament.sponsors?.length > 0 && <SponsorDisplay sponsors={tournament.sponsors} />}
@@ -1539,6 +1781,15 @@ function RegisterSection({ events, tournament }) {
           </div>
         )
       )}
+    </Section>
+  );
+}
+
+// ── Info section ──────────────────────────────────────────────
+function InfoSection({ info }) {
+  return (
+    <Section id="info" title="Tournament Info">
+      <TournamentInfoDisplay info={info} />
     </Section>
   );
 }
@@ -1862,6 +2113,16 @@ export default function TournamentPublic() {
   const hasTeams  = events.some(ev => (ev.participants || []).length > 0);
   const teamCount = events.reduce((n, ev) => n + (ev.participants || []).length, 0);
 
+  const ti = t.tournament_info || {};
+  const hasInfo = !!(
+    ti.overview?.trim() ||
+    ti.prize_pool?.length > 0 ||
+    ti.rules?.trim() ||
+    ti.contact?.entry_fee?.trim() ||
+    ti.contact?.reg_deadline?.trim() ||
+    ti.contact?.persons?.length > 0
+  );
+
   const primarySportKey = events[0]?.sport_key;
   const titleSponsor    = t.sponsors?.find(s => s.tier === "title") ?? null;
 
@@ -1875,8 +2136,9 @@ export default function TournamentPublic() {
   // Build section list (register is now a hero button, not a tab)
   const sections = [
     { id:"fixtures",    label:"Fixtures",    count: allMatches.length },
-    ...(hasTeams ? [{ id:"teams",      label:"Teams", count: teamCount }] : []),
-    ...(hasBoard ? [{ id:"leaderboard", label:"Leaderboard"           }] : []),
+    ...(hasTeams ? [{ id:"teams",       label:"Teams",       count: teamCount }] : []),
+    ...(hasBoard ? [{ id:"leaderboard", label:"Leaderboard"                   }] : []),
+    ...(hasInfo  ? [{ id:"info",        label:"Info"                          }] : []),
   ];
 
   const effectiveActive = activeId || sections[0]?.id;
@@ -1904,6 +2166,7 @@ export default function TournamentPublic() {
         {effectiveActive === "fixtures"               && <FixturesSection events={events} onSelect={setSelectedMatch} titleSponsor={titleSponsor} />}
         {effectiveActive === "teams"       && hasTeams && <TeamsSection events={events} />}
         {effectiveActive === "leaderboard" && hasBoard && <LeaderboardSection events={events} />}
+        {effectiveActive === "info"        && hasInfo  && <InfoSection info={t.tournament_info} />}
       </div>
 
       <footer style={{ textAlign:"center", padding:"20px 24px", color:"var(--subtle)", fontSize:12, borderTop:"1px solid var(--border)" }}>
@@ -1912,8 +2175,8 @@ export default function TournamentPublic() {
         {lastUpdated && ` · Updated ${lastUpdated.toLocaleTimeString()}`}
       </footer>
 
-      {/* Fixed share FAB — always visible bottom-right */}
-      <div style={{ position:"fixed", bottom:20, right:20, zIndex:300 }}>
+      {/* Fixed share FAB — sits above sticky sponsor bar when present */}
+      <div style={{ position:"fixed", bottom: titleSponsor ? 68 + 14 : 20, right:20, zIndex:300, transition:"bottom .2s" }}>
         <ShareButton type="tournament" slug={slug} title={`${t.name} — Live on TheScoreBoard`} upward />
       </div>
 

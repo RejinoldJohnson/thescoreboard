@@ -62,11 +62,12 @@ const errBox = {
 };
 
 // ── Step indicator ────────────────────────────────────────────
-function StepBar({ step, needsAuth }) {
-  const order = needsAuth
-    ? ["auth", "profile", "select", "form"]
+function StepBar({ step, needsAuth, isSingleEvent }) {
+  const base  = isSingleEvent
+    ? ["profile", "form"]
     : ["profile", "select", "form"];
-  const idx = order.indexOf(step);
+  const order = needsAuth ? ["auth", ...base] : base;
+  const idx   = order.indexOf(step);
   return (
     <div style={{ display:"flex", alignItems:"center", gap:0, marginBottom:28 }}>
       {order.slice(0, -1).map((s, i) => {
@@ -623,6 +624,21 @@ export default function TournamentRegister() {
   const [selEvent,    setSelEvent]    = useState(null);
   const [regName,     setRegName]     = useState("");
 
+  // Derived: open events & single-event shortcut flag
+  const openEvents    = events.filter(ev => ev.is_configured !== false);
+  const isSingleEvent = openEvents.length === 1;
+
+  // After profile is confirmed, skip "select" if there's only one event
+  const advanceToFormOrSelect = (evArr) => {
+    const open = (evArr || []).filter(ev => ev.is_configured !== false);
+    if (open.length === 1) {
+      setSelEvent(open[0]);
+      setStep("form");
+    } else {
+      setStep("select");
+    }
+  };
+
   useEffect(() => {
     async function load() {
       try {
@@ -638,7 +654,9 @@ export default function TournamentRegister() {
         if (isLoggedIn()) {
           const prof = await getPlayerProfile().catch(() => null);
           setProfile(prof);
-          setStep(prof ? "select" : "profile");
+          // Use d.events directly — state not yet flushed at this point
+          if (prof) advanceToFormOrSelect(d.events || []);
+          else setStep("profile");
         } else {
           setStep("auth");
         }
@@ -647,13 +665,15 @@ export default function TournamentRegister() {
       }
     }
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   const afterAuth = async () => {
     try {
       const prof = await getPlayerProfile().catch(() => null);
       setProfile(prof);
-      setStep(prof ? "select" : "profile");
+      if (prof) advanceToFormOrSelect(events);
+      else setStep("profile");
     } catch {
       setStep("profile");
     }
@@ -690,10 +710,15 @@ export default function TournamentRegister() {
       <TournamentBar tournament={tournament} slug={slug} navigate={navigate} />
 
       <div style={{ maxWidth:480, margin:"0 auto", padding:"28px 20px 48px" }}>
-        {showBar && <StepBar step={step} needsAuth={!isLoggedIn()} />}
+        {showBar && <StepBar step={step} needsAuth={!isLoggedIn()} isSingleEvent={isSingleEvent} />}
 
         {step === "auth"    && <AuthStep onDone={afterAuth} />}
-        {step === "profile" && <ProfileStep existingProfile={profile} onDone={p => { setProfile(p); setStep("select"); }} />}
+        {step === "profile" && (
+          <ProfileStep
+            existingProfile={profile}
+            onDone={p => { setProfile(p); advanceToFormOrSelect(events); }}
+          />
+        )}
         {step === "select"  && <SelectStep events={events} profile={profile} onSelect={ev => { setSelEvent(ev); setStep("form"); }} />}
         {step === "form"    && selEvent && (
           <FormStep
@@ -701,7 +726,11 @@ export default function TournamentRegister() {
             tournament={tournament}
             profile={profile}
             onSuccess={n => { setRegName(n); setStep("success"); }}
-            onBack={() => { setSelEvent(null); setStep("select"); }}
+            onBack={() => {
+              setSelEvent(null);
+              // Single-event: no select step to go back to — go to profile instead
+              setStep(isSingleEvent ? "profile" : "select");
+            }}
           />
         )}
         {step === "success" && <SuccessStep name={regName} event={selEvent} slug={slug} navigate={navigate} />}

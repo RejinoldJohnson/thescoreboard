@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.event import Event
 from app.models.match import Match, MatchParticipant, MatchSet
-from app.models.player import Player
+from app.models.player import Player, Team
 from app.schemas.match import MatchCreate, MatchOut, MatchStatusUpdate
 from app.utils.auth import get_current_user
 from app.sports.registry import get_sport_engine
@@ -45,7 +45,8 @@ class ScoreUpdate(BaseModel):
 
 class FinishMatch(BaseModel):
     """Explicitly finish a match (football full-time, cricket innings complete)."""
-    winner_position: Optional[Union[int, str]] = None  # 1, 2, None for draw, "super_over" for cricket
+    winner_position:          Optional[Union[int, str]] = None  # 1, 2, None for draw, "super_over" for cricket
+    super_over_batting_first: Optional[int]             = None  # 1 or 2 — who bats first in super over
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -309,11 +310,31 @@ def create_match(
     event = db.query(Event).filter(Event.event_id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    if data.player1_id == data.player2_id:
-        raise HTTPException(status_code=400, detail="A player cannot play themselves")
-    for pid in [data.player1_id, data.player2_id]:
-        if not db.query(Player).filter(Player.player_id == pid).first():
-            raise HTTPException(status_code=404, detail=f"Player {pid} not found")
+
+    engine    = get_sport_engine(event.sport_key)
+    use_teams = event.participant_type in ("team", "doubles_pair")
+
+    # Resolve participant IDs (partial allowed — e.g. bye player in one slot)
+    if use_teams:
+        t1_id, t2_id = data.team1_id, data.team2_id
+        p1_id = p2_id = None
+        if t1_id and t2_id and t1_id == t2_id:
+            raise HTTPException(status_code=400, detail="A team cannot play themselves")
+        for tid in [t for t in [t1_id, t2_id] if t]:
+            if not db.query(Team).filter(Team.team_id == tid).first():
+                raise HTTPException(status_code=404, detail=f"Team {tid} not found")
+    else:
+        p1_id, p2_id = data.player1_id, data.player2_id
+        t1_id = t2_id = None
+        if p1_id and p2_id and p1_id == p2_id:
+            raise HTTPException(status_code=400, detail="A player cannot play themselves")
+        for pid in [p for p in [p1_id, p2_id] if p]:
+            if not db.query(Player).filter(Player.player_id == pid).first():
+                raise HTTPException(status_code=404, detail=f"Player {pid} not found")
+
+    # Initialise live_state with sets_to_win so the scoring endpoint always
+    # finds a configured value (mirrors what generate_fixtures does).
+    default_stw = (event.sport_config or engine.get_default_config()).get("sets_to_win", 2)
 
     match = Match(
         event_id=event_id,
@@ -322,17 +343,27 @@ def create_match(
         stage=data.stage,
         status="scheduled",
         table_number=data.table_number,
+        live_state={"sets_to_win": default_stw},
     )
     db.add(match)
     db.flush()
 
-    db.add_all([
-        MatchParticipant(match_id=match.match_id, player_id=data.player1_id, position=1),
-        MatchParticipant(match_id=match.match_id, player_id=data.player2_id, position=2),
-    ])
+    # Add participants for every non-null slot (supports TBD matches and
+    # half-filled matches where one side is a bye player).
+    if use_teams:
+        if t1_id:
+            db.add(MatchParticipant(match_id=match.match_id, team_id=t1_id, position=1))
+        if t2_id:
+            db.add(MatchParticipant(match_id=match.match_id, team_id=t2_id, position=2))
+    else:
+        if p1_id:
+            db.add(MatchParticipant(match_id=match.match_id, player_id=p1_id, position=1))
+        if p2_id:
+            db.add(MatchParticipant(match_id=match.match_id, player_id=p2_id, position=2))
 
-    engine = get_sport_engine(event.sport_key)
-    if getattr(engine, "has_sets", False):
+    # Create the initial set for set-based sports (TT, Badminton).
+    # Use the same detection as generate_fixtures: check_set_winner presence.
+    if hasattr(engine, "check_set_winner"):
         db.add(MatchSet(match_id=match.match_id, set_number=1))
 
     db.commit()
@@ -553,6 +584,8 @@ def finish_match(
             ls["wickets"] = 0
             ls["balls"]   = 0
             ls["ball_log"] = []
+            if data.super_over_batting_first:
+                ls["super_over_batting_first"] = data.super_over_batting_first
             match.live_state = ls
             db.commit()
             background_tasks.add_task(_push_ws_update, event_id)
@@ -561,6 +594,13 @@ def finish_match(
         # Normal innings end
         if current_set:
             current_set.is_complete = True
+
+        # Explicit winner override (e.g. coin-toss decision after tied super over)
+        if isinstance(data.winner_position, int) and data.winner_position in (1, 2):
+            _finish_match(match, data.winner_position, db)
+            db.commit()
+            background_tasks.add_task(_push_ws_update, event_id)
+            return _serialize_match(_load_match(match_id, db))
 
         all_sets  = sorted(match.sets, key=lambda s: s.set_number)
         completed = [s for s in all_sets if s.is_complete]
