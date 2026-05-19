@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { getMyOrgs, createOrg, createTournament } from "../../api/client";
+import PageLoader from "../../components/shared/PageLoader";
 import CitySelect, { CITY_STATE_MAP } from "../../components/shared/CitySelect";
-import DatePicker from "../../components/shared/DatePicker";
+import VenuePicker from "../../components/shared/VenuePicker";
 
 // ── Sport definitions ─────────────────────────────────────────
 const SPORTS = [
@@ -124,7 +125,6 @@ export default function CreateTournament() {
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState("");
   const [isMultiSport, setIsMultiSport] = useState(false);
-  const [isPublished,  setIsPublished]  = useState(false);
 
   const [events, setEvents] = useState([]);
 
@@ -133,7 +133,9 @@ export default function CreateTournament() {
   const [venue,     setVenue]     = useState("");
   const [city,      setCity]      = useState("");
   const [state,     setState]     = useState("");
-  const [startDate, setStartDate] = useState("");
+  const [venueLat,  setVenueLat]  = useState(null);
+  const [venueLng,  setVenueLng]  = useState(null);
+  const [venueObj,  setVenueObj]  = useState(null);  // full picker value
 
   useEffect(() => {
     getMyOrgs()
@@ -235,6 +237,20 @@ export default function CreateTournament() {
     setState(c ? (CITY_STATE_MAP[c] || "") : "");
   };
 
+  // Called by VenuePicker when user selects a place from OSM results
+  const handleVenueSelect = (v) => {
+    setVenueObj(v);
+    if (!v) {
+      setVenue(""); setCity(""); setState(""); setVenueLat(null); setVenueLng(null);
+      return;
+    }
+    setVenue(v.name || "");
+    if (v.city)  setCity(v.city);
+    if (v.state) setState(v.state);
+    setVenueLat(v.lat ?? null);
+    setVenueLng(v.lng ?? null);
+  };
+
   // ── Create tournament ────────────────────────────────────────
   const handleCreate = async () => {
     if (!activeOrg)     return setError("No organisation found.");
@@ -248,9 +264,10 @@ export default function CreateTournament() {
         venue:          venue.trim() || null,
         city:           city  || null,
         state:          state || null,
-        start_date:     startDate || null,
+        venue_lat:      venueLat  ?? null,
+        venue_lng:      venueLng  ?? null,
         is_multi_sport: isMultiSport,
-        is_published:   isPublished,
+        is_published:   true,
         events: events.map(e => {
           if (isMultiSport) {
             return {
@@ -309,13 +326,7 @@ export default function CreateTournament() {
   const displaySteps = isMultiSport ? STEPS_MULTI : STEPS_SINGLE;
   const displayStep  = isMultiSport ? (MULTI_DISPLAY[step] || 1) : step;
 
-  if (loadingOrgs) {
-    return (
-      <div style={{ minHeight: "100vh", background: c.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ color: c.muted, fontFamily: "var(--font-display)", fontSize: 12, letterSpacing: 2, textTransform: "uppercase" }}>Loading…</div>
-      </div>
-    );
-  }
+  if (loadingOrgs) return <PageLoader />;
 
   return (
     <div style={{ minHeight: "100vh", background: c.bg, fontFamily: "var(--font-body)" }}>
@@ -623,65 +634,26 @@ export default function CreateTournament() {
                     onKeyDown={e => e.key === "Enter" && name.trim() && next()} />
                 </div>
 
+                <div className="field">
+                  <label>Venue</label>
+                  <VenuePicker value={venueObj} onChange={handleVenueSelect} placeholder="Search venue, stadium, ground…" />
+                </div>
+
+                {/* City & State — auto-filled from venue picker, or manual fallback */}
                 <div className="field-row">
-                  <div className="field">
-                    <label>Venue</label>
-                    <input className="input" placeholder="e.g. Main Hall" value={venue} onChange={e => setVenue(e.target.value)} />
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>City</label>
+                    <input className="input" placeholder="e.g. Chennai"
+                      value={city} onChange={e => setCity(e.target.value)} />
                   </div>
-                  <CitySelect city={city} onChange={handleCityChange} />
-                </div>
-
-                {city && (
-                  <div className="field">
+                  <div className="field" style={{ flex: 1 }}>
                     <label>State</label>
-                    <input className="input" value={state} readOnly
-                      style={{ color: c.muted, cursor: "default", background: "var(--elevated)" }} />
-                  </div>
-                )}
-
-                <div className="field">
-                  <DatePicker label="Start Date" value={startDate} onChange={setStartDate} placeholder="Pick tournament start date" />
-                </div>
-
-                <div className="field">
-                  <label>Visibility</label>
-                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                    {[
-                      { value: false, label: "Private", sub: "Accessible via direct link only" },
-                      { value: true,  label: "Public",  sub: "Listed on tournament discovery" },
-                    ].map(opt => (
-                      <div key={String(opt.value)}
-                        style={{ ...selStyle(isPublished === opt.value), flex: 1, padding: "12px 14px", marginBottom: 0, textAlign: "center" }}
-                        onClick={() => setIsPublished(opt.value)}>
-                        <div style={{ marginBottom: 4 }}></div>
-                        <div style={{ fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 800, textTransform: "uppercase", color: isPublished === opt.value ? c.orange : c.ink }}>
-                          {opt.label}
-                        </div>
-                        <div style={{ fontSize: 11, color: c.muted, marginTop: 2 }}>{opt.sub}</div>
-                      </div>
-                    ))}
+                    <input className="input" placeholder="e.g. Tamil Nadu"
+                      value={state} onChange={e => setState(e.target.value)} />
                   </div>
                 </div>
 
-                {/* Event name overrides — single sport only */}
-                {!isMultiSport && events.length > 0 && (
-                  <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${c.border}` }}>
-                    <div style={{ fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: c.muted, marginBottom: 12 }}>
-                      Event Name <span style={{ fontWeight: 400, fontSize: 10, textTransform: "none", letterSpacing: 0 }}>(optional — leave blank for auto-name)</span>
-                    </div>
-                    {events.map((ev, i) => {
-                      const sf      = getSubformat(ev.sport_key, ev.subformat_key);
-                      const autoName = `${sl(ev.sport_key)} ${sf?.label || ""}`.trim();
-                      return (
-                        <div key={`name-${i}`} className="field">
-                          <label>{si(ev.sport_key)} {autoName}</label>
-                          <input className="input" placeholder={autoName}
-                            value={ev.name} onChange={e => updateEvent(i, { name: e.target.value })} />
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+
 
                 <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16 }}>
                   <button className="btn btn-outline" onClick={back}>← Back</button>
@@ -702,10 +674,8 @@ export default function CreateTournament() {
                   ["Organisation", activeOrg?.name],
                   ["Name",         name],
                   ["Type",         isMultiSport ? "Multi-Sport" : "Single Sport"],
-                  ["Visibility",   isPublished ? "Public" : "Private"],
-                  venue     && ["Venue",      venue],
-                  city      && ["City",       `${city}, ${state}`],
-                  startDate && ["Start Date", startDate],
+                  venue     && ["Venue",      venue + (venueLat ? ` 📍` : "")],
+                  city      && ["City",       [city, state].filter(Boolean).join(", ")],
                 ].filter(Boolean).map(([k, v]) => (
                   <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "8px 0", borderBottom: `1px solid ${c.border}` }}>
                     <span style={{ fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: c.muted }}>{k}</span>

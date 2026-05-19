@@ -15,14 +15,17 @@
  */
 import { useState } from "react";
 
-export default function BadmintonScorer({ match, config, onScore, onUndoSet, onWalkover, onClose }) {
-  const [showWalkover, setShowWalkover] = useState(false);
+export default function BadmintonScorer({ match, config, onScore, onUndoSet, onWalkover, onGoLive, onPause, onReset, onClose }) {
+  const [showWalkover,  setShowWalkover]  = useState(false);
+  const [confirmPause,  setConfirmPause]  = useState(false);
+  const [confirmReset,  setConfirmReset]  = useState(false);
 
   const p1 = match.player_1 || {};
   const p2 = match.player_2 || {};
   const sets = (match.sets || []).slice().sort((a, b) => a.set_number - b.set_number);
   const currentSet = sets.find(s => !s.is_complete) || sets[sets.length - 1];
-  const isDone = match.status === "done";
+  const isDone    = match.status === "done";
+  const isPreLive = match.status === "scheduled";
 
   const s1 = currentSet?.score_p1 ?? 0;
   const s2 = currentSet?.score_p2 ?? 0;
@@ -95,28 +98,45 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onW
     <div style={{ position:"fixed", inset:0, zIndex:9999, background:c.bg, display:"flex", flexDirection:"column", overflow:"hidden", fontFamily:"'Space Grotesk',sans-serif" }}>
 
       {/* ── TOP BAR ── */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 20px", background:c.surface, borderBottom:`2px solid ${c.blue}` }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:c.blue, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 16px", background:c.surface, borderBottom:`2px solid ${isPreLive ? "#f59e0b" : c.blue}`, gap:"8px 12px", flexWrap:"wrap" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flex:"1 1 auto", minWidth:0 }}>
+          <span style={{ display:"inline-flex", alignItems:"center", gap:6, background: isPreLive ? "#f59e0b" : c.blue, color:c.bg, fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4, whiteSpace:"nowrap" }}>
             <span style={{ width:7, height:7, borderRadius:"50%", background:c.bg, animation:"pulse 1.5s infinite", display:"inline-block" }}/>
-            {isDone ? "Final" : `Game ${currentSet?.set_number || 1}`}
+            {isDone ? "Final" : isPreLive ? "Ready" : `Game ${currentSet?.set_number || 1}`}
           </span>
-          <span style={{ fontSize:12, color:c.muted, fontWeight:600 }}>
+          <span style={{ fontSize:12, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>
             Games: <strong style={{ color:c.blue }}>{setsWon1}</strong>
             <span style={{ color:c.border, margin:"0 6px" }}>—</span>
             <strong style={{ color:c.blue }}>{setsWon2}</strong>
           </span>
         </div>
-        <div style={{ display:"flex", gap:8 }}>
-          {!isDone && onWalkover && (
-            <button
-              onClick={() => setShowWalkover(true)}
-              style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}
-            >
-              Walkover
-            </button>
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end", flex:"0 0 auto" }}>
+          {confirmPause ? (
+            <>
+              <span style={{ fontSize:11, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>Pause this match?</span>
+              <button onClick={() => setConfirmPause(false)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 10px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Cancel</button>
+              <button onClick={() => { setConfirmPause(false); onPause(); }} style={{ background:"#f59e0b22", color:"#f59e0b", border:"1px solid #f59e0b", borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Pause</button>
+            </>
+          ) : confirmReset ? (
+            <>
+              <span style={{ fontSize:11, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>Reset all scores?</span>
+              <button onClick={() => setConfirmReset(false)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 10px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Cancel</button>
+              <button onClick={() => { setConfirmReset(false); onReset(); }} style={{ background:"#ef444422", color:"#ef4444", border:"1px solid #ef4444", borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Reset</button>
+            </>
+          ) : (
+            <>
+              {!isDone && !isPreLive && onWalkover && (
+                <button onClick={() => setShowWalkover(true)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Walkover</button>
+              )}
+              {!isDone && !isPreLive && onPause && (
+                <button onClick={() => setConfirmPause(true)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Pause</button>
+              )}
+              {!isDone && !isPreLive && onReset && (
+                <button onClick={() => setConfirmReset(true)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Reset</button>
+              )}
+              <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
+            </>
           )}
-          <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
         </div>
       </div>
 
@@ -183,8 +203,29 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onW
           </div>
         )}
 
-        {/* ── POINT BUTTONS ── */}
-        {!isDone && (
+        {/* ── PRE-LIVE: GO LIVE ── */}
+        {isPreLive && (
+          <div style={{ textAlign:"center", padding:"8px 0 16px" }}>
+            <div style={{ fontSize:12, color:c.muted, marginBottom:18, lineHeight:1.5 }}>
+              Match is ready. Press Go Live to begin scoring.
+            </div>
+            <button
+              onClick={onGoLive}
+              style={{
+                width:"100%", padding:"20px 0", borderRadius:12,
+                fontFamily:"'Unbounded',sans-serif", fontSize:15, fontWeight:900,
+                letterSpacing:1, textTransform:"uppercase",
+                background:c.blue, color:c.bg, border:"none",
+                cursor:"pointer", boxShadow:`0 0 32px ${c.blue}44`,
+              }}
+            >
+              ▶ GO LIVE
+            </button>
+          </div>
+        )}
+
+        {/* ── POINT BUTTONS (live only) ── */}
+        {!isDone && !isPreLive && (
           <div style={{ display:"flex", gap:12 }}>
             {[1, 2].map(pos => (
               <div key={pos} style={{ flex:1, display:"flex", flexDirection:"column", gap:6 }}>
@@ -215,7 +256,7 @@ export default function BadmintonScorer({ match, config, onScore, onUndoSet, onW
           </div>
         )}
 
-        {!isDone && sets.length > 0 && (
+        {!isDone && !isPreLive && sets.length > 0 && (
           <button
             onClick={onUndoSet}
             style={{ width:"100%", padding:"11px 0", background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:8, fontSize:12, fontWeight:700, fontFamily:"inherit", cursor:"pointer" }}

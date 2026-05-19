@@ -14,16 +14,19 @@ class Player(Base):
 
     player_id  = Column(Integer, primary_key=True)
     org_id     = Column(Integer, ForeignKey("organizations.org_id", ondelete="SET NULL"), nullable=True)
+    user_id    = Column(Integer, ForeignKey("users.user_id",        ondelete="SET NULL"), nullable=True, index=True)
     name       = Column(String(150), nullable=False)
     age        = Column(Integer,     nullable=True)
     gender     = Column(String(20),  nullable=True)
     phone      = Column(String(30),  nullable=True)
     email      = Column(String(200), nullable=True)
+    location   = Column(String(150), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     seed_level = Column(String(20), nullable=True)  # beginner / intermediate / advanced / pro
 
-    org = relationship("Organization")
+    org  = relationship("Organization")
+    user = relationship("User", foreign_keys=[user_id])
     event_participations = relationship("EventParticipant", back_populates="player",
                                         foreign_keys="EventParticipant.player_id")
 

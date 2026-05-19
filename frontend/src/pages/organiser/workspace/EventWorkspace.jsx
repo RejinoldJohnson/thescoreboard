@@ -4,10 +4,11 @@ import {
   getWorkspace,
   createPlayer, addPlayerToEvent, assignPlayerGroup, removePlayerFromEvent,
   updateParticipantSeed,
-  createGroup, generateFixtures,
+  createGroup, generateFixtures, createMatch, generateGroupMatches,
   updateMatchStatus, updateScore, undoSet, rematchMatch, deleteMatch, walkoverMatch,
-  getMe, clearToken,
+  getMe, clearToken, configureEvent, updateTournament, updateEvent,
 } from "../../../api/client";
+import PageLoader from "../../../components/shared/PageLoader";
 import TTScorer        from "../../../components/scoring/TTScorer";
 import BadmintonScorer from "../../../components/scoring/BadmintonScorer";
 import CricketScorer   from "../../../components/scoring/CricketScorer";
@@ -37,7 +38,7 @@ const createTeamAPI       = (orgId, d) => apiFetch(`/orgs/${orgId}/teams`, { met
 const addTeamToEvent      = (eId, tId) => apiFetch(`/events/${eId}/teams?team_id=${tId}`, { method: "POST" });
 const removeTeamFromEvent = (eId, tId) => apiFetch(`/events/${eId}/teams/${tId}`, { method: "DELETE" });
 const getEventTeams       = (eId)      => apiFetch(`/events/${eId}/teams`);
-const finishMatchAPI      = (mId, wp)  => apiFetch(`/matches/${mId}/finish`, { method: "POST", body: JSON.stringify({ winner_position: wp }) });
+const finishMatchAPI      = (mId, body) => apiFetch(`/matches/${mId}/finish`, { method: "POST", body: JSON.stringify(typeof body === "object" && body !== null && !Array.isArray(body) && "winner_position" in body ? body : { winner_position: body }) });
 
 export default function EventWorkspace() {
   const { tournamentId, eventId } = useParams();
@@ -53,6 +54,12 @@ export default function EventWorkspace() {
   const [thirdPlace,         setThirdPlace]         = useState(false);
   const [numGroups,          setNumGroups]          = useState(4);
   const [qualifiersPerGroup, setQualifiersPerGroup] = useState(2);
+  const [editingOvers,       setEditingOvers]       = useState(false);
+  const [oversVal,           setOversVal]           = useState(null);
+  const [editingTournament,  setEditingTournament]  = useState(false);
+  const [editingEvent,       setEditingEvent]       = useState(false);
+  const [tForm,              setTForm]              = useState(null);
+  const [eForm,              setEForm]              = useState(null);
 
   const flash = (txt) => { setMsg(txt); setTimeout(() => setMsg(""), 3000); };
 
@@ -84,11 +91,7 @@ export default function EventWorkspace() {
     if (ev?.format === "round_robin") loadStandings();
   }, [data, eventId, loadTeams, loadStandings]);
 
-  if (!data) return (
-    <div className="auth-wrap">
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)" }}>Loading…</div>
-    </div>
-  );
+  if (!data) return <PageLoader />;
 
   const { tournament: t, events } = data;
   const currentEvent = events.find(e => e.event_id === parseInt(eventId)) || events[0];
@@ -252,12 +255,100 @@ export default function EventWorkspace() {
     } catch (e) { flash("Error: " + e.message); }
   };
 
+  const handleCreateMatch = async (body) => {
+    try {
+      await createMatch(currentEvent.event_id, body);
+      loadData();
+      flash("Match created!");
+    } catch (e) { flash("Error: " + e.message); }
+  };
+
+  // Creates all first-round matches (with participants) + TBD later-round matches.
+  // `participants` is passed so we can identify which player has the bye (not in any
+  // slot) and pre-seed them into position 1 of the first next-round match.
+  const handleBulkCreateMatches = async (template, slots, participants) => {
+    try {
+      const eId     = currentEvent.event_id;
+      const useTeam = isTeam || isDoubles;
+      const first   = template.rounds.find(r => r.isAssignable);
+
+      // Identify bye participant: the one not assigned to any first-round slot
+      const usedIds = new Set(slots.flatMap(s => [s.p1, s.p2].filter(Boolean).map(String)));
+      const byeParticipant = (template.byeCount > 0 && participants)
+        ? participants.find(p => !usedIds.has(String(p.id)))
+        : null;
+
+      // Round 1: first-round matches with real participants
+      for (const slot of slots) {
+        await createMatch(eId, {
+          stage: first.stage,
+          round: 1,
+          ...(useTeam
+            ? { team1_id:   parseInt(slot.p1), team2_id:   parseInt(slot.p2) }
+            : { player1_id: parseInt(slot.p1), player2_id: parseInt(slot.p2) }
+          ),
+        });
+      }
+
+      // Later rounds: TBD placeholder matches numbered round 2, 3, 4 …
+      // The bye player is pre-seeded into position 1 of the very first next-round
+      // match so that _advance_winner can correctly fill position 2 later.
+      const laterRounds = template.rounds.filter(r => !r.isAssignable);
+      let roundNum  = 2;
+      let byePlaced = false;
+
+      for (const round of laterRounds) {
+        for (let i = 0; i < round.matchCount; i++) {
+          const body = { stage: round.stage, round: roundNum };
+          if (!byePlaced && byeParticipant) {
+            if (useTeam) body.team1_id   = byeParticipant.id;
+            else         body.player1_id = byeParticipant.id;
+            byePlaced = true;
+          }
+          await createMatch(eId, body);
+        }
+        roundNum++;
+      }
+
+      loadData();
+      flash(`Bracket created! ${template.total} match${template.total !== 1 ? "es" : ""}.`);
+    } catch (e) { flash("Error: " + e.message); }
+  };
+
+  // Manually assigns participants to groups, then generates bracket matches
+  const handleManualGroupSetup = async (groupAssignments) => {
+    // groupAssignments = [{ name: "Group A", participants: [id, id, ...] }, ...]
+    try {
+      const eId     = currentEvent.event_id;
+      const useTeam = isTeam || isDoubles;
+
+      for (const group of groupAssignments) {
+        const created = await createGroup(eId, group.name);
+        const gId     = created.group_id;
+        for (const pId of group.participants) {
+          if (useTeam) {
+            await apiFetch(`/events/${eId}/teams?team_id=${pId}&group_id=${gId}`, { method: "POST" });
+          } else {
+            await assignPlayerGroup(eId, pId, gId);
+          }
+        }
+      }
+
+      await generateGroupMatches(eId);
+      loadData();
+      flash("Groups created and matches generated!");
+    } catch (e) { flash("Error: " + e.message); }
+  };
+
   const handleMatchAction = async (matchId, action) => {
     try {
-      if      (action === "start")   { await updateMatchStatus(matchId, { status: "live" }); setActiveMatch(matchId); }
-      else if (action === "score")   setActiveMatch(matchId);
-      else if (action === "rematch") await rematchMatch(matchId);
-      else if (action === "delete")  { if (confirm("Delete this match?")) await deleteMatch(matchId); }
+      if      (action === "start")    setActiveMatch(matchId);          // open scorer — NOT live yet
+      else if (action === "go_live")  await updateMatchStatus(matchId, { status: "live" });
+      else if (action === "pause")    await updateMatchStatus(matchId, { status: "scheduled" });
+      else if (action === "reset")    await rematchMatch(matchId);       // nullify scores, back to scheduled
+      else if (action === "score")    setActiveMatch(matchId);
+      else if (action === "rematch")  await rematchMatch(matchId);
+      else if (action === "delete")   await deleteMatch(matchId);
       loadData();
     } catch (e) { flash("Error: " + e.message); }
   };
@@ -274,13 +365,12 @@ export default function EventWorkspace() {
     loadData();
   };
 
-  const handleFinishMatch = async (matchId, winPos) => {
+  const handleFinishMatch = async (matchId, winPos, extraData = {}) => {
     try {
-      const result = await finishMatchAPI(matchId, winPos);
+      const body = { winner_position: winPos, ...extraData };
+      const result = await finishMatchAPI(matchId, body);
       loadData();
       if (showStandings) loadStandings();
-      // Keep scorer open for cricket innings transitions (match still "live")
-      // and for super over setup. Only close when match is fully done.
       if (result?.status === "done") {
         setActiveMatch(null);
         flash("Match finished!");
@@ -332,53 +422,304 @@ export default function EventWorkspace() {
       <div className="workspace-content" style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 24px" }}>
 
         {/* ══ OVERVIEW ══════════════════════════════════════════ */}
-        {tab === "overview" && (
-          <div>
-            <div className="card" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-                <div style={{ width: 52, height: 52, borderRadius: 10, background: "var(--primary-dim)", border: "1px solid rgba(255,107,53,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900, color: "var(--primary)", flexShrink: 0 }}>
-                  {sm.abbrev}
+        {tab === "overview" && (() => {
+          const fmtDate = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—";
+          const inputStyle = { background: "var(--elevated)", border: "1px solid var(--border-mid)", borderRadius: 6, padding: "7px 10px", fontSize: 13, color: "var(--ink)", width: "100%", outline: "none", fontFamily: "inherit" };
+          const labelStyle = { fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)", fontFamily: "var(--font-display)", marginBottom: 4, display: "block" };
+          const fieldStyle = { marginBottom: 14 };
+
+          const startEditTournament = () => {
+            setTForm({
+              name:                    t.name || "",
+              venue:                   t.venue || "",
+              city:                    t.city || "",
+              state:                   t.state || "",
+              start_date:              t.start_date || "",
+              end_date:                t.end_date || "",
+              registration_start_date: t.registration_start_date || "",
+              registration_end_date:   t.registration_end_date || "",
+            });
+            setEditingTournament(true);
+          };
+
+          const saveTournament = async () => {
+            try {
+              const payload = {};
+              Object.entries(tForm).forEach(([k, v]) => { payload[k] = v || null; });
+              await updateTournament(t.org_id, t.tournament_id, payload);
+              loadData();
+              setEditingTournament(false);
+              flash("Tournament details updated!");
+            } catch (e) { flash("Error: " + e.message); }
+          };
+
+          const startEditEvent = () => {
+            setEForm({
+              name:       currentEvent.name || "",
+              format:     currentEvent.format || "direct_knockout",
+              squad_size: currentEvent.squad_size || 11,
+              overs:      currentEvent.sport_config?.overs ?? 20,
+            });
+            setEditingEvent(true);
+          };
+
+          const saveEvent = async () => {
+            try {
+              if (currentEvent.sport_key === "cricket") {
+                const squadSize = parseInt(eForm.squad_size) || 11;
+                const overs     = parseInt(eForm.overs) || 20;
+                await configureEvent(currentEvent.event_id, {
+                  format:           eForm.format,
+                  participant_type: currentEvent.participant_type,
+                  squad_size:       squadSize,
+                  sport_config:     { ...currentEvent.sport_config, overs, wickets: squadSize - 1 },
+                });
+              } else {
+                await updateEvent(currentEvent.event_id, {
+                  name:   eForm.name   || undefined,
+                  format: eForm.format || undefined,
+                });
+              }
+              loadData();
+              setEditingEvent(false);
+              flash("Event settings updated!");
+            } catch (e) { flash("Error: " + e.message); }
+          };
+
+          return (
+            <div>
+              {/* ── Stats bar ── */}
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+                  <div style={{ width: 52, height: 52, borderRadius: 10, background: "var(--primary-dim)", border: "1px solid rgba(255,107,53,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900, color: "var(--primary)", flexShrink: 0 }}>
+                    {sm.abbrev}
+                  </div>
+                  <div>
+                    <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 900, textTransform: "uppercase", letterSpacing: -0.5, color: "var(--ink)" }}>
+                      {currentEvent.name}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <span>{sm.label}</span>
+                      <span>·</span>
+                      <span>{currentEvent.format.replace(/_/g, " ")}</span>
+                      <span>·</span>
+                      <span className={`pill ${isDoubles ? "pill-gold" : isTeam ? "pill-orange" : "pill-green"}`}>
+                        {isDoubles ? "Doubles Pairs" : isTeam ? "Team Sport" : "Individual"}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 900, textTransform: "uppercase", letterSpacing: -0.5, color: "var(--ink)" }}>
-                    {currentEvent.name}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span>{sm.label}</span>
-                    <span>·</span>
-                    <span>{currentEvent.format.replace(/_/g, " ")}</span>
-                    <span>·</span>
-                    <span className={`pill ${isDoubles ? "pill-gold" : isTeam ? "pill-orange" : "pill-green"}`}>
-                      {isDoubles ? "Doubles Pairs" : isTeam ? "Team Sport" : "Individual"}
-                    </span>
-                  </div>
+                <div className="stats-grid" style={{ marginBottom: 16 }}>
+                  {[
+                    { label: isDoubles ? "Pairs" : isTeam ? "Teams" : "Players", value: currentEvent.player_count },
+                    { label: "Matches", value: currentEvent.match_count },
+                    { label: "Done",    value: `${currentEvent.done_count || 0}/${currentEvent.match_count}` },
+                    { label: "Live",    value: liveCount, color: liveCount > 0 ? "var(--primary)" : undefined },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="stat-card" style={{ margin: 0 }}>
+                      <div className="stat-num" style={color ? { color } : {}}>{value}</div>
+                      <div className="stat-label">{label}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn btn-primary" onClick={() => setTab(pTab)}>
+                    {isDoubles ? "Manage Pairs" : isTeam ? "Manage Teams" : "Add Players"}
+                  </button>
+                  <button className="btn btn-outline" onClick={() => setTab("fixtures")}>Fixtures</button>
+                  {liveCount > 0 && (
+                    <button className="btn btn-danger" onClick={() => setTab("live")}>Score Live</button>
+                  )}
                 </div>
               </div>
-              <div className="stats-grid" style={{ marginBottom: 0 }}>
-                {[
-                  { label: isDoubles ? "Pairs" : isTeam ? "Teams" : "Players", value: currentEvent.player_count },
-                  { label: "Matches", value: currentEvent.match_count },
-                  { label: "Done",    value: `${currentEvent.done_count || 0}/${currentEvent.match_count}` },
-                  { label: "Live",    value: liveCount, color: liveCount > 0 ? "var(--primary)" : undefined },
-                ].map(({ label, value, color }) => (
-                  <div key={label} className="stat-card" style={{ margin: 0 }}>
-                    <div className="stat-num" style={color ? { color } : {}}>{value}</div>
-                    <div className="stat-label">{label}</div>
+
+              {/* ── Tournament Details ── */}
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--primary)" }}>
+                    Tournament Details
                   </div>
-                ))}
+                  {!editingTournament && (
+                    <button className="btn btn-outline btn-sm" onClick={startEditTournament}>Edit</button>
+                  )}
+                </div>
+
+                {!editingTournament ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "12px 24px" }}>
+                    {[
+                      { label: "Tournament Name", value: t.name },
+                      { label: "Venue",           value: t.venue || "—" },
+                      { label: "City",            value: t.city  || "—" },
+                      { label: "State",           value: t.state || "—" },
+                      { label: "Start Date",      value: fmtDate(t.start_date) },
+                      { label: "End Date",        value: fmtDate(t.end_date) },
+                      { label: "Reg. Opens",      value: fmtDate(t.registration_start_date) },
+                      { label: "Reg. Closes",     value: fmtDate(t.registration_end_date) },
+                      { label: "Status",          value: t.status?.charAt(0).toUpperCase() + t.status?.slice(1) },
+                    ].map(({ label, value }) => (
+                      <div key={label}>
+                        <div style={labelStyle}>{label}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px" }}>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Tournament Name</label>
+                        <input style={inputStyle} value={tForm.name} onChange={e => setTForm(f => ({ ...f, name: e.target.value }))} />
+                      </div>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Venue</label>
+                        <input style={inputStyle} value={tForm.venue} onChange={e => setTForm(f => ({ ...f, venue: e.target.value }))} placeholder="e.g. Sports Complex" />
+                      </div>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>City</label>
+                        <input style={inputStyle} value={tForm.city} onChange={e => setTForm(f => ({ ...f, city: e.target.value }))} placeholder="e.g. Mumbai" />
+                      </div>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>State</label>
+                        <input style={inputStyle} value={tForm.state} onChange={e => setTForm(f => ({ ...f, state: e.target.value }))} placeholder="e.g. Maharashtra" />
+                      </div>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Tournament Start Date</label>
+                        <input style={inputStyle} type="date" value={tForm.start_date} onChange={e => setTForm(f => ({ ...f, start_date: e.target.value }))} />
+                      </div>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Tournament End Date</label>
+                        <input style={inputStyle} type="date" value={tForm.end_date} onChange={e => setTForm(f => ({ ...f, end_date: e.target.value }))} />
+                      </div>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Registration Opens</label>
+                        <input style={inputStyle} type="date" value={tForm.registration_start_date} onChange={e => setTForm(f => ({ ...f, registration_start_date: e.target.value }))} />
+                      </div>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Registration Closes</label>
+                        <input style={inputStyle} type="date" value={tForm.registration_end_date} onChange={e => setTForm(f => ({ ...f, registration_end_date: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                      <button className="btn btn-primary btn-sm" onClick={saveTournament}>Save Changes</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => setEditingTournament(false)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Event / Match Settings ── */}
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--primary)" }}>
+                    Match Configuration
+                  </div>
+                  {!editingEvent && (
+                    <button className="btn btn-outline btn-sm" onClick={startEditEvent}>Edit</button>
+                  )}
+                </div>
+
+                {!editingEvent ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: "12px 24px" }}>
+                    <div>
+                      <div style={labelStyle}>Event Name</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{currentEvent.name}</div>
+                    </div>
+                    <div>
+                      <div style={labelStyle}>Tournament Format</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{currentEvent.format?.replace(/_/g, " ")}</div>
+                    </div>
+                    <div>
+                      <div style={labelStyle}>Participant Type</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{isDoubles ? "Doubles Pairs" : isTeam ? "Team" : "Individual"}</div>
+                    </div>
+                    {currentEvent.sport_key === "cricket" && (
+                      <>
+                        <div>
+                          <div style={labelStyle}>Overs per Innings</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+                            {currentEvent.sport_config?.overs ?? 20}
+                            <span style={{ fontSize: 11, color: "var(--muted)", marginLeft: 6 }}>
+                              {(currentEvent.sport_config?.overs ?? 20) === 10 ? "(T10)" : (currentEvent.sport_config?.overs ?? 20) === 20 ? "(T20)" : (currentEvent.sport_config?.overs ?? 20) === 50 ? "(ODI)" : ""}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <div style={labelStyle}>Squad Size</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{currentEvent.squad_size ?? 11} players</div>
+                        </div>
+                        <div>
+                          <div style={labelStyle}>Wickets</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{currentEvent.sport_config?.wickets ?? ((currentEvent.squad_size ?? 11) - 1)}</div>
+                        </div>
+                      </>
+                    )}
+                    {currentEvent.sport_key === "football" && (
+                      <>
+                        <div>
+                          <div style={labelStyle}>Team Format</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{currentEvent.team_size ?? 11}-a-side</div>
+                        </div>
+                        <div>
+                          <div style={labelStyle}>Substitutes</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{currentEvent.substitutes ?? 5}</div>
+                        </div>
+                        <div>
+                          <div style={labelStyle}>Half Duration</div>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{currentEvent.sport_config?.half_duration_minutes ?? 45} mins</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px" }}>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Event Name</label>
+                        <input style={inputStyle} value={eForm.name} onChange={e => setEForm(f => ({ ...f, name: e.target.value }))} />
+                      </div>
+                      <div style={fieldStyle}>
+                        <label style={labelStyle}>Tournament Format</label>
+                        <select style={inputStyle} value={eForm.format} onChange={e => setEForm(f => ({ ...f, format: e.target.value }))}>
+                          <option value="direct_knockout">Direct Knockout</option>
+                          <option value="round_robin">Round Robin</option>
+                          <option value="group_knockout">Group Stage + Knockout</option>
+                        </select>
+                      </div>
+                      {currentEvent.sport_key === "cricket" && (
+                        <>
+                          <div style={fieldStyle}>
+                            <label style={labelStyle}>Squad Size <span style={{ color: "var(--muted)", textTransform: "none", letterSpacing: 0 }}>(wickets = squad − 1)</span></label>
+                            <input style={inputStyle} type="number" min={6} max={15} value={eForm.squad_size}
+                              onChange={e => setEForm(f => ({ ...f, squad_size: parseInt(e.target.value) || 11 }))} />
+                          </div>
+                          <div style={fieldStyle}>
+                            <label style={labelStyle}>Overs per Innings</label>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <button className="btn btn-outline btn-sm" style={{ width: 32, padding: 0 }}
+                                onClick={() => setEForm(f => ({ ...f, overs: Math.max(1, (f.overs || 20) - 1) }))}>−</button>
+                              <span style={{ fontFamily: "var(--font-display)", fontSize: 20, fontWeight: 900, color: "var(--primary)", minWidth: 36, textAlign: "center" }}>
+                                {eForm.overs ?? 20}
+                              </span>
+                              <button className="btn btn-outline btn-sm" style={{ width: 32, padding: 0 }}
+                                onClick={() => setEForm(f => ({ ...f, overs: Math.min(50, (f.overs || 20) + 1) }))}>+</button>
+                              <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                                {eForm.overs === 5 ? "T5" : eForm.overs === 10 ? "T10" : eForm.overs === 20 ? "T20" : eForm.overs === 50 ? "ODI" : "Custom"}
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                      <button className="btn btn-primary btn-sm" onClick={saveEvent}>Save Changes</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => setEditingEvent(false)}>Cancel</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }} className="event-actions">
-              <button className="btn btn-primary" onClick={() => setTab(pTab)}>
-                {isDoubles ? "Manage Pairs" : isTeam ? "Manage Teams" : "Add Players"}
-              </button>
-              <button className="btn btn-outline" onClick={() => setTab("fixtures")}>Fixtures</button>
-              {liveCount > 0 && (
-                <button className="btn btn-danger" onClick={() => setTab("live")}>Score Live</button>
-              )}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ══ PARTICIPANTS ══════════════════════════════════════
             Exactly ONE of these renders based on participant_type.
@@ -438,53 +779,93 @@ export default function EventWorkspace() {
                 onSetConfig={handleSetConfig}
                 sportKey={currentEvent.sport_key}
                 participantType={currentEvent.participant_type}
+                participants={
+                  (isTeam || isDoubles)
+                    ? eventTeams.map(t => ({ id: t.team_id, name: t.name }))
+                    : [
+                        ...(currentEvent.groups || []).flatMap(g => (g.players || []).map(p => ({ id: p.player_id, name: p.name }))),
+                        ...(currentEvent.ungrouped_players || []).map(p => ({ id: p.player_id, name: p.name })),
+                      ]
+                }
+                isTeamEvent={isTeam || isDoubles}
+                onCreateMatch={handleCreateMatch}
+                onManualGroupSetup={handleManualGroupSetup}
+                flash={flash}
               />
             ) : (
-              <>
-                {/* ── Control bar (non-group_knockout) ── */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
-                  <span style={{ fontFamily: "var(--font-display)", fontSize: 13, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
-                    {currentEvent.match_count} {isDoubles ? "pair " : isTeam ? "team " : ""}matches
-                  </span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    {currentEvent.format === "direct_knockout" && (
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}>
-                        <input type="checkbox" checked={thirdPlace} onChange={e => setThirdPlace(e.target.checked)} style={{ cursor: "pointer" }} />
-                        3rd place match
-                      </label>
-                    )}
-                    <button className="btn btn-primary" onClick={handleGenerateFixtures}>Generate Fixtures</button>
-                  </div>
-                </div>
+              (() => {
+                const allParticipants = isTeam || isDoubles
+                  ? eventTeams.map(t => ({ id: t.team_id, name: t.name }))
+                  : [
+                      ...(currentEvent.groups || []).flatMap(g => (g.players || []).map(p => ({ id: p.player_id, name: p.name }))),
+                      ...(currentEvent.ungrouped_players || []).map(p => ({ id: p.player_id, name: p.name })),
+                    ];
 
-                {/* ── Match display ── */}
-                {!currentEvent.matches?.length ? (
-                  <div className="empty">
-                    <div className="empty-icon"></div>
-                    {isTeam || isDoubles
-                      ? `Add ${isDoubles ? "pairs" : "teams"}, then generate fixtures.`
-                      : "Add players, then generate fixtures."}
-                  </div>
-                ) : currentEvent.format === "direct_knockout" ? (
-                  <KnockoutBracket matches={currentEvent.matches} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />
-                ) : (
+                // ── No matches yet → show suggestion + setup panel ──
+                if (!currentEvent.matches?.length) {
+                  return (
+                    <DirectKnockoutSuggestionPanel
+                      participantCount={allParticipants.length}
+                      participants={allParticipants}
+                      isTeam={isTeam || isDoubles}
+                      thirdPlace={thirdPlace}
+                      setThirdPlace={setThirdPlace}
+                      onAutoGenerate={handleGenerateFixtures}
+                      onBulkCreate={handleBulkCreateMatches}
+                      flash={flash}
+                    />
+                  );
+                }
+
+                // ── Matches exist → control bar + add manually + bracket ──
+                return (
                   <>
-                    {currentEvent.groups?.map(g => {
-                      const gm = currentEvent.matches.filter(m => m.group_id === g.group_id);
-                      if (!gm.length) return null;
-                      return (
-                        <div key={g.group_id} style={{ marginBottom: 20 }}>
-                          <div className="section-label">{g.name} · {gm.length} matches</div>
-                          {gm.map(m => <MatchCard key={m.match_id} match={m} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />)}
-                        </div>
-                      );
-                    })}
-                    {currentEvent.matches.filter(m => !m.group_id).map(m => (
-                      <MatchCard key={m.match_id} match={m} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />
-                    ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+                      <span style={{ fontFamily: "var(--font-display)", fontSize: 13, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+                        {currentEvent.match_count} {isDoubles ? "pair " : isTeam ? "team " : ""}matches
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        {currentEvent.format === "direct_knockout" && (
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}>
+                            <input type="checkbox" checked={thirdPlace} onChange={e => setThirdPlace(e.target.checked)} style={{ cursor: "pointer" }} />
+                            3rd place match
+                          </label>
+                        )}
+                        <button className="btn btn-primary" onClick={handleGenerateFixtures}>Regenerate Fixtures</button>
+                      </div>
+                    </div>
+
+                    <ManualMatchCreator
+                      format={currentEvent.format}
+                      groups={currentEvent.groups || []}
+                      participants={allParticipants}
+                      isTeam={isTeam || isDoubles}
+                      onCreate={handleCreateMatch}
+                      flash={flash}
+                    />
+
+                    {currentEvent.format === "direct_knockout" ? (
+                      <KnockoutBracket matches={currentEvent.matches} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />
+                    ) : (
+                      <>
+                        {currentEvent.groups?.map(g => {
+                          const gm = currentEvent.matches.filter(m => m.group_id === g.group_id);
+                          if (!gm.length) return null;
+                          return (
+                            <div key={g.group_id} style={{ marginBottom: 20 }}>
+                              <div className="section-label">{g.name} · {gm.length} matches</div>
+                              {gm.map(m => <MatchCard key={m.match_id} match={m} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />)}
+                            </div>
+                          );
+                        })}
+                        {currentEvent.matches.filter(m => !m.group_id).map(m => (
+                          <MatchCard key={m.match_id} match={m} onAction={handleMatchAction} onSetConfig={handleSetConfig} sportKey={currentEvent.sport_key} />
+                        ))}
+                      </>
+                    )}
                   </>
-                )}
-              </>
+                );
+              })()
             )}
           </div>
         )}
@@ -566,6 +947,9 @@ export default function EventWorkspace() {
           onScore={(s1, s2, srv) => handleScore(activeMatch, s1, s2, srv)}
           onUndoSet={() => { undoSet(activeMatch).then(loadData); }}
           onWalkover={(winPos) => handleWalkover(activeMatch, winPos)}
+          onGoLive={() => handleMatchAction(activeMatch, "go_live")}
+          onPause={() => handleMatchAction(activeMatch, "pause")}
+          onReset={() => handleMatchAction(activeMatch, "reset")}
           onClose={() => { setActiveMatch(null); loadData(); loadStandings(); }} />
       )}
       {activeMatch && activeMatchData && currentEvent.sport_key === "badminton" && (
@@ -573,12 +957,18 @@ export default function EventWorkspace() {
           onScore={(s1, s2, srv) => handleScore(activeMatch, s1, s2, srv)}
           onUndoSet={() => { undoSet(activeMatch).then(loadData); }}
           onWalkover={(winPos) => handleWalkover(activeMatch, winPos)}
+          onGoLive={() => handleMatchAction(activeMatch, "go_live")}
+          onPause={() => handleMatchAction(activeMatch, "pause")}
+          onReset={() => handleMatchAction(activeMatch, "reset")}
           onClose={() => { setActiveMatch(null); loadData(); }} />
       )}
       {activeMatch && activeMatchData && currentEvent.sport_key === "cricket" && (
         <CricketScorer match={activeMatchData} config={currentEvent.sport_config || {}}
           onScore={(s1, s2, extra) => updateScore(activeMatch, { score_p1: s1, score_p2: s2, ...extra }).then(loadData)}
-          onFinish={(wp) => handleFinishMatch(activeMatch, wp)}
+          onFinish={(wp, extra) => handleFinishMatch(activeMatch, wp, extra)}
+          onGoLive={() => handleMatchAction(activeMatch, "go_live")}
+          onPause={() => handleMatchAction(activeMatch, "pause")}
+          onReset={() => handleMatchAction(activeMatch, "reset")}
           onClose={() => { setActiveMatch(null); loadData(); }} />
       )}
       {activeMatch && activeMatchData && currentEvent.sport_key === "football" && (
@@ -586,8 +976,607 @@ export default function EventWorkspace() {
           onScore={(s1, s2, extra) => updateScore(activeMatch, { score_p1: s1, score_p2: s2, ...extra }).then(loadData)}
           onFinish={(wp) => handleFinishMatch(activeMatch, wp)}
           onWalkover={(winPos) => handleWalkover(activeMatch, winPos)}
+          onGoLive={() => handleMatchAction(activeMatch, "go_live")}
+          onPause={() => handleMatchAction(activeMatch, "pause")}
+          onReset={() => handleMatchAction(activeMatch, "reset")}
           onClose={() => { setActiveMatch(null); loadData(); }} />
       )}
+    </div>
+  );
+}
+
+// ── Bracket template calculator ──────────────────────────────
+// Mirrors the backend build_bracket algorithm to show bracket structure.
+// Returns { rounds, byeCount, total }
+// rounds = [{ stage, label, matchCount, isAssignable, byeCount }]
+function getBracketTemplate(n, thirdPlace = false) {
+  if (n < 2) return null;
+  const bracketSize = Math.pow(2, Math.ceil(Math.log2(Math.max(n, 2))));
+  const halfBracket = bracketSize / 2;
+  const prelimCount = n - halfBracket;     // first-round real matches
+  const byeCount    = halfBracket - prelimCount;
+
+  const STAGE_FOR_COUNT = (count) => {
+    if (count <= 2)  return { stage: "final",       label: "Final"           };
+    if (count <= 4)  return { stage: "semi",         label: "Semi Finals"     };
+    if (count <= 8)  return { stage: "quarter",      label: "Quarter Finals"  };
+    if (count <= 16) return { stage: "round_of_16",  label: "Round of 16"     };
+    if (count <= 32) return { stage: "round_of_32",  label: "Round of 32"     };
+    return { stage: "preliminary", label: "First Round" };
+  };
+
+  const r1 = byeCount > 0
+    ? { stage: "preliminary", label: "Preliminary Round" }
+    : STAGE_FOR_COUNT(n);
+
+  const rounds = [{ ...r1, matchCount: prelimCount, isAssignable: true, byeCount }];
+
+  // Subsequent TBD rounds (advancing players = halfBracket)
+  let advancing = halfBracket;
+  while (advancing > 1) {
+    const info = STAGE_FOR_COUNT(advancing);
+    rounds.push({ ...info, matchCount: advancing / 2, isAssignable: false, byeCount: 0 });
+    advancing = advancing / 2;
+  }
+
+  if (thirdPlace) {
+    rounds.push({ stage: "third_place", label: "3rd Place Match", matchCount: 1, isAssignable: false, byeCount: 0 });
+  }
+
+  return { rounds, byeCount, total: rounds.reduce((s, r) => s + r.matchCount, 0) };
+}
+
+// ── DirectKnockoutSuggestionPanel ────────────────────────────
+// Shown when no fixtures exist yet for a direct_knockout event.
+// Two modes: suggestion overview, or manual slot assignment.
+function DirectKnockoutSuggestionPanel({
+  participantCount, participants, isTeam, thirdPlace, setThirdPlace,
+  onAutoGenerate, onBulkCreate, flash,
+}) {
+  const [mode,  setMode]  = useState("suggestion"); // "suggestion" | "manual"
+  const n       = participantCount;
+  const template = getBracketTemplate(n, thirdPlace);
+  const unit    = isTeam ? "team" : "player";
+  const Unit    = isTeam ? "Team" : "Player";
+
+  const cardStyle  = { marginBottom: 16 };
+  const labelStyle = { fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)", display: "block", marginBottom: 4 };
+
+  // ── Suggestion overview ───────────────────────────────────
+  if (mode === "suggestion") {
+    return (
+      <div className="card" style={cardStyle}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18, flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 900, color: "var(--ink)", letterSpacing: -0.3 }}>
+              🏆 Tournament Setup
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+              {n} {unit}{n !== 1 ? "s" : ""} · Direct Knockout
+            </div>
+          </div>
+          {/* 3rd place toggle */}
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--muted)", cursor: "pointer" }}>
+            <input type="checkbox" checked={thirdPlace} onChange={e => setThirdPlace(e.target.checked)} style={{ cursor: "pointer" }} />
+            3rd place match
+          </label>
+        </div>
+
+        {n < 2 ? (
+          <div style={{ fontSize: 13, color: "var(--muted)", padding: "12px 0" }}>
+            Add at least 2 {unit}s to set up the bracket.
+          </div>
+        ) : (
+          <>
+            {/* Bracket flow */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={labelStyle}>Recommended Bracket — {template.total} matches total</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 0, flexWrap: "wrap", marginTop: 6 }}>
+                {template.rounds.map((r, i) => (
+                  <div key={r.stage} style={{ display: "flex", alignItems: "center" }}>
+                    {i > 0 && <span style={{ color: "var(--muted)", fontSize: 16, padding: "0 8px" }}>→</span>}
+                    <div style={{
+                      background: r.isAssignable ? "var(--primary-dim)" : "var(--surface)",
+                      border: `1px solid ${r.isAssignable ? "rgba(255,107,53,0.35)" : "var(--border)"}`,
+                      borderRadius: 8, padding: "8px 12px", textAlign: "center", minWidth: 90,
+                    }}>
+                      <div style={{ fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 800, color: r.isAssignable ? "var(--primary)" : "var(--ink)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                        {r.label}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+                        {r.matchCount} match{r.matchCount !== 1 ? "es" : ""}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {template.byeCount > 0 && (
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 10, padding: "6px 10px", background: "var(--elevated)", borderRadius: 6, display: "inline-block" }}>
+                  ℹ {template.byeCount} {unit}{template.byeCount !== 1 ? "s" : ""} will get a bye directly to the next round
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={onAutoGenerate} style={{ gap: 6 }}>
+                ⚡ Generate Automatically
+              </button>
+              <button className="btn btn-outline" onClick={() => setMode("manual")}>
+                🎯 Set Up Manually
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── Manual slot assignment ────────────────────────────────
+  return (
+    <DirectKnockoutManualSetup
+      template={template}
+      participants={participants}
+      isTeam={isTeam}
+      onBulkCreate={onBulkCreate}
+      onBack={() => setMode("suggestion")}
+      flash={flash}
+    />
+  );
+}
+
+// ── DirectKnockoutManualSetup ─────────────────────────────────
+// Shows slot-by-slot participant assignment for the first round.
+function DirectKnockoutManualSetup({ template, participants, isTeam, onBulkCreate, onBack, flash }) {
+  const first      = template?.rounds?.find(r => r.isAssignable);
+  const slotCount  = first?.matchCount || 0;
+  const [slots, setSlots] = useState(() => Array.from({ length: slotCount }, () => ({ p1: "", p2: "" })));
+  const [busy, setBusy]   = useState(false);
+
+  const unit  = isTeam ? "Team" : "Player";
+  const iStyle = {
+    background: "var(--elevated)", border: "1px solid var(--border-mid)",
+    borderRadius: 6, padding: "7px 10px", fontSize: 13,
+    color: "var(--ink)", width: "100%", outline: "none", fontFamily: "inherit",
+  };
+  const lStyle = { fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)", display: "block", marginBottom: 4 };
+
+  // IDs that are already picked in some slot
+  const usedSet = new Set(slots.flatMap(s => [s.p1, s.p2].filter(Boolean)));
+
+  const updateSlot = (idx, field, val) =>
+    setSlots(prev => prev.map((s, i) => i === idx ? { ...s, [field]: val } : s));
+
+  const autoFillAll = () => {
+    const shuffled = [...participants].sort(() => Math.random() - 0.5);
+    setSlots(Array.from({ length: slotCount }, (_, i) => ({
+      p1: shuffled[i * 2]?.id?.toString()       || "",
+      p2: shuffled[i * 2 + 1]?.id?.toString()   || "",
+    })));
+  };
+
+  const handleCreate = async () => {
+    const incomplete = slots.some(s => !s.p1 || !s.p2);
+    if (incomplete) return flash("Fill in all match slots before creating.");
+    setBusy(true);
+    // Pass participants so handleBulkCreateMatches can identify the bye player
+    try { await onBulkCreate(template, slots, participants); }
+    finally { setBusy(false); }
+  };
+
+  const laterRounds = template.rounds.filter(r => !r.isAssignable);
+
+  return (
+    <div className="card" style={{ marginBottom: 16, border: "1px solid rgba(255,107,53,0.25)" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 900, color: "var(--ink)" }}>
+            Manual Setup — {first?.label}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+            Assign participants for {slotCount} first-round match{slotCount !== 1 ? "es" : ""}.
+            {laterRounds.length > 0 && (
+              <span> {laterRounds.map(r => r.label).join(" → ")} will be created as TBD.</span>
+            )}
+          </div>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={onBack}>← Back</button>
+      </div>
+
+      {template.byeCount > 0 && (
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 14, padding: "6px 10px", background: "var(--elevated)", borderRadius: 6 }}>
+          ℹ {template.byeCount} participant{template.byeCount !== 1 ? "s" : ""} will automatically get a bye to the next round.
+        </div>
+      )}
+
+      {/* Match slots */}
+      <div style={{ marginBottom: 14 }}>
+        {slots.map((slot, idx) => (
+          <div key={idx} style={{ marginBottom: 12, padding: "12px 0", borderBottom: idx < slots.length - 1 ? "1px solid var(--border)" : "none" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--muted)", marginBottom: 8 }}>
+              Match {idx + 1}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 36px 1fr", gap: 8, alignItems: "end" }}>
+              <div>
+                <label style={lStyle}>{unit} 1</label>
+                <select style={iStyle} value={slot.p1} onChange={e => updateSlot(idx, "p1", e.target.value)}>
+                  <option value="">— Select —</option>
+                  {participants
+                    .filter(p => String(p.id) === slot.p1 || !usedSet.has(String(p.id)))
+                    .filter(p => String(p.id) !== slot.p2)
+                    .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div style={{ textAlign: "center", paddingBottom: 8, fontWeight: 900, color: "var(--muted)", fontSize: 11 }}>vs</div>
+              <div>
+                <label style={lStyle}>{unit} 2</label>
+                <select style={iStyle} value={slot.p2} onChange={e => updateSlot(idx, "p2", e.target.value)}>
+                  <option value="">— Select —</option>
+                  {participants
+                    .filter(p => String(p.id) === slot.p2 || !usedSet.has(String(p.id)))
+                    .filter(p => String(p.id) !== slot.p1)
+                    .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="btn btn-outline" onClick={autoFillAll} style={{ fontSize: 12 }}>
+          🎲 Auto-fill All
+        </button>
+        <button className="btn btn-primary" onClick={handleCreate} disabled={busy || slots.some(s => !s.p1 || !s.p2)}>
+          {busy ? "Creating…" : `✓ Create All ${template.total} Matches`}
+        </button>
+        <button className="btn btn-outline btn-sm" onClick={onBack}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ── GroupKnockoutSuggestionPanel ──────────────────────────────
+// Shown when no groups exist yet for a group_knockout event.
+// Suggestion mode shows recommended group count + two action buttons.
+// Manual mode shows group-assignment slots.
+function GroupKnockoutSuggestionPanel({
+  participantCount, participants, isTeam, numGroups, setNumGroups,
+  unitLabel, UnitLabel, onAutoGenerate, onManualSetup, flash,
+}) {
+  const [mode, setMode] = useState("suggestion"); // "suggestion" | "manual"
+  const n = participantCount;
+
+  // Recommend ≈ 4 participants per group
+  const recommended = Math.max(2, Math.min(Math.floor(n / 4), 8));
+  const perGroup    = numGroups > 0 ? Math.ceil(n / numGroups) : 0;
+
+  const iStyle = { background: "var(--elevated)", border: "1px solid var(--border-mid)", borderRadius: 6, padding: "7px 10px", fontSize: 13, color: "var(--ink)", width: "100%", outline: "none", fontFamily: "inherit" };
+  const lStyle = { fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)", display: "block", marginBottom: 4 };
+
+  // ── Suggestion overview ───────────────────────────────────
+  if (mode === "suggestion") {
+    return (
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 900, color: "var(--ink)", letterSpacing: -0.3 }}>
+            🏆 Tournament Setup
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
+            {n} {unitLabel} · Group Stage + Knockout
+          </div>
+        </div>
+
+        {n < 4 ? (
+          <div style={{ fontSize: 13, color: "var(--muted)", padding: "12px 0" }}>
+            Add at least 4 {unitLabel} to set up groups.
+          </div>
+        ) : (
+          <>
+            {/* Structure summary */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)", marginBottom: 10 }}>
+                Recommended Structure
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+                {[
+                  { icon: "👥", label: "Groups", value: `${recommended} groups` },
+                  { icon: "📋", label: "Per Group", value: `~${Math.ceil(n / recommended)} ${unitLabel}` },
+                  { icon: "🏅", label: "Format", value: "Single-elim bracket" },
+                  { icon: "🥇", label: "Advance", value: "Group winners → Championship" },
+                ].map(({ icon, label, value }) => (
+                  <div key={label} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", minWidth: 120 }}>
+                    <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 2 }}>{icon} {label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Groups stepper */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 12, color: "var(--muted)" }}>Number of groups:</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button className="btn btn-outline btn-sm" style={{ width: 28, padding: 0 }}
+                    onClick={() => setNumGroups(g => Math.max(2, g - 1))}>−</button>
+                  <span style={{ fontFamily: "var(--font-display)", fontSize: 18, fontWeight: 900, color: "var(--primary)", minWidth: 28, textAlign: "center" }}>{numGroups}</span>
+                  <button className="btn btn-outline btn-sm" style={{ width: 28, padding: 0 }}
+                    onClick={() => setNumGroups(g => Math.min(16, g + 1))}>+</button>
+                </div>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>≈ {perGroup} {unitLabel} per group</span>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button className="btn btn-primary" onClick={onAutoGenerate}>⚡ Generate Automatically</button>
+              {onManualSetup && (
+                <button className="btn btn-outline" onClick={() => setMode("manual")}>🎯 Assign Groups Manually</button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ── Manual group assignment ───────────────────────────────
+  return (
+    <GroupManualAssignment
+      numGroups={numGroups}
+      participants={participants}
+      isTeam={isTeam}
+      unitLabel={unitLabel}
+      UnitLabel={UnitLabel}
+      onSetup={onManualSetup}
+      onBack={() => setMode("suggestion")}
+      flash={flash}
+    />
+  );
+}
+
+// ── GroupManualAssignment ─────────────────────────────────────
+// Shows group boxes with participant assignment dropdowns.
+function GroupManualAssignment({ numGroups, participants, isTeam, unitLabel, UnitLabel, onSetup, onBack, flash }) {
+  const perGroup = Math.ceil(participants.length / numGroups);
+  const groupLabels = Array.from({ length: numGroups }, (_, i) => String.fromCharCode(65 + i)); // A, B, C, …
+
+  // groupSlots[groupIdx][slotIdx] = participantId string or ""
+  const [slots, setSlots] = useState(() =>
+    Array.from({ length: numGroups }, () => Array.from({ length: perGroup }, () => ""))
+  );
+  const [busy, setBusy] = useState(false);
+
+  const iStyle = { background: "var(--elevated)", border: "1px solid var(--border-mid)", borderRadius: 6, padding: "6px 8px", fontSize: 12, color: "var(--ink)", width: "100%", outline: "none", fontFamily: "inherit" };
+
+  // All currently assigned participant IDs
+  const usedSet = new Set(slots.flat().filter(Boolean));
+
+  const updateSlot = (gi, si, val) =>
+    setSlots(prev => prev.map((g, i) => i === gi ? g.map((v, j) => j === si ? val : v) : g));
+
+  const autoDistribute = () => {
+    const shuffled = [...participants].sort(() => Math.random() - 0.5);
+    const newSlots = Array.from({ length: numGroups }, () => Array(perGroup).fill(""));
+    shuffled.forEach((p, idx) => {
+      const gi = idx % numGroups;
+      const si = Math.floor(idx / numGroups);
+      if (si < perGroup) newSlots[gi][si] = String(p.id);
+    });
+    setSlots(newSlots);
+  };
+
+  const handleCreate = async () => {
+    // Validate: every participant assigned exactly once
+    const allAssigned = slots.flat().filter(Boolean);
+    const unique = new Set(allAssigned);
+    if (unique.size < participants.length) {
+      return flash(`Assign all ${participants.length} ${unitLabel} to groups.`);
+    }
+
+    const groupAssignments = slots.map((g, i) => ({
+      name: `Group ${groupLabels[i]}`,
+      participants: g.filter(Boolean).map(Number),
+    }));
+
+    setBusy(true);
+    try { await onSetup(groupAssignments); }
+    finally { setBusy(false); }
+  };
+
+  const allFilled = slots.flat().filter(Boolean).length === participants.length;
+
+  return (
+    <div className="card" style={{ marginBottom: 16, border: "1px solid rgba(255,107,53,0.25)" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 900, color: "var(--ink)" }}>
+            Assign {UnitLabel} to Groups
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
+            {numGroups} groups · ~{perGroup} {unitLabel} each
+          </div>
+        </div>
+        <button className="btn btn-outline btn-sm" onClick={onBack}>← Back</button>
+      </div>
+
+      {/* Group grid */}
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(numGroups, 4)}, 1fr)`, gap: 12, marginBottom: 16, overflowX: "auto" }}>
+        {slots.map((group, gi) => (
+          <div key={gi} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 10px 12px" }}>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--primary)", marginBottom: 8 }}>
+              Group {groupLabels[gi]}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {group.map((val, si) => (
+                <select key={si} style={iStyle} value={val} onChange={e => updateSlot(gi, si, e.target.value)}>
+                  <option value="">— {UnitLabel} {si + 1} —</option>
+                  {participants
+                    .filter(p => String(p.id) === val || !usedSet.has(String(p.id)))
+                    .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Unassigned indicator */}
+      {!allFilled && (
+        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 12, padding: "6px 10px", background: "var(--elevated)", borderRadius: 6 }}>
+          {participants.length - slots.flat().filter(Boolean).length} {unitLabel} unassigned
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn btn-outline" onClick={autoDistribute} style={{ fontSize: 12 }}>🎲 Auto-distribute</button>
+        <button className="btn btn-primary" onClick={handleCreate} disabled={busy || !allFilled}>
+          {busy ? "Creating…" : "✓ Create Groups & Matches"}
+        </button>
+        <button className="btn btn-outline btn-sm" onClick={onBack}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ── ManualMatchCreator ───────────────────────────────────────
+// Collapsible form allowing organisers to create individual matches by hand.
+// Works for both direct_knockout and group_knockout formats.
+function ManualMatchCreator({ format, groups = [], participants = [], isTeam, onCreate, flash }) {
+  const [open,    setOpen]    = useState(false);
+  const [stage,   setStage]   = useState(format === "group_knockout" ? "group" : "semi");
+  const [groupId, setGroupId] = useState("");
+  const [p1,      setP1]      = useState("");
+  const [p2,      setP2]      = useState("");
+  const [busy,    setBusy]    = useState(false);
+
+  const isGroupKnockout = format === "group_knockout";
+  const isGroupStage    = isGroupKnockout && stage === "group";
+
+  const stageOptions = isGroupKnockout
+    ? [
+        { value: "group",       label: "Group Stage" },
+        { value: "quarter",     label: "Quarter Final" },
+        { value: "semi",        label: "Semi Final" },
+        { value: "final",       label: "Final" },
+        { value: "third_place", label: "3rd Place Match" },
+      ]
+    : [
+        { value: "preliminary", label: "Preliminary" },
+        { value: "quarter",     label: "Quarter Final" },
+        { value: "semi",        label: "Semi Final" },
+        { value: "final",       label: "Final" },
+        { value: "third_place", label: "3rd Place Match" },
+      ];
+
+  const handleStageChange = (val) => { setStage(val); setGroupId(""); setP1(""); setP2(""); };
+
+  const handleCreate = async () => {
+    if (!p1 || !p2) return flash("Select both participants.");
+    if (p1 === p2) return flash("Cannot match a participant against themselves.");
+    setBusy(true);
+    try {
+      const body = {
+        stage:    isGroupStage ? "group" : stage,
+        group_id: isGroupStage && groupId ? parseInt(groupId) : null,
+        round:    1,
+        ...(isTeam
+          ? { team1_id: parseInt(p1), team2_id: parseInt(p2) }
+          : { player1_id: parseInt(p1), player2_id: parseInt(p2) }
+        ),
+      };
+      await onCreate(body);
+      setP1(""); setP2(""); setGroupId("");
+      setOpen(false);
+    } finally { setBusy(false); }
+  };
+
+  const iStyle = {
+    background: "var(--elevated)", border: "1px solid var(--border-mid)",
+    borderRadius: 6, padding: "7px 10px", fontSize: 13,
+    color: "var(--ink)", width: "100%", outline: "none", fontFamily: "inherit",
+  };
+  const lStyle = {
+    fontSize: 10, fontWeight: 800, textTransform: "uppercase",
+    letterSpacing: 2, color: "var(--muted)", display: "block", marginBottom: 4,
+  };
+
+  if (!open) {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <button className="btn btn-outline" onClick={() => setOpen(true)} style={{ fontSize: 12 }}>
+          ＋ Add Match Manually
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16, border: "1px solid rgba(255,107,53,0.25)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <span style={{ fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--primary)" }}>
+          Add Match Manually
+        </span>
+        <button className="btn btn-outline btn-sm" onClick={() => setOpen(false)}>✕ Close</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: isGroupStage && groups.length ? "1fr 1fr" : "1fr", gap: "0 20px" }}>
+        {/* Stage */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={lStyle}>Stage</label>
+          <select style={iStyle} value={stage} onChange={e => handleStageChange(e.target.value)}>
+            {stageOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+
+        {/* Group selector — only for group stage in group_knockout */}
+        {isGroupStage && groups.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <label style={lStyle}>Group (optional)</label>
+            <select style={iStyle} value={groupId} onChange={e => setGroupId(e.target.value)}>
+              <option value="">— No group —</option>
+              {groups.map(g => <option key={g.group_id} value={g.group_id}>{g.name}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {/* Participant selectors */}
+      {participants.length === 0 ? (
+        <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+          No {isTeam ? "teams" : "players"} added yet. Add participants first.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 28px 1fr", gap: 8, alignItems: "end", marginBottom: 14 }}>
+          <div>
+            <label style={lStyle}>{isTeam ? "Team" : "Player"} 1</label>
+            <select style={iStyle} value={p1} onChange={e => setP1(e.target.value)}>
+              <option value="">— Select —</option>
+              {participants.filter(p => String(p.id) !== p2).map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ textAlign: "center", paddingBottom: 8, fontWeight: 900, color: "var(--muted)", fontSize: 12 }}>vs</div>
+          <div>
+            <label style={lStyle}>{isTeam ? "Team" : "Player"} 2</label>
+            <select style={iStyle} value={p2} onChange={e => setP2(e.target.value)}>
+              <option value="">— Select —</option>
+              {participants.filter(p => String(p.id) !== p1).map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={busy || !p1 || !p2}>
+          {busy ? "Creating…" : "Create Match"}
+        </button>
+        <button className="btn btn-outline btn-sm" onClick={() => setOpen(false)}>Cancel</button>
+      </div>
     </div>
   );
 }
@@ -600,6 +1589,7 @@ function GroupKnockoutFixtures({
   event, numGroups, setNumGroups, qualifiersPerGroup, setQualifiersPerGroup,
   thirdPlace, setThirdPlace, onGenerateGroups, onGenerateKnockout,
   onAction, onSetConfig, sportKey, participantType,
+  participants = [], isTeamEvent = false, onCreateMatch, onManualGroupSetup, flash,
 }) {
   const allMatches      = event.matches || [];
   const groupMatches    = allMatches.filter(m => m.group_id);
@@ -631,31 +1621,21 @@ function GroupKnockoutFixtures({
     </div>
   );
 
-  // ── Step 1: no groups yet ─────────────────────────────────
+  // ── Step 1: no groups yet → show suggestion panel ────────
   if (!hasGroups) {
     return (
-      <div>
-        <div className="card" style={{ marginBottom: 20, padding: 20 }}>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1, color: "var(--primary)", marginBottom: 4 }}>
-            Step 1 — Set up Groups
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>
-            {UnitLabel} are divided randomly into groups. Each group plays a single-elimination bracket (with byes if needed). Group winner and runner-up advance to the championship bracket.
-          </div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <NumInput label="Number of groups" value={numGroups} setter={setNumGroups} min={2} max={16} />
-              <span style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                Min 2 · Standard 4
-              </span>
-            </div>
-            <button className="btn btn-primary" style={{ height: 34 }} onClick={onGenerateGroups}>
-              Generate Groups
-            </button>
-          </div>
-        </div>
-        <div className="empty"><div className="empty-icon"></div>Add {unitLabel} first, then generate groups.</div>
-      </div>
+      <GroupKnockoutSuggestionPanel
+        participantCount={participants.length}
+        participants={participants}
+        isTeam={isTeamEvent}
+        numGroups={numGroups}
+        setNumGroups={setNumGroups}
+        unitLabel={unitLabel}
+        UnitLabel={UnitLabel}
+        onAutoGenerate={onGenerateGroups}
+        onManualSetup={onManualGroupSetup}
+        flash={flash || (() => {})}
+      />
     );
   }
 
@@ -712,6 +1692,18 @@ function GroupKnockoutFixtures({
           </div>
         )}
       </div>
+
+      {/* Manual match creator */}
+      {onCreateMatch && (
+        <ManualMatchCreator
+          format="group_knockout"
+          groups={event.groups || []}
+          participants={participants}
+          isTeam={isTeamEvent}
+          onCreate={onCreateMatch}
+          flash={flash || (() => {})}
+        />
+      )}
 
       {/* Group brackets — one KnockoutBracket per group */}
       {event.groups?.map(g => {
@@ -883,6 +1875,7 @@ function defaultSetsToWin(match) {
 }
 
 function BracketCard({ match: m, onAction, onSetConfig, sportKey, isFinal }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const isLive     = m.status === "live";
   const isDone     = m.status === "done";
   const p1Won      = m.player_1?.is_winner;
@@ -964,32 +1957,66 @@ function BracketCard({ match: m, onAction, onSetConfig, sportKey, isFinal }) {
 
       {/* Action footer */}
       <div style={{ padding: "4px 6px", borderTop: "1px solid var(--border)" }}>
-        {/* Sets picker — own row */}
-        {m.status === "scheduled" && isSetBased && (
-          <div style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 4 }}>
-            <span style={{ fontSize: 8, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginRight: 2 }}>Sets</span>
-            {[1, 2, 3].map(v => (
-              <button key={v}
-                className={`btn btn-sm ${curSets === v ? "btn-danger" : "btn-outline"}`}
-                style={{ fontSize: 9, padding: "1px 6px", minWidth: 22, flex: 1 }}
-                onClick={() => onSetConfig(m.match_id, v)}>
-                {v * 2 - 1}
+        {/* ── Delete confirmation strip ── */}
+        {confirmDelete ? (
+          <div style={{ padding: "6px 4px" }}>
+            <div style={{ fontSize: 9, color: "var(--ink)", fontWeight: 700, marginBottom: 6, textAlign: "center" }}>
+              Delete this match?
+            </div>
+            <div style={{ display: "flex", gap: 4 }}>
+              <button
+                className="btn btn-sm btn-outline"
+                style={{ flex: 1, fontSize: 9, padding: "4px 0", color: "var(--muted)" }}
+                onClick={() => setConfirmDelete(false)}>
+                Cancel
               </button>
-            ))}
+              <button
+                className="btn btn-sm"
+                style={{ flex: 1, fontSize: 9, padding: "4px 0", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}
+                onClick={() => { setConfirmDelete(false); onAction(m.match_id, "delete"); }}>
+                Delete
+              </button>
+            </div>
           </div>
-        )}
-        {/* Action button — full width */}
-        {m.status === "scheduled" && (
-          <button className="btn btn-sm btn-danger" style={{ fontSize: 10, padding: "4px 0", width: "100%" }}
-            onClick={() => onAction(m.match_id, "start")}>▶ Start</button>
-        )}
-        {isLive && (
-          <button className="btn btn-sm btn-danger" style={{ fontSize: 10, padding: "4px 0", width: "100%" }}
-            onClick={() => onAction(m.match_id, "score")}>Score</button>
-        )}
-        {isDone && (
-          <button className="btn btn-sm btn-outline" style={{ fontSize: 10, padding: "4px 0", width: "100%" }}
-            onClick={() => onAction(m.match_id, "rematch")}>Rematch</button>
+        ) : (
+          <>
+            {/* Sets picker — own row */}
+            {m.status === "scheduled" && isSetBased && (
+              <div style={{ display: "flex", alignItems: "center", gap: 2, marginBottom: 4 }}>
+                <span style={{ fontSize: 8, color: "var(--muted)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, marginRight: 2 }}>Sets</span>
+                {[1, 2, 3].map(v => (
+                  <button key={v}
+                    className={`btn btn-sm ${curSets === v ? "btn-danger" : "btn-outline"}`}
+                    style={{ fontSize: 9, padding: "1px 6px", minWidth: 22, flex: 1 }}
+                    onClick={() => onSetConfig(m.match_id, v)}>
+                    {v * 2 - 1}
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* Primary action — full width */}
+            {m.status === "scheduled" && (
+              <button className="btn btn-sm btn-danger" style={{ fontSize: 10, padding: "4px 0", width: "100%" }}
+                onClick={() => onAction(m.match_id, "start")}>▶ Start</button>
+            )}
+            {isLive && (
+              <button className="btn btn-sm btn-danger" style={{ fontSize: 10, padding: "4px 0", width: "100%" }}
+                onClick={() => onAction(m.match_id, "score")}>Score</button>
+            )}
+            {isDone && (
+              <button className="btn btn-sm btn-outline" style={{ fontSize: 10, padding: "4px 0", width: "100%" }}
+                onClick={() => onAction(m.match_id, "rematch")}>Rematch</button>
+            )}
+            {/* Delete — available on all non-done matches */}
+            {!isDone && (
+              <button
+                className="btn btn-sm btn-outline"
+                style={{ fontSize: 9, padding: "3px 0", width: "100%", marginTop: 3, color: "var(--muted)" }}
+                onClick={() => setConfirmDelete(true)}>
+                ✕ Delete
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -998,6 +2025,7 @@ function BracketCard({ match: m, onAction, onSetConfig, sportKey, isFinal }) {
 
 // ── MatchCard ─────────────────────────────────────────────────
 function MatchCard({ match: m, onAction, onSetConfig, sportKey }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const isLive     = m.status === "live";
   const isDone     = m.status === "done";
   const sets       = m.sets || [];
@@ -1088,35 +2116,62 @@ function MatchCard({ match: m, onAction, onSetConfig, sportKey }) {
 
         {/* Actions */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {/* Sets picker — scheduled set-based matches only */}
-          {m.status === "scheduled" && isSetBased && (
-            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-              <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>Sets:</span>
-              {[1, 2, 3].map(v => (
-                <button key={v}
-                  className={`btn btn-sm ${curSets === v ? "btn-danger" : "btn-outline"}`}
-                  style={{ fontSize: 10, padding: "3px 8px", minWidth: 28 }}
-                  onClick={() => onSetConfig(m.match_id, v)}>
-                  {v * 2 - 1}
-                </button>
-              ))}
+          {confirmDelete ? (
+            /* ── Inline delete confirmation ── */
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)",
+              borderRadius: 6, padding: "4px 8px",
+            }}>
+              <span style={{ fontSize: 10, color: "var(--ink)", fontWeight: 600, whiteSpace: "nowrap" }}>
+                Delete this match?
+              </span>
+              <button
+                className="btn btn-sm btn-outline"
+                style={{ fontSize: 10, padding: "2px 8px", color: "var(--muted)" }}
+                onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn btn-sm"
+                style={{ fontSize: 10, padding: "2px 8px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: 700 }}
+                onClick={() => { setConfirmDelete(false); onAction(m.match_id, "delete"); }}>
+                Delete
+              </button>
             </div>
-          )}
-          {m.status === "scheduled" && (
-            <button className="btn btn-sm btn-danger" style={{ padding: "4px 12px" }}
-              onClick={() => onAction(m.match_id, "start")}>▶ Start</button>
-          )}
-          {isLive && (
-            <button className="btn btn-sm btn-danger" style={{ padding: "4px 12px" }}
-              onClick={() => onAction(m.match_id, "score")}>Score</button>
-          )}
-          {isDone && (
-            <button className="btn btn-sm btn-outline" style={{ padding: "4px 12px" }}
-              onClick={() => onAction(m.match_id, "rematch")}>Rematch</button>
-          )}
-          {!isDone && (
-            <button className="btn btn-sm btn-outline" style={{ color: "var(--muted)", padding: "4px 8px" }}
-              onClick={() => onAction(m.match_id, "delete")}>✕</button>
+          ) : (
+            <>
+              {/* Sets picker — scheduled set-based matches only */}
+              {m.status === "scheduled" && isSetBased && (
+                <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                  <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 600 }}>Sets:</span>
+                  {[1, 2, 3].map(v => (
+                    <button key={v}
+                      className={`btn btn-sm ${curSets === v ? "btn-danger" : "btn-outline"}`}
+                      style={{ fontSize: 10, padding: "3px 8px", minWidth: 28 }}
+                      onClick={() => onSetConfig(m.match_id, v)}>
+                      {v * 2 - 1}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {m.status === "scheduled" && (
+                <button className="btn btn-sm btn-danger" style={{ padding: "4px 12px" }}
+                  onClick={() => onAction(m.match_id, "start")}>▶ Start</button>
+              )}
+              {isLive && (
+                <button className="btn btn-sm btn-danger" style={{ padding: "4px 12px" }}
+                  onClick={() => onAction(m.match_id, "score")}>Score</button>
+              )}
+              {isDone && (
+                <button className="btn btn-sm btn-outline" style={{ padding: "4px 12px" }}
+                  onClick={() => onAction(m.match_id, "rematch")}>Rematch</button>
+              )}
+              {!isDone && (
+                <button className="btn btn-sm btn-outline" style={{ color: "var(--muted)", padding: "4px 8px" }}
+                  onClick={() => setConfirmDelete(true)}>✕</button>
+              )}
+            </>
           )}
         </div>
       </div>

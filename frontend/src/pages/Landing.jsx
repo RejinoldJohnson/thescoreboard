@@ -12,7 +12,7 @@ const SPORTS_CONFIG = [
   { key: "badminton",    url: "badminton",    color: "#38bdf8" },
 ];
 
-const POLL_INTERVAL = 10000;
+const POLL_INTERVAL = 5000;
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -132,19 +132,6 @@ export default function Landing() {
         </div>
       </header>
 
-      {/* ── LIVE TICKER ── */}
-      {totalLive > 0 && (
-        <div style={{
-          background: "var(--primary)", color: "#fff",
-          padding: "9px 24px", textAlign: "center",
-          fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 800,
-          letterSpacing: 2.5, textTransform: "uppercase",
-          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-        }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#fff", animation: "pulse 1.5s infinite", display: "inline-block" }}/>
-          {totalLive} Match{totalLive !== 1 ? "es" : ""} Live Right Now
-        </div>
-      )}
 
       {/* ── HERO ── */}
       <section className="landing-hero" style={{

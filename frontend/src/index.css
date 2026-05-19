@@ -1824,29 +1824,15 @@
 }
 .hero-poster-active .hero-stat-chip span { color: #fff !important; }
 
-/* ── Tournament hero — responsive layout ────────────────── */
-
-/* Mobile default: banner + floating logo visible, desktop sections hidden */
-.hero-mobile-only   { display: block; }
-.hero-desktop-only  { display: none;  }
+/* ── Tournament hero — poster banner hero redesign ─ */
+/* Legacy class stubs kept for safety; new hero uses only inline styles */
+.hero-mobile-only   { display: none; }
+.hero-desktop-only  { display: none; }
 .hero-desktop-namerow { display: none !important; }
-.hero-mobile-name   { display: block; }
-/* padding-top = LOGO_HALF(36) + gap(16) = 52px */
-.hero-info-zone     { padding: 52px 20px 28px; }
-
-@media (min-width: 768px) {
-  .hero-mobile-only  { display: none; }
-  .hero-desktop-only { display: block; }
-  .hero-desktop-namerow {
-    display: flex !important;
-    align-items: center;
-    gap: 18px;
-    padding-top: 28px;
-    margin-bottom: 14px;
-  }
-  .hero-mobile-name  { display: none !important; }
-  .hero-info-zone    { padding: 0 24px 32px; }
-}
+.hero-mobile-name   { display: none !important; }
+.hero-info-zone     { display: none !important; }
+.hero-logo-desktop  { display: none; }
+.hero-logo-mobile   { display: none; }
 
 /* ── Dashboard (organiser) — mobile org bar ──────────────── */
 .mobile-org-bar {

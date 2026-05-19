@@ -21,10 +21,16 @@ async function request(method, path, body) {
   return res.status === 204 ? null : res.json();
 }
 
+// Dashboard (aggregated — replaces getMe + getMyOrgs + getTournaments)
+export const getDashboard = () => request("GET", "/dashboard");
+
 // Auth
 export const register = (d) => request("POST", "/auth/register", d);
 export const login = (d) => request("POST", "/auth/login", d);
-export const getMe = () => request("GET", "/auth/me");
+export const googleAuth = (accessToken) => request("POST", "/auth/google", { access_token: accessToken });
+export const getMe             = ()  => request("GET", "/auth/me");
+export const getPlayerProfile  = ()  => request("GET", "/auth/player-profile");
+export const savePlayerProfile = (d) => request("PUT", "/auth/player-profile", d);
 
 // Orgs
 export const createOrg = (d) => request("POST", "/orgs/", d);
@@ -41,6 +47,11 @@ export const deleteTournament = (orgId, tournamentId) =>
 export const getWorkspace = (tId) => request("GET", `/orgs/tournaments/${tId}/workspace`);
 export const transitionTournament = (tId, status) => request("POST", `/orgs/tournaments/${tId}/transition?target_status=${status}`);
 
+// Sponsors
+export const createSponsor = (tId, d)         => request("POST",   `/orgs/tournaments/${tId}/sponsors`, d);
+export const updateSponsor = (tId, sId, d)     => request("PATCH",  `/orgs/tournaments/${tId}/sponsors/${sId}`, d);
+export const deleteSponsor = (tId, sId)        => request("DELETE", `/orgs/tournaments/${tId}/sponsors/${sId}`);
+
 // Events
 export const createEvent = (tId, d) => request("POST", `/tournaments/${tId}/events`, d);
 export const getEvents = (tId) => request("GET", `/tournaments/${tId}/events`);
@@ -48,6 +59,8 @@ export const updateEvent = (eId, d) => request("PATCH", `/events/${eId}`, d);
 export const configureEvent = (eId, d) => request("POST", `/events/${eId}/configure`, d);
 export const generateFixtures = (eId, thirdPlace = false) =>
   request("POST", `/orgs/events/${eId}/generate-fixtures${thirdPlace ? "?third_place=true" : ""}`);
+export const generateGroupMatches = (eId) =>
+  request("POST", `/events/${eId}/generate-group-matches`);
 export const getStandings = (eId) => request("GET", `/orgs/events/${eId}/standings`);
 
 // Players
@@ -109,12 +122,12 @@ export const publicRegisterTeam = (tournamentId, d) =>
 
 // Media upload (direct — file goes to backend, backend proxies to Supabase)
 
-// Share URLs — always point to the frontend origin, never the API domain.
-// window.location.origin resolves to the correct domain in every environment:
-//   dev  → http://localhost:5173
-//   prod → https://thescoreboard.in
+// Share URLs point to the backend share route (/api/share/…) on the same origin.
+// WhatsApp and other crawlers hit this route and get proper OG meta tags (og:image,
+// og:title, og:description). Human users are JS-redirected to the frontend SPA.
+// The /api prefix is proxied to the FastAPI backend in both dev (Vite) and prod (nginx).
 const SITE_ORIGIN = typeof window !== "undefined" ? window.location.origin : "";
 export const shareUrl = {
-  tournament: (slug)    => `${SITE_ORIGIN}/t/${slug}`,
-  match:      (matchId) => `${SITE_ORIGIN}/t/match/${matchId}`,
+  tournament: (slug)    => `${SITE_ORIGIN}/api/share/t/${slug}`,
+  match:      (matchId) => `${SITE_ORIGIN}/api/share/m/${matchId}`,
 };

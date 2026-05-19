@@ -8,6 +8,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { getTournamentBySlug, getSportTournament } from "../api/client";
 import RoadToFinal from "../components/shared/RoadToFinal";
 import { ShareButton } from "../components/shared/ShareButton";
+import { useShare } from "../hooks/useShare";
 
 const POLL_MS  = 8000;
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
@@ -357,15 +358,13 @@ function SuccessView({ name, event, onBack }) {
 function EventCard({ event, onClick }) {
   const mode = getRegMode(event);
   const modeLabel = { team:"Team Sport", doubles:"Doubles Pair", individual:"Individual" }[mode];
-  const sportIcon = SPORT_META[event.sport_key]?.icon || "🏆";
-
   return (
     <div onClick={onClick} style={{ display:"flex", alignItems:"center", gap:14, padding:"14px 16px", borderRadius:14, marginBottom:8, background:"var(--surface)", border:"1.5px solid var(--border)", borderLeft:"4px solid var(--accent)", cursor:"pointer", boxShadow:"var(--sh-sm)", transition:"box-shadow .15s" }}
       onMouseEnter={e => e.currentTarget.style.boxShadow = "var(--accent-glow), var(--sh-sm)"}
       onMouseLeave={e => e.currentTarget.style.boxShadow = "var(--sh-sm)"}
     >
-      <div style={{ width:44, height:44, borderRadius:12, background:"var(--accent-dim)", border:"1px solid var(--accent-border)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>
-        {sportIcon}
+      <div style={{ width:44, height:44, borderRadius:12, background:"var(--accent-dim)", border:"1px solid var(--accent-border)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, fontFamily:"var(--font-display)", fontSize:12, fontWeight:900, color:"var(--accent)" }}>
+        {sa(event.sport_key)}
       </div>
       <div style={{ flex:1, minWidth:0 }}>
         <div style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:"-0.5px", color:"var(--ink)", marginBottom:6 }}>{event.name}</div>
@@ -424,14 +423,21 @@ function PenDot({ result }) {
 }
 
 // ── Round chip ────────────────────────────────────────────────
-function RoundChip({ round, table }) {
-  if (round == null) return null;
+const STAGE_CHIP_LABELS = {
+  group: "Group Stage", r16: "Round of 16", qf: "Quarterfinal",
+  sf: "Semifinal", final: "Final", "3rd_place": "3rd Place",
+};
+function RoundChip({ round, stage, round_name, table }) {
+  let label = round_name;
+  if (!label && stage) label = stage === "group" && round != null ? `Group Stage · Round ${round}` : (STAGE_CHIP_LABELS[stage] || null);
+  if (!label && round != null) label = `Round ${round}`;
+  if (!label) return null;
   return (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", minWidth:32, flexShrink:0 }}>
-      <span style={{ fontFamily:"var(--font-display)", fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:1, background:"var(--primary-dim)", color:"var(--primary)", padding:"2px 5px", borderRadius:3 }}>
-        R{round}
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-start", flexShrink:0 }}>
+      <span style={{ fontFamily:"var(--font-display)", fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:0.8, background:"var(--primary-dim)", color:"var(--primary)", padding:"2px 7px", borderRadius:3, whiteSpace:"nowrap" }}>
+        {label}
       </span>
-      {table && <span style={{ fontSize:9, color:"var(--muted)", fontWeight:700, marginTop:2 }}>T{table}</span>}
+      {table && <span style={{ fontSize:9, color:"var(--muted)", fontWeight:700, marginTop:2 }}>Table {table}</span>}
     </div>
   );
 }
@@ -448,100 +454,110 @@ function StatusPill({ isLive, isDone }) {
 }
 
 // ── Cricket match card ────────────────────────────────────────
-function CricketCard({ m }) {
+function CricketCard({ m, sponsorFooter }) {
   const isLive = m.status === "live";
   const isDone = m.status === "done";
   const ls     = m.live_state || {};
   const battingFirst   = ls.batting_first   || 1;
+  const soFirst        = ls.super_over_batting_first || battingFirst;
   const currentInnings = ls.current_innings || 1;
-  const completedSets  = (m.sets || [])
-    .filter(s => s.is_complete)
-    .sort((a, b) => a.set_number - b.set_number);
-
+  const completedSets  = (m.sets || []).filter(s => s.is_complete).sort((a, b) => a.set_number - b.set_number);
   const p1Name = m.player_1?.name || "TBD";
   const p2Name = m.player_2?.name || "TBD";
-
-  // Build innings display list
   const maxInn = isDone ? completedSets.length : (isLive ? currentInnings : 0);
   const inningsData = Array.from({ length: maxInn }, (_, idx) => {
-    const innNum    = idx + 1;
-    const battingPos = (innNum % 2 === 1) ? battingFirst : (3 - battingFirst);
-    const teamName   = battingPos === 1 ? p1Name : p2Name;
-    const isP1       = battingPos === 1;
-    const set        = completedSets.find(s => s.set_number === innNum);
-    const isActiveLive = isLive && innNum === currentInnings;
-
+    const innNum         = idx + 1;
+    const isSuperOverInnings = innNum >= 3;
+    const effectiveBatFirst  = isSuperOverInnings ? soFirst : battingFirst;
+    const battingPos     = (innNum % 2 === 1) ? effectiveBatFirst : (3 - effectiveBatFirst);
+    const teamName       = battingPos === 1 ? p1Name : p2Name;
+    const isP1           = battingPos === 1;
+    const set            = completedSets.find(s => s.set_number === innNum);
+    const isActiveLive   = isLive && innNum === currentInnings;
     const runs    = set ? set.score_p1 : (isActiveLive ? ls.runs    || 0 : 0);
     const wickets = set ? set.score_p2 : (isActiveLive ? ls.wickets || 0 : 0);
     const overs   = isActiveLive ? ls.overs : null;
     const isWinner = isDone && (isP1 ? m.player_1?.is_winner : m.player_2?.is_winner);
-    return { innNum, teamName, isP1, runs, wickets, overs, isComplete: !!set, isActiveLive, isWinner };
+    return { innNum, teamName, isP1, runs, wickets, overs, isComplete: !!set, isActiveLive, isWinner, isSuperOverInnings };
   });
-
   const target = inningsData[0] ? inningsData[0].runs + 1 : null;
 
+  const inn1 = completedSets.find(s => s.set_number === 1);
+  const inn2 = completedSets.find(s => s.set_number === 2);
+  const inn3 = completedSets.find(s => s.set_number === 3);
+  const inn4 = completedSets.find(s => s.set_number === 4);
+  const hasSO   = !!inn3;
+  const soTied  = hasSO && inn4 && inn3.score_p1 === inn4.score_p1;
+
+  let winMargin = null;
+  if (isDone && completedSets.length >= 2) {
+    if (hasSO && soTied) {
+      winMargin = "🪙 Decided by Coin Toss";
+    } else if (hasSO && inn4) {
+      const soBat2ndWon = (soFirst === 1 ? 2 : 1) === 1 ? m.player_1?.is_winner : m.player_2?.is_winner;
+      if (soBat2ndWon) { const w = 2 - inn4.score_p2; winMargin = `⚡ Super Over — Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
+      else              { const r = inn3.score_p1 - inn4.score_p1; winMargin = `⚡ Super Over — Won by ${r} run${r !== 1 ? "s" : ""}`; }
+    } else if (inn1 && inn2) {
+      const bat2ndWon = battingFirst === 1 ? m.player_2?.is_winner : m.player_1?.is_winner;
+      if (bat2ndWon) { const w = 10 - inn2.score_p2; winMargin = `Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
+      else           { const r = inn1.score_p1 - inn2.score_p1; winMargin = `Won by ${r > 0 ? r : 0} run${r !== 1 ? "s" : ""}`; }
+    }
+  }
+
   return (
-    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:0 }}>
+    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:0, padding:0, overflow:"hidden" }}>
       {isLive && <div className="glow-bg"/>}
-      {/* Header row */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8, gap:6 }}>
-        <div style={{ display:"flex", gap:6, alignItems:"center" }}>
-          <RoundChip round={m.round} />
-          <span style={{ fontSize:13 }}>🏏</span>
+      <div style={{ padding:"12px 14px" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8, gap:6 }}>
+          <RoundChip round={m.round} stage={m.stage} round_name={m.round_name} />
+          <StatusPill isLive={isLive} isDone={isDone} />
         </div>
-        <StatusPill isLive={isLive} isDone={isDone} />
-      </div>
-
-      {/* Pre-match */}
-      {inningsData.length === 0 && (
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
-          <span style={{ flex:1, fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p1Name}</span>
-          <span style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:800, color:"var(--muted)" }}>vs</span>
-          <span style={{ flex:1, fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"right" }}>{p2Name}</span>
-        </div>
-      )}
-
-      {/* Innings rows */}
-      {inningsData.map((inn, idx) => {
-        const isChasing = idx === 1 && target !== null;
-        const runsNeeded = isChasing && !isDone ? target - inn.runs : null;
-        const won = isChasing && inn.runs >= target;
-        return (
-          <div key={inn.innNum} style={{ display:"flex", alignItems:"center", gap:8, padding:"5px 0", borderTop: idx > 0 ? "1px solid var(--border)" : "none" }}>
-            {/* Live bat icon */}
-            <span style={{ width:14, fontSize:10, flexShrink:0, color:"#16a34a", opacity: inn.isActiveLive ? 1 : 0 }}>🏏</span>
-            {/* Team name */}
-            <span style={{ flex:1, fontSize:13, fontWeight: inn.isWinner ? 800 : 600, color: inn.isWinner ? "#16a34a" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-              {inn.teamName}
-            </span>
-            {/* Score */}
-            <span style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:900, color: inn.isActiveLive ? "var(--primary)" : inn.isWinner ? "#16a34a" : "var(--ink)", lineHeight:1 }}>
-              {inn.runs}
-              <span style={{ fontSize:11, fontWeight:600, color:"var(--muted)" }}>/{inn.wickets}</span>
-            </span>
-            {/* Overs + need */}
-            <span style={{ fontSize:10, color:"var(--muted)", minWidth:56, textAlign:"right", flexShrink:0 }}>
-              {inn.overs ? `(${inn.overs})` : ""}
-              {isChasing && inn.isActiveLive && runsNeeded !== null && (
-                <span style={{ color: won ? "#16a34a" : "var(--muted)", display:"block", fontSize:9 }}>
-                  {won ? "✓ won" : `need ${runsNeeded}`}
-                </span>
-              )}
-            </span>
+        {inningsData.length === 0 && (
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+            <span style={{ flex:1, fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p1Name}</span>
+            <span style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:800, color:"var(--muted)" }}>vs</span>
+            <span style={{ flex:1, fontSize:13, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"right" }}>{p2Name}</span>
           </div>
-        );
-      })}
-
-      {/* Target line for live 2nd innings */}
-      {isLive && currentInnings === 2 && target !== null && inningsData.length > 1 && (
-        <div style={{ fontSize:10, color:"var(--muted)", textAlign:"right", marginTop:3 }}>Target: {target}</div>
-      )}
+        )}
+        {inningsData.map((inn, idx) => {
+          const isChasing  = idx === 1 && target !== null;
+          const runsNeeded = isChasing && !isDone ? target - inn.runs : null;
+          const showSoLabel = inn.isSuperOverInnings && (idx === 0 || !inningsData[idx-1].isSuperOverInnings);
+          const soColor = "#f59e0b";
+          return (
+            <div key={inn.innNum}>
+              {showSoLabel && (
+                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 0 3px", borderTop:"1px solid rgba(245,158,11,.25)" }}>
+                  <span style={{ fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, color:soColor, fontFamily:"var(--font-display)" }}>⚡ Super Over</span>
+                </div>
+              )}
+              <div style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderTop: idx > 0 && !showSoLabel ? "1px solid var(--border)" : "none" }}>
+                <span style={{ width:6, height:6, borderRadius:"50%", flexShrink:0, background: inn.isActiveLive ? "var(--primary)" : inn.isSuperOverInnings ? soColor+"66" : "transparent" }} />
+                <span style={{ flex:1, fontSize:13, fontWeight: inn.isWinner ? 800 : 600, color: inn.isWinner ? "#16a34a" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{inn.teamName}</span>
+                <span style={{ fontFamily:"var(--font-display)", fontSize:17, fontWeight:900, color: inn.isActiveLive ? "var(--primary)" : inn.isWinner ? "#16a34a" : inn.isSuperOverInnings ? soColor : "var(--ink)", lineHeight:1 }}>
+                  {inn.runs}<span style={{ fontSize:11, fontWeight:600, color:"var(--muted)" }}>/{inn.wickets}</span>
+                </span>
+                <span style={{ fontSize:10, color:"var(--muted)", minWidth:40, textAlign:"right", flexShrink:0 }}>
+                  {inn.overs ? `(${inn.overs})` : ""}
+                  {isChasing && inn.isActiveLive && runsNeeded != null && <span style={{ display:"block", fontSize:9 }}>need {runsNeeded}</span>}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+        {winMargin && (
+          <div style={{ fontSize:11, fontWeight:700, marginTop:6, paddingTop:6, borderTop:"1px solid var(--border)", color: winMargin.includes("Coin") ? "var(--primary)" : winMargin.includes("Super") ? "#f59e0b" : "#16a34a" }}>
+            {winMargin}
+          </div>
+        )}
+      </div>
+      {sponsorFooter}
     </div>
   );
 }
 
 // ── Football match card ───────────────────────────────────────
-function FootballCard({ m }) {
+function FootballCard({ m, sponsorFooter }) {
   const isLive = m.status === "live";
   const isDone = m.status === "done";
   const ls     = m.live_state || {};
@@ -569,67 +585,52 @@ function FootballCard({ m }) {
   const p2Win  = m.player_2?.is_winner;
 
   return (
-    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:8 }}>
+    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:0, padding:0, overflow:"hidden" }}>
       {isLive && <div className="glow-bg"/>}
-      {/* Main score row */}
-      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-        <RoundChip round={m.round} table={m.table_number} />
+      <div style={{ padding:"12px 14px", display:"flex", flexDirection:"column", gap:8 }}>
+        {/* Stage chip + score row */}
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <RoundChip round={m.round} stage={m.stage} round_name={m.round_name} table={m.table_number} />
 
-        {/* Team 1 */}
-        <span style={{ flex:1, fontSize:13, fontWeight: p1Win ? 800 : 700, color: p1Win ? "#2563eb" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"right" }}>
-          {m.player_1?.name || "TBD"}
-        </span>
+          {/* Team 1 */}
+          <span style={{ flex:1, fontSize:13, fontWeight: p1Win ? 800 : 700, color: p1Win ? "#2563eb" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", textAlign:"right" }}>
+            {m.player_1?.name || "TBD"}
+          </span>
 
-        {/* Central score block */}
-        <div style={{ textAlign:"center", flexShrink:0, minWidth:60 }}>
-          <div style={{ fontFamily:"var(--font-display)", fontSize: isLive || isDone ? 22 : 14, fontWeight:900, lineHeight:1, color: isLive ? "var(--primary)" : isDone ? "var(--ink)" : "var(--muted)" }}>
-            {isLive || isDone ? `${score1}–${score2}` : "vs"}
+          {/* Central score block */}
+          <div style={{ textAlign:"center", flexShrink:0, minWidth:60 }}>
+            <div style={{ fontFamily:"var(--font-display)", fontSize: isLive || isDone ? 22 : 14, fontWeight:900, lineHeight:1, color: isLive ? "var(--primary)" : isDone ? "var(--ink)" : "var(--muted)" }}>
+              {isLive || isDone ? `${score1}–${score2}` : "vs"}
+            </div>
+            {isLive && phaseLabel && (
+              <div style={{ fontSize:8, fontWeight:800, color:"var(--muted)", textTransform:"uppercase", letterSpacing:0.5, marginTop:2 }}>{phaseLabel}</div>
+            )}
           </div>
-          {isLive && phaseLabel && (
-            <div style={{ fontSize:8, fontWeight:800, color:"var(--muted)", textTransform:"uppercase", letterSpacing:0.5, marginTop:2 }}>{phaseLabel}</div>
-          )}
+
+          {/* Team 2 */}
+          <span style={{ flex:1, fontSize:13, fontWeight: p2Win ? 800 : 700, color: p2Win ? "#2563eb" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {m.player_2?.name || "TBD"}
+          </span>
+
+          <div style={{ flexShrink:0, width:40, display:"flex", justifyContent:"flex-end" }}>
+            <StatusPill isLive={isLive} isDone={isDone} />
+          </div>
         </div>
 
-        {/* Team 2 */}
-        <span style={{ flex:1, fontSize:13, fontWeight: p2Win ? 800 : 700, color: p2Win ? "#2563eb" : "var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-          {m.player_2?.name || "TBD"}
-        </span>
-
-        <div style={{ flexShrink:0, width:40, display:"flex", justifyContent:"flex-end" }}>
-          <StatusPill isLive={isLive} isDone={isDone} />
-        </div>
+        {/* Penalty summary (no breakdown — tap card for details) */}
+        {hasPens && isDone && (
+          <div style={{ fontSize:10, fontWeight:700, color:"#3b82f6" }}>
+            {penScore1}–{penScore2} on penalties
+          </div>
+        )}
       </div>
-
-      {/* Penalty shootout */}
-      {hasPens && (
-        <div style={{ padding:"8px 12px", background:"#0d1b2a", borderRadius:8, border:"1px solid #1e3a5f" }}>
-          <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"#3b82f6", marginBottom:6, textAlign:"center" }}>
-            Penalty Shootout
-          </div>
-          <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"center" }}>
-            <div style={{ display:"flex", gap:3 }}>
-              {Array.from({ length: penSlots }, (_, i) => <PenDot key={i} result={penH1[i]} />)}
-            </div>
-            <div style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"#fff", minWidth:36, textAlign:"center" }}>
-              {penScore1}–{penScore2}
-            </div>
-            <div style={{ display:"flex", gap:3 }}>
-              {Array.from({ length: penSlots }, (_, i) => <PenDot key={i} result={penH2[i]} />)}
-            </div>
-          </div>
-          {isDone && (
-            <div style={{ textAlign:"center", fontSize:10, color:"#3b82f6", fontWeight:700, marginTop:6 }}>
-              {p1Win ? (m.player_1?.name||"Team 1") : (m.player_2?.name||"Team 2")} win on penalties
-            </div>
-          )}
-        </div>
-      )}
+      {sponsorFooter}
     </div>
   );
 }
 
 // ── Default match card (Badminton / Table Tennis) ─────────────
-function DefaultCard({ m, sportKey }) {
+function DefaultCard({ m, sportKey, sponsorFooter }) {
   const isLive = m.status === "live";
   const isDone = m.status === "done";
   const ls     = m.live_state || {};
@@ -657,10 +658,10 @@ function DefaultCard({ m, sportKey }) {
   );
 
   return (
-    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:6 }}>
+    <div className={`mc${isLive ? " live" : ""}`} style={{ flexDirection:"column", gap:0, padding:0, overflow:"hidden" }}>
       {isLive && <div className="glow-bg"/>}
-      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-        <RoundChip round={m.round} table={m.table_number} />
+      <div style={{ padding:"12px 14px", display:"flex", alignItems:"center", gap:8 }}>
+        <RoundChip round={m.round} stage={m.stage} round_name={m.round_name} table={m.table_number} />
 
         {/* Two-row player layout */}
         <div style={{ flex:1, display:"flex", flexDirection:"column", gap:4 }}>
@@ -694,15 +695,727 @@ function DefaultCard({ m, sportKey }) {
           <StatusPill isLive={isLive} isDone={isDone} />
         </div>
       </div>
+      {sponsorFooter}
     </div>
   );
 }
 
 // ── Sport-aware match card dispatcher ─────────────────────────
-function MatchCard({ match: m, sportKey }) {
-  if (sportKey === "cricket")  return <CricketCard m={m} />;
-  if (sportKey === "football") return <FootballCard m={m} />;
-  return <DefaultCard m={m} sportKey={sportKey} />;
+function MatchCard({ match: m, sportKey, sponsorFooter }) {
+  if (sportKey === "cricket")  return <CricketCard  m={m} sponsorFooter={sponsorFooter} />;
+  if (sportKey === "football") return <FootballCard m={m} sponsorFooter={sponsorFooter} />;
+  return <DefaultCard m={m} sportKey={sportKey} sponsorFooter={sponsorFooter} />;
+}
+
+// ── Card sponsor footer strip ─────────────────────────────────
+function CardSponsorFooter({ sponsor }) {
+  if (!sponsor) return null;
+  return (
+    <div style={{ borderTop:"1px solid var(--border)", padding:"6px 14px", display:"flex", alignItems:"center", gap:7, background:"rgba(245,158,11,.03)" }}>
+      <span style={{ fontFamily:"var(--font-display)", fontSize:6.5, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"var(--muted)", whiteSpace:"nowrap" }}>Powered by</span>
+      <div style={{ width:16, height:16, borderRadius:3, flexShrink:0, background:"var(--elevated)", border:"1px solid var(--border)", overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center" }}>
+        {sponsor.logo_url
+          ? <img src={sponsor.logo_url} alt={sponsor.name} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+          : <span style={{ fontFamily:"var(--font-display)", fontSize:4.5, fontWeight:900, color:"var(--primary)" }}>{sponsor.name[0].toUpperCase()}</span>
+        }
+      </div>
+      <span style={{ fontSize:10, fontWeight:600, color:"var(--muted)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{sponsor.name}</span>
+    </div>
+  );
+}
+
+// ── Tournament Info & Rules display ───────────────────────────
+const MONTHS_FULL = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function formatDeadline(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${MONTHS_FULL[m - 1]} ${d}, ${y}`;
+}
+
+function TournamentInfoDisplay({ info }) {
+  if (!info) return null;
+
+  const hasOverview = !!info.overview?.trim();
+  const hasPrizes   = info.prize_pool?.length > 0;
+  const hasRules    = !!info.rules?.trim();
+  const hasContact  = !!(
+    info.contact?.entry_fee?.trim() ||
+    info.contact?.reg_deadline?.trim() ||
+    info.contact?.persons?.length > 0
+  );
+
+  if (!hasOverview && !hasPrizes && !hasRules && !hasContact) return null;
+
+  const sectionHead = {
+    fontSize: 10, fontWeight: 800, textTransform: "uppercase",
+    letterSpacing: 1.5, color: "var(--muted)", marginBottom: 10,
+  };
+  const card = {
+    background: "var(--surface)", border: "1.5px solid var(--border)",
+    borderRadius: 12, padding: "14px 16px",
+  };
+
+  // Render text preserving intentional line breaks cleanly
+  const renderText = (text) => (
+    <div style={{ fontSize: 13, color: "var(--ink)", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>
+      {text.trim()}
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+        {/* Overview */}
+        {hasOverview && (
+          <div style={card}>
+            <div style={sectionHead}>📋 Overview</div>
+            {renderText(info.overview)}
+          </div>
+        )}
+
+        {/* Prize Pool */}
+        {hasPrizes && (
+          <div style={card}>
+            <div style={sectionHead}>🏆 Prize Pool</div>
+            {/* Group by category */}
+            {(() => {
+              const categories = [...new Set(info.prize_pool.map(p => p.category || ""))];
+              return categories.map(cat => (
+                <div key={cat || "_"} style={{ marginBottom: categories.length > 1 ? 14 : 0 }}>
+                  {cat && (
+                    <div style={{ fontSize: 11, fontWeight: 800, color: "var(--primary, #FF6B35)",
+                      textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+                      {cat}
+                    </div>
+                  )}
+                  {info.prize_pool.filter(p => (p.category || "") === cat).map((prize, i) => (
+                    <div key={i} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "7px 0",
+                      borderBottom: i < info.prize_pool.filter(p => (p.category || "") === cat).length - 1
+                        ? "1px solid var(--border)" : "none",
+                    }}>
+                      <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
+                        {prize.position}
+                      </span>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: "var(--ink)",
+                        fontFamily: "var(--font-display)" }}>
+                        {prize.amount}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ));
+            })()}
+          </div>
+        )}
+
+        {/* Rules */}
+        {hasRules && (
+          <div style={card}>
+            <div style={sectionHead}>📏 Rules & Regulations</div>
+            {renderText(info.rules)}
+          </div>
+        )}
+
+        {/* Registration & Contact */}
+        {hasContact && (
+          <div style={card}>
+            <div style={sectionHead}>📞 Registration & Contact</div>
+            {(info.contact.entry_fee || info.contact.reg_deadline) && (
+              <div style={{ display: "flex", gap: 24, marginBottom: info.contact.persons?.length ? 14 : 0,
+                flexWrap: "wrap" }}>
+                {info.contact.entry_fee && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 2 }}>
+                      Entry Fee
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "var(--ink)",
+                      fontFamily: "var(--font-display)" }}>
+                      {info.contact.entry_fee}
+                    </div>
+                  </div>
+                )}
+                {info.contact.reg_deadline && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 2 }}>
+                      Deadline
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "var(--ink)",
+                      fontFamily: "var(--font-display)" }}>
+                      {formatDeadline(info.contact.reg_deadline) || info.contact.reg_deadline}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {info.contact.persons?.length > 0 && (
+              <div>
+                <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, marginBottom: 8 }}>
+                  Contact
+                </div>
+                {info.contact.persons.map((p, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between",
+                    alignItems: "center", padding: "7px 0",
+                    borderBottom: i < info.contact.persons.length - 1 ? "1px solid var(--border)" : "none" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{p.name}</span>
+                    {p.phone && (
+                      <a href={`tel:${p.phone}`}
+                        style={{ fontSize: 13, color: "var(--primary, #FF6B35)", fontWeight: 700,
+                          textDecoration: "none" }}>
+                        {p.phone}
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+// ── Tiered sponsor display wall ───────────────────────────────
+const TIER_ORDER = ["title", "gold", "silver", "bronze", "partner"];
+function SponsorDisplay({ sponsors }) {
+  if (!sponsors?.length) return null;
+  const byTier = (tier) => sponsors.filter(s => s.tier === tier);
+  const titleSponsors = byTier("title");
+  const goldSponsors  = byTier("gold");
+  const others = TIER_ORDER.slice(2).flatMap(t => byTier(t));
+
+  const LogoBox = ({ s, size = 40, radius = 8 }) => (
+    <div style={{ width:size, height:size, borderRadius:radius, flexShrink:0, background:"var(--surface)", border:"1px solid var(--border)", overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center" }}>
+      {s.logo_url
+        ? <img src={s.logo_url} alt={s.name} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+        : <span style={{ fontFamily:"var(--font-display)", fontSize:size * 0.28, fontWeight:900, color:"var(--primary)" }}>{s.name[0].toUpperCase()}</span>
+      }
+    </div>
+  );
+
+  return (
+    <div style={{ marginTop:16, paddingTop:14, borderTop:"1px solid var(--border)" }}>
+      <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"var(--muted)", fontFamily:"var(--font-display)", marginBottom:10 }}>Our Sponsors</div>
+
+      {/* Title sponsors — gold gradient card */}
+      {titleSponsors.map(s => (
+        <div key={s.sponsor_id || s.name} style={{ marginBottom:8, background:"linear-gradient(135deg, rgba(245,158,11,.12) 0%, rgba(217,119,6,.06) 100%)", border:"1px solid rgba(245,158,11,.35)", borderRadius:12, padding:"12px 14px", display:"flex", alignItems:"center", gap:12 }}>
+          <LogoBox s={s} size={48} radius={10} />
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"#d97706", fontFamily:"var(--font-display)", marginBottom:2 }}>Title Sponsor</div>
+            <div style={{ fontSize:15, fontWeight:900, color:"var(--ink)", fontFamily:"var(--font-display)" }}>{s.name}</div>
+            {s.description && <div style={{ fontSize:11, color:"var(--muted)", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.description}</div>}
+          </div>
+        </div>
+      ))}
+
+      {/* Gold sponsors — accent-border card */}
+      {goldSponsors.map(s => (
+        <div key={s.sponsor_id || s.name} style={{ marginBottom:8, background:"var(--elevated)", borderLeft:"3px solid #d97706", borderTop:"1px solid var(--border)", borderRight:"1px solid var(--border)", borderBottom:"1px solid var(--border)", borderRadius:"0 10px 10px 0", padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
+          <LogoBox s={s} size={36} radius={8} />
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"#d97706", fontFamily:"var(--font-display)", marginBottom:1 }}>Gold</div>
+            <div style={{ fontSize:13, fontWeight:700, color:"var(--ink)" }}>{s.name}</div>
+          </div>
+        </div>
+      ))}
+
+      {/* Silver / Bronze / Partner — 2-col compact grid */}
+      {others.length > 0 && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+          {others.map(s => (
+            <div key={s.sponsor_id || s.name} style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:8, padding:"8px 10px", display:"flex", alignItems:"center", gap:8 }}>
+              <LogoBox s={s} size={28} radius={6} />
+              <div style={{ minWidth:0 }}>
+                <div style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:"var(--muted)", fontFamily:"var(--font-display)" }}>{s.tier}</div>
+                <div style={{ fontSize:11, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.name}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Sticky sponsor bar ────────────────────────────────────────
+function SponsorStickyBar({ sponsors }) {
+  const storageKey = "tsb_sponsor_bar_dismissed";
+  const [visible, setVisible] = useState(() => !sessionStorage.getItem(storageKey));
+  const titleSponsor  = sponsors?.find(s => s.tier === "title");
+  const otherSponsors = (sponsors?.filter(s => s.tier !== "title") ?? []).slice(0, 4);
+  const dismiss = () => { sessionStorage.setItem(storageKey, "1"); setVisible(false); };
+  if (!visible || !titleSponsor) return null;
+
+  const SmallLogo = ({ s }) => (
+    <div style={{ width:24, height:24, borderRadius:4, background:"rgba(255,255,255,.1)", border:"1px solid rgba(255,255,255,.15)", overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+      {s.logo_url
+        ? <img src={s.logo_url} alt={s.name} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+        : <span style={{ fontFamily:"var(--font-display)", fontSize:7, fontWeight:900, color:"#f59e0b" }}>{s.name[0].toUpperCase()}</span>
+      }
+    </div>
+  );
+
+  return (
+    <div style={{ position:"fixed", bottom:0, left:0, right:0, zIndex:200, background:"rgba(14,14,14,.97)", backdropFilter:"blur(14px)", borderTop:"1px solid rgba(255,107,53,.18)", padding:"10px 20px", display:"flex", alignItems:"center", gap:12 }}>
+      {/* Title sponsor */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, flex:1, minWidth:0 }}>
+        <div style={{ width:32, height:32, borderRadius:6, background:"rgba(245,158,11,.15)", border:"1px solid rgba(245,158,11,.35)", overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+          {titleSponsor.logo_url
+            ? <img src={titleSponsor.logo_url} alt={titleSponsor.name} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+            : <span style={{ fontFamily:"var(--font-display)", fontSize:10, fontWeight:900, color:"#f59e0b" }}>{titleSponsor.name[0].toUpperCase()}</span>
+          }
+        </div>
+        <div style={{ minWidth:0 }}>
+          <div style={{ fontSize:8, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"#d97706", fontFamily:"var(--font-display)" }}>Title Sponsor</div>
+          <div style={{ fontSize:12, fontWeight:700, color:"#fff", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{titleSponsor.name}</div>
+        </div>
+      </div>
+
+      {/* Divider + other logos */}
+      {otherSponsors.length > 0 && (
+        <>
+          <div style={{ width:1, height:28, background:"rgba(255,255,255,.12)", flexShrink:0 }} />
+          <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+            {otherSponsors.map(s => <SmallLogo key={s.sponsor_id || s.name} s={s} />)}
+          </div>
+        </>
+      )}
+
+      {/* Dismiss */}
+      <button onClick={dismiss} style={{ background:"none", border:"none", color:"rgba(255,255,255,.4)", fontSize:18, lineHeight:1, cursor:"pointer", padding:"0 4px", flexShrink:0 }}>×</button>
+    </div>
+  );
+}
+
+// ── Match detail modal ────────────────────────────────────────
+
+function parseCricketOvers(raw) {
+  if (raw == null) return 0;
+  const str = String(raw);
+  const [whole, balls] = str.split(".").map(Number);
+  return (whole || 0) + ((balls || 0) / 6);
+}
+
+function MatchDetailModal({ match: m, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const { share, copyLink } = useShare({
+    type: "match", matchId: m.match_id,
+    title: `${m.player_1?.name || "TBD"} vs ${m.player_2?.name || "TBD"} — TheScoreBoard`,
+  });
+
+  const handleCopy = async () => {
+    await copyLink();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const isLive     = m.status === "live";
+  const isDone     = m.status === "done";
+  const sportKey   = m.sport_key || "default";
+  const ls         = m.live_state || {};
+  const isCricket  = sportKey === "cricket";
+  const isFootball = sportKey === "football";
+  const isRacket   = sportKey === "badminton" || sportKey === "table_tennis";
+
+  let stageLabel = null;
+  if (m.stage) stageLabel = m.stage === "group" && m.round != null
+    ? `Group Stage · Round ${m.round}` : (STAGE_CHIP_LABELS[m.stage] || null);
+  if (!stageLabel && m.round != null) stageLabel = `Round ${m.round}`;
+
+  // Football
+  const penH1     = ls.pen_h1 || [];
+  const penH2     = ls.pen_h2 || [];
+  const hasPens   = penH1.length > 0 || penH2.length > 0;
+  const penScore1 = penH1.filter(r => r === "H").length;
+  const penScore2 = penH2.filter(r => r === "H").length;
+  const penSlots  = Math.max(5, penH1.length, penH2.length);
+  const fbHalf    = ls.half;
+
+  const phaseText = (() => {
+    if (isFootball) {
+      if (isDone && hasPens)      return "Full Time (Penalties)";
+      if (isDone && fbHalf >= 3)  return "Full Time (AET)";
+      if (isDone)                 return "Full Time";
+      if (!isLive)                return null;
+      if (fbHalf >= 5) return "Penalties";
+      if (fbHalf === 4) return "ET 2nd Half";
+      if (fbHalf === 3) return "ET 1st Half";
+      if (fbHalf === 2) return "2nd Half";
+      return "1st Half";
+    }
+    return isDone ? "Full Time" : isLive ? "Live" : null;
+  })();
+
+  const p1Win   = m.player_1?.is_winner;
+  const p2Win   = m.player_2?.is_winner;
+  const p1Score = m.player_1?.score ?? 0;
+  const p2Score = m.player_2?.score ?? 0;
+
+  // Racket
+  const completedSets = (m.sets || []).filter(s => s.is_complete).sort((a,b) => a.set_number - b.set_number);
+  const liveS1    = ls.score_p1 ?? 0;
+  const liveS2    = ls.score_p2 ?? 0;
+  const p1SetWins = completedSets.filter(s => s.score_p1 > s.score_p2).length;
+  const p2SetWins = completedSets.filter(s => s.score_p2 > s.score_p1).length;
+
+  // Cricket
+  const battingFirst   = ls.batting_first   || 1;
+  const soFirst        = ls.super_over_batting_first || battingFirst;
+  const currentInnings = ls.current_innings || 1;
+  const maxInn = isDone ? completedSets.length : (isLive ? currentInnings : 0);
+  const inningsData = Array.from({ length: maxInn }, (_, idx) => {
+    const innNum         = idx + 1;
+    const isSuperOverInnings = innNum >= 3;
+    const effectiveBatFirst  = isSuperOverInnings ? soFirst : battingFirst;
+    const battingPos     = innNum % 2 === 1 ? effectiveBatFirst : (3 - effectiveBatFirst);
+    const isP1           = battingPos === 1;
+    const set            = completedSets.find(s => s.set_number === innNum);
+    const isActiveLive   = isLive && innNum === currentInnings;
+    const runs    = set ? set.score_p1 : (isActiveLive ? ls.runs    ?? 0 : 0);
+    const wickets = set ? set.score_p2 : (isActiveLive ? ls.wickets ?? 0 : 0);
+    const overs   = isActiveLive ? ls.overs : (isDone && innNum === maxInn && ls.overs ? ls.overs : null);
+    const isWinner = isDone && (isP1 ? p1Win : p2Win);
+    return { innNum, teamName: isP1 ? (m.player_1?.name||"TBD") : (m.player_2?.name||"TBD"), isP1, runs, wickets, overs, isComplete: !!set, isActiveLive, isWinner, isSuperOverInnings };
+  });
+
+  const mdInn1 = completedSets.find(s => s.set_number === 1);
+  const mdInn2 = completedSets.find(s => s.set_number === 2);
+  const mdInn3 = completedSets.find(s => s.set_number === 3);
+  const mdInn4 = completedSets.find(s => s.set_number === 4);
+  const hasSO  = !!mdInn3;
+  const soTied = hasSO && mdInn4 && mdInn3.score_p1 === mdInn4.score_p1;
+
+  let winMargin = null;
+  if (isCricket && isDone && completedSets.length >= 2) {
+    if (hasSO && soTied) {
+      winMargin = "🪙 Decided by Coin Toss";
+    } else if (hasSO && mdInn4) {
+      const soBat2ndWon = (soFirst === 1 ? 2 : 1) === 1 ? p1Win : p2Win;
+      if (soBat2ndWon) { const w = 2 - mdInn4.score_p2; winMargin = `⚡ Super Over — Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
+      else              { const r = mdInn3.score_p1 - mdInn4.score_p1; winMargin = `⚡ Super Over — Won by ${r} run${r !== 1 ? "s" : ""}`; }
+    } else if (mdInn1 && mdInn2) {
+      const bat2ndWon = battingFirst === 1 ? p2Win : p1Win;
+      if (bat2ndWon) { const w = 10 - mdInn2.score_p2; winMargin = `Won by ${w} wicket${w !== 1 ? "s" : ""}`; }
+      else           { const r = mdInn1.score_p1 - mdInn2.score_p1; winMargin = `Won by ${r > 0 ? r : 0} run${r !== 1 ? "s" : ""}`; }
+    }
+  }
+
+  const accentColor = isLive ? "var(--primary)" : isDone ? "#16a34a" : "var(--border)";
+  const abbr = (name) => (name || "?").split(" ").filter(Boolean).slice(0,2).map(w => w[0]).join("").toUpperCase();
+
+  const SHARE_CHANNELS = [
+    { id:"whatsapp", color:"#25D366", icon:<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg> },
+    { id:"twitter",  color:"#000",    icon:<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg> },
+    { id:"facebook", color:"#1877F2", icon:<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg> },
+  ];
+
+  return (
+    <>
+      <style>{`
+        .mdl-ov   { position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:500; display:flex; align-items:flex-end; justify-content:center; }
+        .mdl-wrap { background:var(--surface); border-radius:24px 24px 0 0; width:100%; max-height:92vh; display:flex; flex-direction:column; box-shadow:0 -16px 48px rgba(0,0,0,.4); }
+        .mdl-body { flex:1; overflow-y:auto; padding:0 20px 8px; min-height:0; }
+        .mdl-foot { padding:14px 20px 28px; flex-shrink:0; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:center; gap:8px; }
+        @media(min-width:600px){
+          .mdl-ov   { align-items:center; }
+          .mdl-wrap { border-radius:20px; width:460px; max-height:85vh; }
+          .mdl-foot { padding:14px 20px 20px; }
+        }
+      `}</style>
+      <div className="mdl-ov" onClick={onClose}>
+        <div className="mdl-wrap" onClick={e => e.stopPropagation()}>
+          {/* Colored accent stripe */}
+          <div style={{ height:4, background:accentColor, borderRadius:"24px 24px 0 0", flexShrink:0 }} />
+          {/* Drag handle */}
+          <div style={{ width:36, height:4, borderRadius:2, background:"var(--border)", margin:"10px auto 0", flexShrink:0 }} />
+
+          <div className="mdl-body">
+            {/* Chips + close */}
+            <div style={{ display:"flex", alignItems:"center", gap:6, padding:"14px 0 10px", flexWrap:"wrap" }}>
+              <span style={{ fontFamily:"var(--font-display)", fontSize:8, fontWeight:900, textTransform:"uppercase", letterSpacing:2, padding:"3px 10px", borderRadius:20, background:"var(--accent-dim)", color:"var(--accent)", border:"1px solid var(--accent-border)" }}>
+                {SPORT_META[sportKey]?.label || sportKey}
+              </span>
+              {stageLabel && (
+                <span style={{ fontFamily:"var(--font-display)", fontSize:8, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, padding:"3px 10px", borderRadius:20, background:"var(--primary-dim)", color:"var(--primary)" }}>
+                  {stageLabel}
+                </span>
+              )}
+              {(isLive || isDone) && (
+                <span style={{ fontSize:8, fontWeight:900, padding:"3px 8px", borderRadius:20, display:"flex", alignItems:"center", gap:3,
+                  background: isLive ? "var(--primary-dim)" : "rgba(22,163,74,.1)",
+                  color: isLive ? "var(--primary)" : "#16a34a",
+                  border:`1px solid ${isLive ? "rgba(255,107,53,.3)" : "rgba(22,163,74,.3)"}` }}>
+                  {isLive && <span className="live-dot" style={{ width:5, height:5, background:"var(--primary)" }}/>}
+                  {isLive ? "LIVE" : "FT"}
+                </span>
+              )}
+              <button onClick={onClose} style={{ marginLeft:"auto", background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:8, width:28, height:28, cursor:"pointer", color:"var(--muted)", fontSize:18, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>×</button>
+            </div>
+
+            {/* Hero score card */}
+            <div style={{ background: isLive ? "linear-gradient(135deg,rgba(255,107,53,.08) 0%,transparent 65%)" : "var(--elevated)",
+              border:`1px solid ${isLive ? "rgba(255,107,53,.2)" : "var(--border)"}`,
+              borderRadius:16, padding:"18px 14px", marginBottom:14 }}>
+              <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
+                {/* Team 1 */}
+                <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"flex-start", gap:6 }}>
+                  <div style={{ width:52, height:52, borderRadius:14, flexShrink:0,
+                    background: p1Win ? "rgba(22,163,74,.12)" : "var(--surface)",
+                    border:`2px solid ${p1Win ? "#16a34a" : "var(--border)"}`,
+                    display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    <span style={{ fontFamily:"var(--font-display)", fontSize:17, fontWeight:900, color: p1Win ? "#16a34a" : "var(--muted)", lineHeight:1 }}>{abbr(m.player_1?.name)}</span>
+                  </div>
+                  <div style={{ fontSize:13, fontWeight:700, color: p1Win ? "#16a34a" : "var(--ink)", lineHeight:1.3, wordBreak:"break-word" }}>{m.player_1?.name || "TBD"}</div>
+                  {p1Win && <span style={{ fontSize:8, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, color:"#16a34a", background:"rgba(22,163,74,.1)", padding:"2px 7px", borderRadius:4 }}>Winner</span>}
+                </div>
+
+                {/* Score center — cricket shows VS/status only; innings section carries the scores */}
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"center", padding:"2px 0 0", flexShrink:0 }}>
+                  {isCricket ? (
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:4, padding:"8px 4px" }}>
+                      {isLive && <span className="live-dot" style={{ width:8, height:8, background:"var(--primary)" }}/>}
+                      {phaseText && <div style={{ fontSize:9, color: isLive ? "var(--primary)" : "var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, textAlign:"center" }}>{phaseText}</div>}
+                      {!isLive && !isDone && <div style={{ fontFamily:"var(--font-display)", fontSize:18, fontWeight:900, color:"var(--muted)", letterSpacing:2 }}>VS</div>}
+                    </div>
+                  ) : (isLive || isDone) ? (
+                    <>
+                      <div style={{ fontFamily:"var(--font-display)", fontSize:40, fontWeight:900, lineHeight:1, letterSpacing:-1,
+                        color: isLive ? "var(--primary)" : "var(--ink)" }}>
+                        {isRacket ? `${p1SetWins}–${p2SetWins}` : `${p1Score}–${p2Score}`}
+                      </div>
+                      {hasPens && isDone && isFootball && (
+                        <div style={{ fontSize:11, fontWeight:800, color:"#3b82f6", marginTop:3 }}>({penScore1}–{penScore2} pens)</div>
+                      )}
+                      {phaseText && <div style={{ fontSize:9, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, marginTop:4, textAlign:"center" }}>{phaseText}</div>}
+                    </>
+                  ) : (
+                    <div style={{ fontFamily:"var(--font-display)", fontSize:20, fontWeight:900, color:"var(--muted)", letterSpacing:2, padding:"12px 4px" }}>VS</div>
+                  )}
+                </div>
+
+                {/* Team 2 */}
+                <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6 }}>
+                  <div style={{ width:52, height:52, borderRadius:14, flexShrink:0,
+                    background: p2Win ? "rgba(22,163,74,.12)" : "var(--surface)",
+                    border:`2px solid ${p2Win ? "#16a34a" : "var(--border)"}`,
+                    display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    <span style={{ fontFamily:"var(--font-display)", fontSize:17, fontWeight:900, color: p2Win ? "#16a34a" : "var(--muted)", lineHeight:1 }}>{abbr(m.player_2?.name)}</span>
+                  </div>
+                  <div style={{ fontSize:13, fontWeight:700, color: p2Win ? "#16a34a" : "var(--ink)", lineHeight:1.3, textAlign:"right", wordBreak:"break-word" }}>{m.player_2?.name || "TBD"}</div>
+                  {p2Win && <span style={{ fontSize:8, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, color:"#16a34a", background:"rgba(22,163,74,.1)", padding:"2px 7px", borderRadius:4 }}>Winner</span>}
+                </div>
+              </div>
+            </div>
+
+            {/* Football: Penalty shootout section */}
+            {isFootball && hasPens && (
+              <div style={{ background:"#0d1b2a", border:"1px solid #1e3a5f", borderRadius:14, padding:"14px 16px", marginBottom:14 }}>
+                <div style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"#60a5fa", marginBottom:12, textAlign:"center" }}>
+                  Penalty Shootout
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,.55)", marginBottom:6 }}>{m.player_1?.name || "Team 1"}</div>
+                    <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+                      {Array.from({ length: penSlots }, (_, i) => <PenDot key={i} result={penH1[i]} />)}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:900, color:"#fff", flexShrink:0, minWidth:52, textAlign:"center" }}>
+                    {penScore1}–{penScore2}
+                  </div>
+                  <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"flex-end" }}>
+                    <div style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,.55)", marginBottom:6 }}>{m.player_2?.name || "Team 2"}</div>
+                    <div style={{ display:"flex", gap:4, flexWrap:"wrap", justifyContent:"flex-end" }}>
+                      {Array.from({ length: penSlots }, (_, i) => <PenDot key={i} result={penH2[i]} />)}
+                    </div>
+                  </div>
+                </div>
+                {isDone && (
+                  <div style={{ marginTop:12, paddingTop:10, borderTop:"1px solid rgba(255,255,255,.08)", textAlign:"center", fontSize:11, fontWeight:800, color:"#60a5fa" }}>
+                    {p1Win ? (m.player_1?.name||"Team 1") : (m.player_2?.name||"Team 2")} win on penalties
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Racket: set breakdown */}
+            {isRacket && completedSets.length > 0 && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"var(--muted)", marginBottom:8 }}>Sets</div>
+                <div style={{ display:"grid", gridTemplateColumns:`repeat(${completedSets.length + (isLive ? 1 : 0)}, 1fr)`, gap:6 }}>
+                  {completedSets.map(s => {
+                    const w1 = s.score_p1 > s.score_p2;
+                    const w2 = s.score_p2 > s.score_p1;
+                    return (
+                      <div key={s.set_number} style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:10, padding:"10px 6px", textAlign:"center" }}>
+                        <div style={{ fontSize:9, color:"var(--muted)", fontWeight:700, marginBottom:5 }}>Set {s.set_number}</div>
+                        <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:900, color: w1 ? "#16a34a" : "var(--ink)" }}>{s.score_p1}</div>
+                        <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:900, color: w2 ? "#16a34a" : "var(--ink)" }}>{s.score_p2}</div>
+                      </div>
+                    );
+                  })}
+                  {isLive && (
+                    <div style={{ background:"var(--primary-dim)", border:"1px solid rgba(255,107,53,.3)", borderRadius:10, padding:"10px 6px", textAlign:"center" }}>
+                      <div style={{ fontSize:9, color:"var(--primary)", fontWeight:700, marginBottom:5 }}>Now</div>
+                      <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:900, color:"var(--primary)" }}>{liveS1}</div>
+                      <div style={{ fontFamily:"var(--font-display)", fontSize:16, fontWeight:900, color:"var(--primary)" }}>{liveS2}</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Cricket: match narrative */}
+            {isCricket && isDone && mdInn1 && mdInn2 && (() => {
+              const bat1stName  = battingFirst === 1 ? m.player_1?.name : m.player_2?.name;
+              const bat2ndName  = battingFirst === 1 ? m.player_2?.name : m.player_1?.name;
+              const regularTied = mdInn1.score_p1 === mdInn2.score_p1;
+              const bat2ndWon   = !hasSO && (battingFirst === 1 ? p2Win : p1Win);
+              const target      = mdInn1.score_p1 + 1;
+              const shortfall   = target - 1 - mdInn2.score_p1;
+              const wktsLeft    = 10 - mdInn2.score_p2;
+              const soBat1stName = soFirst === 1 ? m.player_1?.name : m.player_2?.name;
+              const soBat2ndName = soFirst === 1 ? m.player_2?.name : m.player_1?.name;
+              const winnerName   = p1Win ? m.player_1?.name : p2Win ? m.player_2?.name : null;
+              const soWinnerResult = hasSO && mdInn4 && !soTied && (() => {
+                const soBat2ndWon = (soFirst === 1 ? 2 : 1) === 1 ? p1Win : p2Win;
+                if (soBat2ndWon) { const w = 2 - mdInn4.score_p2; return `by ${w} wicket${w !== 1 ? "s" : ""}`; }
+                const r = mdInn3.score_p1 - mdInn4.score_p1;
+                return `by ${r} run${r !== 1 ? "s" : ""}`;
+              })();
+
+              return (
+                <div style={{ marginBottom:14, display:"flex", flexDirection:"column", gap:6 }}>
+                  {/* Regular innings summary */}
+                  <div style={{ padding:"10px 13px", background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:10, fontSize:12, color:"var(--muted)", lineHeight:1.6 }}>
+                    <strong style={{ color:"var(--ink)" }}>{bat1stName}</strong>{" batted first — scored "}
+                    <strong style={{ color:"var(--ink)" }}>{mdInn1.score_p1}/{mdInn1.score_p2}</strong>
+                    {". "}
+                    <strong style={{ color:"var(--ink)" }}>{bat2ndName}</strong>{" replied with "}
+                    <strong style={{ color:"var(--ink)" }}>{mdInn2.score_p1}/{mdInn2.score_p2}</strong>
+                    {regularTied
+                      ? " — match tied after regulation."
+                      : bat2ndWon
+                      ? <>{"."} <span style={{ color:"#16a34a" }}>{bat2ndName} won with {wktsLeft} wicket{wktsLeft !== 1 ? "s" : ""} to spare.</span></>
+                      : <>{"."} <span style={{ color:"var(--primary)" }}>{bat1stName} defended — {bat2ndName} fell short by {shortfall} run{shortfall !== 1 ? "s" : ""}.</span></>}
+                  </div>
+
+                  {/* Super over */}
+                  {hasSO && mdInn3 && (
+                    <div style={{ padding:"10px 13px", background:"rgba(245,158,11,.06)", border:"1px solid rgba(245,158,11,.25)", borderRadius:10, fontSize:12, color:"var(--muted)", lineHeight:1.6 }}>
+                      <div style={{ fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, color:"#f59e0b", marginBottom:5, fontFamily:"var(--font-display)" }}>⚡ Super Over</div>
+                      <strong style={{ color:"var(--ink)" }}>{soBat1stName}</strong>{" scored "}
+                      <strong style={{ color:"#f59e0b" }}>{mdInn3.score_p1}/{mdInn3.score_p2}</strong>
+                      {mdInn4 ? (
+                        <>{". "}<strong style={{ color:"var(--ink)" }}>{soBat2ndName}</strong>{" replied with "}
+                        <strong style={{ color:"#f59e0b" }}>{mdInn4.score_p1}/{mdInn4.score_p2}</strong>
+                        {soTied ? " — super over tied." : "."}</>
+                      ) : "."}
+                    </div>
+                  )}
+
+                  {/* Final result */}
+                  {winnerName && (
+                    <div style={{ padding:"10px 13px", background: soTied ? "rgba(249,115,22,.07)" : "rgba(22,163,74,.06)", border:`1px solid ${soTied ? "rgba(249,115,22,.3)" : "rgba(22,163,74,.2)"}`, borderRadius:10, fontSize:12, lineHeight:1.6 }}>
+                      <strong style={{ color: soTied ? "var(--primary)" : "#16a34a", fontSize:13 }}>{winnerName}</strong>
+                      {soTied
+                        ? " won by Coin Toss 🪙"
+                        : hasSO && soWinnerResult
+                        ? <>{" won "}<strong>{soWinnerResult}</strong>{" in the Super Over"}</>
+                        : " won"}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Cricket: innings breakdown */}
+            {isCricket && inningsData.length > 0 && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"var(--muted)", marginBottom:8 }}>Innings</div>
+                <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:12, overflow:"hidden" }}>
+                  {inningsData.map((inn, idx) => {
+                    const showSoHeader = inn.isSuperOverInnings && (idx === 0 || !inningsData[idx-1].isSuperOverInnings);
+                    const soC = "#f59e0b";
+                    return (
+                      <div key={inn.innNum}>
+                        {showSoHeader && (
+                          <div style={{ padding:"7px 14px", background:"rgba(245,158,11,.07)", borderTop:"1px solid rgba(245,158,11,.2)", borderBottom:"1px solid rgba(245,158,11,.15)" }}>
+                            <span style={{ fontSize:9, fontWeight:900, textTransform:"uppercase", letterSpacing:1.5, color:soC, fontFamily:"var(--font-display)" }}>⚡ Super Over</span>
+                          </div>
+                        )}
+                        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px",
+                          borderBottom: idx < inningsData.length - 1 ? `1px solid ${inn.isSuperOverInnings ? "rgba(245,158,11,.15)" : "var(--border)"}` : "none",
+                          background: inn.isActiveLive ? "var(--primary-dim)" : inn.isSuperOverInnings ? "rgba(245,158,11,.03)" : "transparent" }}>
+                          <div style={{ width:22, height:22, borderRadius:"50%", flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center",
+                            background: inn.isActiveLive ? "var(--primary)" : inn.isSuperOverInnings ? "rgba(245,158,11,.15)" : "var(--elevated)",
+                            border:`1px solid ${inn.isActiveLive ? "var(--primary)" : inn.isSuperOverInnings ? "rgba(245,158,11,.4)" : "var(--border)"}` }}>
+                            <span style={{ fontSize:8, fontWeight:900, color: inn.isActiveLive ? "#fff" : inn.isSuperOverInnings ? soC : "var(--muted)" }}>
+                              {inn.isSuperOverInnings ? "SO" : inn.innNum}
+                            </span>
+                          </div>
+                          <div style={{ flex:1 }}>
+                            <div style={{ fontSize:13, fontWeight: inn.isWinner ? 800 : 600, color: inn.isWinner ? "#16a34a" : "var(--ink)" }}>{inn.teamName}</div>
+                            {inn.overs != null && <div style={{ fontSize:10, color:"var(--muted)", marginTop:1 }}>{inn.overs} overs</div>}
+                          </div>
+                          <div style={{ textAlign:"right" }}>
+                            <div style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:900, lineHeight:1,
+                              color: inn.isActiveLive ? "var(--primary)" : inn.isSuperOverInnings ? soC : "var(--ink)" }}>
+                              {inn.runs}<span style={{ fontSize:12, color:"var(--muted)", fontWeight:600 }}>/{inn.wickets}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {winMargin && (
+                  <div style={{ marginTop:8, borderRadius:8, padding:"8px 12px", textAlign:"center", fontSize:12, fontWeight:700,
+                    background: winMargin.includes("Coin") ? "rgba(249,115,22,.08)" : winMargin.includes("Super") ? "rgba(245,158,11,.08)" : "rgba(22,163,74,.08)",
+                    border: winMargin.includes("Coin") ? "1px solid rgba(249,115,22,.25)" : winMargin.includes("Super") ? "1px solid rgba(245,158,11,.25)" : "1px solid rgba(22,163,74,.25)",
+                    color: winMargin.includes("Coin") ? "var(--primary)" : winMargin.includes("Super") ? "#f59e0b" : "#16a34a" }}>
+                    {winMargin}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Footer: inline share — outside overflow so nothing is clipped */}
+          <div className="mdl-foot">
+            {SHARE_CHANNELS.map(ch => (
+              <button key={ch.id} onClick={() => share(ch.id)} style={{
+                width:42, height:42, borderRadius:12, border:"none", cursor:"pointer",
+                background:ch.color, color:"#fff",
+                display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
+              }}>
+                {ch.icon}
+              </button>
+            ))}
+            <button onClick={handleCopy} style={{
+              flex:1, height:42, borderRadius:12, cursor:"pointer",
+              border:`1px solid ${copied ? "rgba(22,163,74,.4)" : "var(--border)"}`,
+              background: copied ? "rgba(22,163,74,.08)" : "var(--elevated)",
+              color: copied ? "#16a34a" : "var(--ink)", fontSize:13, fontWeight:600,
+              display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+            }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                {copied
+                  ? <polyline points="20 6 9 17 4 12"/>
+                  : <><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>}
+              </svg>
+              {copied ? "Copied!" : "Copy link"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
 }
 
 // BracketCard removed — bracket rendering handled by RoadToFinal component
@@ -725,56 +1438,51 @@ function Section({ id, title, count, accent, children, wide, action }) {
 }
 
 // ── Tournament hero ───────────────────────────────────────────
-function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, totalMatches, sportKey, darkMode, onToggleDark, slug }) {
-  const sportIcon  = SPORT_META[sportKey]?.icon;
+function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, totalMatches, sportKey, darkMode, onToggleDark, slug, onRegister }) {
   const sportLabel = SPORT_META[sportKey]?.label;
+  const status = tournament.status || "draft";
 
-  const stCfg = ({
-    live:         { label:"Live Now",           bg:"var(--primary-dim)",  c:"var(--primary)", b:"rgba(255,107,53,.25)", dot:true  },
-    registration: { label:"Registration Open",  bg:"rgba(22,163,74,.1)", c:"#16a34a",         b:"rgba(22,163,74,.25)",  dot:false },
-    completed:    { label:"Completed",          bg:"var(--elevated)",    c:"var(--muted)",    b:"var(--border)",         dot:false },
-    draft:        { label:"Coming Soon",        bg:"var(--elevated)",    c:"var(--muted)",    b:"var(--border)",         dot:false },
-    fixtures:     { label:"Fixtures Set",       bg:"rgba(37,99,235,.1)", c:"#2563eb",         b:"rgba(37,99,235,.25)",  dot:false },
-  })[tournament.status] || { label:"", bg:"var(--elevated)", c:"var(--muted)", b:"var(--border)", dot:false };
+  const STATUS_CFG = {
+    live:         { label:"Live Now",          dot:true,  solidC:"var(--primary)", solidB:"rgba(255,107,53,.35)" },
+    registration: { label:"Registration Open", dot:false, solidC:"#16a34a",        solidB:"rgba(22,163,74,.35)"  },
+    completed:    { label:"Completed",         dot:false, solidC:"var(--muted)",   solidB:"var(--border)"        },
+    draft:        { label:"Coming Soon",       dot:false, solidC:"var(--muted)",   solidB:"var(--border)"        },
+    fixtures:     { label:"Fixtures Set",      dot:false, solidC:"#2563eb",        solidB:"rgba(37,99,235,.35)"  },
+  };
+  const stCfg = STATUS_CFG[status] || STATUS_CFG.draft;
 
-  const metaParts = [
-    tournament.venue,
-    tournament.city ? `${tournament.city}${tournament.state ? `, ${tournament.state}` : ""}` : null,
-    tournament.start_date,
-  ].filter(Boolean);
+  const fmtDate = (d) => {
+    if (!d) return null;
+    const [y, m, day] = d.split("-");
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return `${parseInt(day, 10)} ${months[parseInt(m, 10) - 1]} ${y}`;
+  };
+  const dateStr = (() => {
+    const s = fmtDate(tournament.start_date);
+    const e = fmtDate(tournament.end_date);
+    if (!s) return null;
+    return (!e || e === s) ? s : `${s} – ${e}`;
+  })();
+  const locationStr = [tournament.city, tournament.state].filter(Boolean).join(", ") || null;
 
   const hasBanner = !!tournament.poster_url;
   const hasLogo   = !!tournament.logo_url;
   const initials  = tournament.name.split(" ").slice(0, 2).map(w => w[0] || "").join("").toUpperCase() || "T";
 
-  // Reusable logo circle (different sizes for mobile vs desktop)
-  const logoCircle = (size, border = 4) => (
-    <div style={{
-      width:size, height:size, borderRadius:"50%",
-      border:`${border}px solid var(--bg)`,
-      boxShadow:"0 4px 20px rgba(0,0,0,.28)",
-      background:"var(--elevated)",
-      overflow:"hidden", flexShrink:0,
-      display:"flex", alignItems:"center", justifyContent:"center",
-    }}>
-      {hasLogo
-        ? <img src={tournament.logo_url} alt="logo"
-            style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
-        : <span style={{ fontFamily:"var(--font-display)", fontSize: size * 0.28,
-            fontWeight:900, color:"var(--primary)", lineHeight:1, userSelect:"none" }}>
-            {initials}
-          </span>
-      }
-    </div>
-  );
+  // On glass (banner) vs flat (no banner) styles
+  const glass = hasBanner;
+  const textC  = glass ? "#fff"                   : "var(--ink)";
+  const mutedC = glass ? "rgba(255,255,255,.72)"  : "var(--muted)";
+  const chipBg = glass ? "rgba(255,255,255,.15)"  : "var(--elevated)";
+  const chipBd = glass ? "rgba(255,255,255,.25)"  : "var(--border)";
+  const chipC  = glass ? "rgba(255,255,255,.92)"  : "var(--muted)";
 
-  // Reusable action buttons (share + dark mode)
-  const darkBtn = (glass) => (
+  const darkBtn = (
     <button onClick={onToggleDark} style={{
-      background: glass ? "rgba(255,255,255,.15)" : "none",
+      background: glass ? "rgba(255,255,255,.15)" : "var(--elevated)",
       border: glass ? "1px solid rgba(255,255,255,.25)" : "1px solid var(--border)",
-      backdropFilter: glass ? "blur(6px)" : "none",
-      borderRadius:6, width:32, height:32, cursor:"pointer",
+      backdropFilter: glass ? "blur(8px)" : "none",
+      borderRadius:8, width:34, height:34, cursor:"pointer",
       color: glass ? "#fff" : "var(--ink)",
       display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
     }}>
@@ -785,183 +1493,201 @@ function TournamentHero({ tournament, liveCount, totalPlayers, doneMatches, tota
     </button>
   );
 
-  // Shared chips + meta + stats block (used in both layouts)
-  const infoBody = (
-    <>
-      {/* Status + sport chips */}
-      <div style={{ display:"flex", gap:6, marginBottom:10, flexWrap:"wrap" }}>
-        <span style={{ display:"inline-flex", alignItems:"center", gap:5,
-          background:stCfg.bg, color:stCfg.c,
-          fontFamily:"var(--font-display)", fontSize:9, fontWeight:900,
-          textTransform:"uppercase", letterSpacing:2, padding:"4px 11px",
-          borderRadius:20, border:`1px solid ${stCfg.b}` }}>
-          {stCfg.dot && <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>}
-          {stCfg.label}
-        </span>
-        {sportIcon && sportLabel && (
-          <span style={{ display:"inline-flex", alignItems:"center", gap:4,
-            background:"var(--accent-dim)", color:"var(--accent)",
-            fontFamily:"var(--font-display)", fontSize:9, fontWeight:900,
-            textTransform:"uppercase", letterSpacing:1, padding:"4px 11px",
-            borderRadius:20, border:"1px solid var(--accent-border)" }}>
-            {sportIcon} {sportLabel}
-          </span>
-        )}
-      </div>
-
-      {/* Meta: venue · city · dates */}
-      {metaParts.length > 0 && (
-        <div style={{ display:"flex", flexWrap:"wrap", fontSize:13,
-          color:"var(--muted)", marginBottom:12, fontWeight:500, gap:2 }}>
-          {metaParts.map((item, i) => (
-            <span key={i} style={{ display:"inline-flex", alignItems:"center" }}>
-              {i > 0 && <span style={{ margin:"0 8px", opacity:.4 }}>·</span>}
-              {item}
-            </span>
-          ))}
-          {tournament.end_date && tournament.end_date !== tournament.start_date && (
-            <span style={{ display:"inline-flex", alignItems:"center" }}>
-              <span style={{ margin:"0 8px", opacity:.4 }}>→</span>
-              {tournament.end_date}
-            </span>
-          )}
-        </div>
-      )}
-
-      {tournament.description && (
-        <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.65, marginBottom:14, maxWidth:520 }}>
-          {tournament.description}
-        </p>
-      )}
-
-      {/* Stat chips */}
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-        {totalPlayers > 0 && (
-          <div style={{ background:"var(--elevated)", border:"1px solid var(--border)",
-            borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
-            <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900,
-              color:"var(--ink)", lineHeight:1 }}>{totalPlayers}</span>
-            <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Players</span>
-          </div>
-        )}
-        {totalMatches > 0 && (
-          <div style={{ background:"var(--elevated)", border:"1px solid var(--border)",
-            borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
-            <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900,
-              color:"var(--ink)", lineHeight:1 }}>{doneMatches}/{totalMatches}</span>
-            <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Matches</span>
-          </div>
-        )}
-        {liveCount > 0 && (
-          <div style={{ background:"rgba(255,107,53,.15)", border:"1px solid rgba(255,107,53,.35)",
-            borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
-            <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
-            <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900,
-              color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
-            <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live Now</span>
-          </div>
-        )}
-      </div>
-
-      {/* Sponsors */}
-      {tournament.sponsors?.length > 0 && (
-        <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:14, flexWrap:"wrap" }}>
-          <span style={{ fontSize:10, color:"var(--muted)", fontWeight:700,
-            textTransform:"uppercase", letterSpacing:1 }}>Sponsors</span>
-          {tournament.sponsors.map((s, i) => (
-            <span key={i} style={{ background:"var(--elevated)", border:"1px solid var(--border)",
-              borderRadius:6, padding:"3px 10px", fontSize:11, color:"var(--muted)", fontWeight:600 }}>
-              {s.name}
-            </span>
-          ))}
-        </div>
-      )}
-    </>
-  );
-
   return (
     <div style={{ borderBottom:"1px solid var(--border)" }}>
 
-      {/* ══════════ MOBILE ONLY: banner + floating logo ══════════ */}
-      <div className="hero-mobile-only" style={{ position:"relative" }}>
-        {/* Banner image — overflow:hidden scoped here only */}
-        <div style={{
-          position:"relative", height: hasBanner ? 300 : 140, overflow:"hidden",
-          background: hasBanner ? "#111" : "linear-gradient(135deg, rgba(var(--accent-rgb),.1) 0%, var(--bg) 70%)",
-        }}>
-          {hasBanner && (
-            <img src={tournament.poster_url} alt=""
-              style={{ position:"absolute", inset:0, width:"100%", height:"100%",
-                objectFit:"cover", objectPosition:"top center", display:"block" }} />
-          )}
-          <div style={{ position:"absolute", inset:0, pointerEvents:"none",
-            background:"linear-gradient(to bottom, rgba(0,0,0,.52) 0%, transparent 38%, transparent 58%, rgba(0,0,0,.5) 100%)" }} />
+      {/* ══ Hero band ══════════════════════════════════════════ */}
+      <div style={{ position:"relative", overflow:"hidden" }}>
 
-          {/* Top bar over banner */}
-          <div style={{ position:"absolute", top:0, left:0, right:0, zIndex:2 }}>
-            <div style={{ maxWidth:900, margin:"0 auto", padding:"16px 20px",
-              display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <span style={{ fontFamily:"var(--font-display)", fontSize:11, fontWeight:900,
-                textTransform:"uppercase", letterSpacing:2, lineHeight:1 }}>
-                <span style={{ color:"var(--primary)" }}>The</span>
-                <span style={{ color:"#fff" }}>Score</span>
-                <span style={{ color:"var(--primary)" }}>Board</span>
-              </span>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <ShareButton type="tournament" slug={slug} title={`${tournament.name} — Live on TheScoreBoard`} />
-                {darkBtn(true)}
+        {/* Background — poster or accent gradient */}
+        {hasBanner ? (
+          <>
+            <img src={tournament.poster_url} alt=""
+              style={{ position:"absolute", inset:0, width:"100%", height:"100%", objectFit:"cover", objectPosition:"center top", display:"block", zIndex:0 }} />
+            <div style={{ position:"absolute", inset:0, zIndex:1,
+              background:"linear-gradient(170deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,.38) 50%, rgba(0,0,0,.68) 100%)" }} />
+          </>
+        ) : (
+          <div style={{ position:"absolute", inset:0, zIndex:0,
+            background:"linear-gradient(160deg, rgba(var(--accent-rgb),.13) 0%, rgba(var(--accent-rgb),.04) 55%, transparent 100%)" }} />
+        )}
+
+        {/* Content */}
+        <div style={{ position:"relative", zIndex:2, maxWidth:900, margin:"0 auto" }}>
+
+          {/* Top bar: brand + dark toggle */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"14px 20px" }}>
+            <span style={{ fontFamily:"var(--font-display)", fontSize:11, fontWeight:900, textTransform:"uppercase", letterSpacing:2, lineHeight:1 }}>
+              <span style={{ color:"var(--primary)" }}>The</span>
+              <span style={{ color: glass ? "#fff" : "var(--ink)" }}>Score</span>
+              <span style={{ color:"var(--primary)" }}>Board</span>
+            </span>
+            {darkBtn}
+          </div>
+
+          {/* Main hero content */}
+          <div style={{ padding:"4px 20px 28px", display:"flex", alignItems:"flex-start", gap:16 }}>
+
+            {/* Tournament logo / emblem */}
+            <div style={{
+              flexShrink:0, width:72, height:72, borderRadius:16,
+              background: glass ? "rgba(255,255,255,.14)" : "var(--surface)",
+              border: glass ? "2px solid rgba(255,255,255,.28)" : "2px solid var(--border)",
+              backdropFilter: glass ? "blur(12px)" : "none",
+              boxShadow: glass ? "0 8px 32px rgba(0,0,0,.28)" : "0 2px 12px rgba(0,0,0,.08)",
+              overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center",
+            }}>
+              {hasLogo
+                ? <img src={tournament.logo_url} alt="logo" style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+                : <span style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:900, color:"var(--primary)", lineHeight:1, userSelect:"none" }}>{initials}</span>
+              }
+            </div>
+
+            {/* Right side: chips → name → meta */}
+            <div style={{ flex:1, minWidth:0 }}>
+
+              {/* Status + sport chips */}
+              <div style={{ display:"flex", gap:5, marginBottom:9, flexWrap:"wrap" }}>
+                <span style={{
+                  display:"inline-flex", alignItems:"center", gap:4,
+                  background: chipBg, backdropFilter: glass ? "blur(8px)" : "none",
+                  color: glass ? stCfg.solidC : stCfg.solidC,
+                  border:`1px solid ${glass ? chipBd : stCfg.solidB}`,
+                  fontFamily:"var(--font-display)", fontSize:8, fontWeight:900,
+                  textTransform:"uppercase", letterSpacing:1.5, padding:"3px 10px", borderRadius:20,
+                }}>
+                  {stCfg.dot && <span className="live-dot" style={{ width:5, height:5, background:"var(--primary)" }}/>}
+                  {stCfg.label}
+                </span>
+                {sportLabel && (
+                  <span style={{
+                    display:"inline-flex", alignItems:"center",
+                    background: glass ? "rgba(255,255,255,.12)" : "var(--accent-dim)",
+                    backdropFilter: glass ? "blur(8px)" : "none",
+                    color: glass ? "rgba(255,255,255,.9)" : "var(--accent)",
+                    border:`1px solid ${glass ? "rgba(255,255,255,.2)" : "var(--accent-border)"}`,
+                    fontFamily:"var(--font-display)", fontSize:8, fontWeight:900,
+                    textTransform:"uppercase", letterSpacing:1, padding:"3px 10px", borderRadius:20,
+                  }}>
+                    {SPORT_META[sportKey]?.icon && <span style={{ fontSize:9, marginRight:3 }}>{SPORT_META[sportKey].icon}</span>}
+                    {sportLabel}
+                  </span>
+                )}
               </div>
+
+              {/* Tournament name — the hero centrepiece */}
+              <h1 style={{
+                fontFamily:"var(--font-display)", fontWeight:900, lineHeight:1.0,
+                letterSpacing:"-1.5px", textTransform:"uppercase",
+                color: textC,
+                textShadow: glass ? "0 2px 10px rgba(0,0,0,.5)" : "none",
+                margin:"0 0 10px 0",
+                fontSize:"clamp(18px, 5.5vw, 34px)",
+                wordBreak:"break-word",
+              }}>
+                {tournament.name}
+              </h1>
+
+              {/* Compact meta: date · location · venue */}
+              {(dateStr || locationStr || tournament.venue) && (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:"5px 14px" }}>
+                  {dateStr && (
+                    <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:mutedC }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                      {dateStr}
+                    </span>
+                  )}
+                  {(locationStr || tournament.venue) && (
+                    <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:mutedC }}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                      {[tournament.venue, locationStr].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
+                  {/* Google Maps button — only shown when coordinates are saved */}
+                  {tournament.venue_lat && tournament.venue_lng && (
+                    <a
+                      href={`https://www.google.com/maps?q=${tournament.venue_lat},${tournament.venue_lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display:"inline-flex", alignItems:"center", gap:4,
+                        fontSize:11, fontWeight:700,
+                        color: primaryC || "var(--primary, #FF6B35)",
+                        textDecoration:"none",
+                        padding:"3px 8px", borderRadius:6,
+                        border:`1px solid ${primaryC || "var(--primary, #FF6B35)"}44`,
+                        background:`${primaryC || "var(--primary, #FF6B35)"}10`,
+                      }}
+                    >
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                      Open in Maps
+                    </a>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
-
-        {/* Logo — outside overflow:hidden, straddles banner bottom */}
-        <div style={{ position:"absolute", bottom:-36, left:0, right:0, zIndex:10, pointerEvents:"none" }}>
-          <div style={{ maxWidth:900, margin:"0 auto", padding:"0 20px" }}>
-            <div style={{ pointerEvents:"all" }}>{logoCircle(72)}</div>
-          </div>
-        </div>
       </div>
 
-      {/* ══════════ DESKTOP ONLY: simple top bar (no banner) ══════════ */}
-      <div className="hero-desktop-only">
-        <div style={{ maxWidth:900, margin:"0 auto", padding:"18px 24px",
-          display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <span style={{ fontFamily:"var(--font-display)", fontSize:12, fontWeight:900,
-            textTransform:"uppercase", letterSpacing:2, lineHeight:1 }}>
-            <span style={{ color:"var(--primary)" }}>The</span>
-            <span style={{ color:"var(--ink)" }}>Score</span>
-            <span style={{ color:"var(--primary)" }}>Board</span>
-          </span>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <ShareButton type="tournament" slug={slug} title={`${tournament.name} — Live on TheScoreBoard`} />
-            {darkBtn(false)}
+      {/* ══ Below-fold ══════════════════════════════════════════ */}
+      <div style={{ maxWidth:900, margin:"0 auto", padding:"20px 20px 32px" }}>
+
+        {/* Description */}
+        {tournament.description && (
+          <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.6, margin:"0 0 16px", maxWidth:560 }}>
+            {tournament.description}
+          </p>
+        )}
+
+        {/* Stats row */}
+        {(totalPlayers > 0 || totalMatches > 0 || liveCount > 0) && (
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:16 }}>
+            {totalPlayers > 0 && (
+              <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{totalPlayers}</span>
+                <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Players</span>
+              </div>
+            )}
+            {totalMatches > 0 && (
+              <div style={{ background:"var(--elevated)", border:"1px solid var(--border)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:5 }}>
+                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--ink)", lineHeight:1 }}>{doneMatches}/{totalMatches}</span>
+                <span style={{ fontSize:11, color:"var(--muted)", fontWeight:500 }}>Matches</span>
+              </div>
+            )}
+            {liveCount > 0 && (
+              <div style={{ background:"rgba(255,107,53,.12)", border:"1px solid rgba(255,107,53,.3)", borderRadius:20, padding:"5px 14px", display:"flex", alignItems:"center", gap:6 }}>
+                <span className="live-dot" style={{ width:6, height:6, background:"var(--primary)" }}/>
+                <span style={{ fontFamily:"var(--font-display)", fontSize:15, fontWeight:900, color:"var(--primary)", lineHeight:1 }}>{liveCount}</span>
+                <span style={{ fontSize:11, color:"var(--primary)", fontWeight:600 }}>Live</span>
+              </div>
+            )}
           </div>
-        </div>
-      </div>
+        )}
 
-      {/* ══════════ INFO ZONE (both layouts) ══════════ */}
-      {/* hero-info-zone CSS: mobile padding-top=52px, desktop padding-top=0 */}
-      <div className="hero-info-zone" style={{ maxWidth:900, margin:"0 auto" }}>
+        {/* Register CTA — full-width prominent button, separate from stats */}
+        {status === "registration" && onRegister && (
+          <button onClick={onRegister} style={{
+            display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+            width:"100%", padding:"13px 20px", borderRadius:12, border:"none",
+            cursor:"pointer", background:"var(--primary)", color:"#fff",
+            fontFamily:"var(--font-display)", fontSize:13, fontWeight:900,
+            textTransform:"uppercase", letterSpacing:1.2,
+            boxShadow:"0 4px 16px rgba(255,107,53,.35)",
+            marginBottom:24,
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <line x1="19" y1="8" x2="19" y2="14"/>
+              <line x1="22" y1="11" x2="16" y2="11"/>
+            </svg>
+            Register Now
+          </button>
+        )}
 
-        {/* Desktop: logo circle + tournament name side-by-side */}
-        <div className="hero-desktop-namerow">
-          {logoCircle(64, 3)}
-          <h1 style={{ fontFamily:"var(--font-display)", fontSize:32, fontWeight:900,
-            textTransform:"uppercase", letterSpacing:"-1.5px",
-            color:"var(--ink)", lineHeight:1.05, margin:0 }}>
-            {tournament.name}
-          </h1>
-        </div>
-
-        {/* Mobile: tournament name (logo floats above) */}
-        <h1 className="hero-mobile-name" style={{ fontFamily:"var(--font-display)", fontSize:26, fontWeight:900,
-          textTransform:"uppercase", letterSpacing:"-1.5px",
-          color:"var(--ink)", lineHeight:1.05, marginBottom:10 }}>
-          {tournament.name}
-        </h1>
-
-        {infoBody}
+        {/* Sponsors */}
+        {tournament.sponsors?.length > 0 && <SponsorDisplay sponsors={tournament.sponsors} />}
       </div>
     </div>
   );
@@ -1043,7 +1769,6 @@ function RegisterSection({ events, tournament }) {
       {phase === "browse" && (
         open.length === 0 ? (
           <div className="empty">
-            <div className="empty-icon">📋</div>
             <div className="empty-title">Registration Closed</div>
             <p style={{ fontSize:13, color:"var(--muted)", marginTop:8 }}>No events are currently open for registration.</p>
           </div>
@@ -1060,9 +1785,19 @@ function RegisterSection({ events, tournament }) {
   );
 }
 
+// ── Info section ──────────────────────────────────────────────
+function InfoSection({ info }) {
+  return (
+    <Section id="info" title="Tournament Info">
+      <TournamentInfoDisplay info={info} />
+    </Section>
+  );
+}
+
 // ── Fixtures section ──────────────────────────────────────────
-function FixturesSection({ events }) {
+function FixturesSection({ events, onSelect, titleSponsor }) {
   const multiEvent = events.length > 1;
+  const sponsorFooter = titleSponsor ? <CardSponsorFooter sponsor={titleSponsor} /> : null;
   // Flatten all matches, tagging each with sport_key and event name
   const allMatches = events.flatMap(ev =>
     (ev.all_matches || []).map(m => ({ ...m, sport_key: ev.sport_key, _eventName: ev.name }))
@@ -1092,7 +1827,6 @@ function FixturesSection({ events }) {
 
       {allMatches.length === 0 ? (
         <div className="empty">
-          <div className="empty-icon">🏆</div>
           <div className="empty-title">Fixtures Not Set Yet</div>
           <p style={{ fontSize:13, color:"var(--muted)", marginTop:8 }}>The draw will be published here once ready.</p>
         </div>
@@ -1104,9 +1838,9 @@ function FixturesSection({ events }) {
                 <span className="live-dot" style={{ width:7, height:7, background:"var(--primary)" }}/>Live Now
               </div>
               {live.map(m => (
-                <div key={m.match_id}>
+                <div key={m.match_id} onClick={() => onSelect?.(m)} style={{ cursor:"pointer" }}>
                   {multiEvent && <div style={{ fontSize:9, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:3, paddingLeft:2 }}>{m._eventName}</div>}
-                  <MatchCard match={m} sportKey={m.sport_key} />
+                  <MatchCard match={m} sportKey={m.sport_key} sponsorFooter={sponsorFooter} />
                 </div>
               ))}
             </div>
@@ -1115,9 +1849,9 @@ function FixturesSection({ events }) {
             <div style={{ marginBottom:20 }}>
               <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"var(--muted)", marginBottom:10, fontFamily:"var(--font-display)" }}>Upcoming</div>
               {upcoming.map(m => (
-                <div key={m.match_id}>
+                <div key={m.match_id} onClick={() => onSelect?.(m)} style={{ cursor:"pointer" }}>
                   {multiEvent && <div style={{ fontSize:9, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:3, paddingLeft:2 }}>{m._eventName}</div>}
-                  <MatchCard match={m} sportKey={m.sport_key} />
+                  <MatchCard match={m} sportKey={m.sport_key} sponsorFooter={sponsorFooter} />
                 </div>
               ))}
             </div>
@@ -1126,9 +1860,9 @@ function FixturesSection({ events }) {
             <div style={{ marginBottom:4 }}>
               <div style={{ fontSize:9, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"var(--muted)", marginBottom:10, fontFamily:"var(--font-display)" }}>Completed</div>
               {done.map(m => (
-                <div key={m.match_id}>
+                <div key={m.match_id} onClick={() => onSelect?.(m)} style={{ cursor:"pointer" }}>
                   {multiEvent && <div style={{ fontSize:9, color:"var(--muted)", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:3, paddingLeft:2 }}>{m._eventName}</div>}
-                  <MatchCard match={m} sportKey={m.sport_key} />
+                  <MatchCard match={m} sportKey={m.sport_key} sponsorFooter={sponsorFooter} />
                 </div>
               ))}
             </div>
@@ -1158,7 +1892,7 @@ function LeaderboardSection({ events }) {
           <div key={ev.event_id} style={{ marginBottom:20 }}>
             {relevant.length > 1 && (
               <div style={{ fontFamily:"var(--font-display)", fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1, color:"var(--muted)", marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
-                {SPORT_META[sp]?.icon} {ev.name}
+                {ev.name}
               </div>
             )}
 
@@ -1222,11 +1956,52 @@ function BracketSection({ events }) {
   );
 }
 
+// ── Teams section ─────────────────────────────────────────────
+function TeamsSection({ events }) {
+  const eventsWithParticipants = events.filter(ev => (ev.participants || []).length > 0);
+  if (!eventsWithParticipants.length) return null;
+  const multiEvent = eventsWithParticipants.length > 1;
+  const totalCount = eventsWithParticipants.reduce((n, ev) => n + ev.participants.length, 0);
+
+  return (
+    <Section id="teams" title="Teams" count={totalCount}>
+      {eventsWithParticipants.map(ev => {
+        const ps = ev.participants || [];
+        return (
+          <div key={ev.event_id} style={{ marginBottom: multiEvent ? 20 : 0 }}>
+            {multiEvent && (
+              <div style={{ fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:1.5, color:"var(--muted)", fontFamily:"var(--font-display)", marginBottom:10 }}>
+                {ev.name}
+              </div>
+            )}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              {ps.map(p => (
+                <div key={p.id} style={{ display:"flex", alignItems:"center", gap:10, background:"var(--surface)", border:"1px solid var(--border)", borderRadius:10, padding:"10px 12px" }}>
+                  {/* Logo / initial */}
+                  <div style={{ width:36, height:36, borderRadius:8, flexShrink:0, background:"var(--primary-dim)", border:"1px solid var(--border)", overflow:"hidden", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    {p.logo_url
+                      ? <img src={p.logo_url} alt={p.name} style={{ width:"100%", height:"100%", objectFit:"contain" }} />
+                      : <span style={{ fontFamily:"var(--font-display)", fontSize:13, fontWeight:900, color:"var(--primary)" }}>{(p.name[0] || "?").toUpperCase()}</span>
+                    }
+                  </div>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:"var(--ink)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name}</div>
+                    {p.group && <div style={{ fontSize:10, color:"var(--muted)", marginTop:1 }}>{p.group}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </Section>
+  );
+}
+
 // ── Draft view ────────────────────────────────────────────────
 function DraftView({ tournament }) {
   return (
     <div style={{ maxWidth:480, margin:"72px auto", padding:"0 24px", textAlign:"center" }}>
-      <div style={{ fontSize:56, marginBottom:20 }}>🏗️</div>
       <h2 style={{ fontFamily:"var(--font-display)", fontSize:22, fontWeight:900, textTransform:"uppercase", letterSpacing:-1, marginBottom:12 }}>Coming Soon</h2>
       <p style={{ fontSize:14, color:"var(--muted)", lineHeight:1.7, marginBottom:28 }}>
         <strong style={{ color:"var(--ink)" }}>{tournament.name}</strong> is still being set up. Check back soon.
@@ -1245,11 +2020,12 @@ export default function TournamentPublic() {
   const { slug, sportUrl } = useParams();
   const navigate = useNavigate();
 
-  const [data,        setData]        = useState(null);
-  const [error,       setError]       = useState(null);
-  const [activeId,    setActiveId]    = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  const [darkMode,    setDarkMode]    = useState(
+  const [data,          setData]          = useState(null);
+  const [error,         setError]         = useState(null);
+  const [activeId,      setActiveId]      = useState(null);
+  const [lastUpdated,   setLastUpdated]   = useState(null);
+  const [selectedMatch, setSelectedMatch] = useState(null);
+  const [darkMode,      setDarkMode]      = useState(
     () => (localStorage.getItem("theme") || "light") === "dark"
   );
   const fetchingRef = useRef(false);
@@ -1279,11 +2055,18 @@ export default function TournamentPublic() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Apply sport accent when data first loads
+  // Apply sport accent + set default active tab when data first loads
   useEffect(() => {
     if (!data) return;
     const firstSportKey = data.events?.[0]?.sport_key;
     if (firstSportKey) applyAccent(firstSportKey);
+    const t = data.tournament;
+    const evs = data.events || [];
+    const status = t?.status || "draft";
+    setActiveId(prev => {
+      if (prev) return prev;
+      return "fixtures";
+    });
   }, [data]);
 
   useEffect(() => {
@@ -1294,31 +2077,9 @@ export default function TournamentPublic() {
     return () => clearInterval(id);
   }, [data, fetchData]);
 
-  // Scroll spy — highlight active section
-  useEffect(() => {
-    const handleScroll = () => {
-      const ids = ["register", "fixtures", "leaderboard", "bracket"];
-      for (const id of [...ids].reverse()) {
-        const el = document.getElementById(id);
-        if (el && el.getBoundingClientRect().top <= 80) {
-          setActiveId(id);
-          return;
-        }
-      }
-      // Nothing scrolled into view — pick first visible section
-      for (const id of ids) {
-        if (document.getElementById(id)) { setActiveId(id); return; }
-      }
-    };
-    window.addEventListener("scroll", handleScroll, { passive: true });
-    handleScroll();
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, [data]);
-
-  const scrollTo = (id) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior:"smooth", block:"start" });
+  const switchTab = (id) => {
     setActiveId(id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // ── Loading ──
@@ -1333,7 +2094,7 @@ export default function TournamentPublic() {
     <div className="auth-wrap">
       <div className="auth-card" style={{ textAlign:"center" }}>
         <div className="auth-logo">The<span className="accent">Score</span>Board</div>
-        <div style={{ fontSize:40, margin:"20px 0 12px" }}>😕</div>
+        <div style={{ fontSize:40, margin:"20px 0 12px", color:"var(--muted)" }}>:(</div>
         <p style={{ color:"var(--muted)", marginBottom:20, fontSize:14 }}>{error}</p>
         <button className="btn btn-primary" onClick={() => navigate("/")}>Go Home</button>
       </div>
@@ -1348,32 +2109,42 @@ export default function TournamentPublic() {
   const doneCt      = allMatches.filter(m => m.status === "done").length;
   const totalPlayers = events.reduce((s, ev) => s + (ev.player_count ?? 0), 0);
 
-  const regOpen   = status === "registration";
-  const hasKO     = events.some(ev => ev.format === "direct_knockout" || ev.format === "group_knockout");
   const hasBoard  = events.some(ev => ev.format === "round_robin"     || ev.format === "group_knockout");
+  const hasTeams  = events.some(ev => (ev.participants || []).length > 0);
+  const teamCount = events.reduce((n, ev) => n + (ev.participants || []).length, 0);
+
+  const ti = t.tournament_info || {};
+  const hasInfo = !!(
+    ti.overview?.trim() ||
+    ti.prize_pool?.length > 0 ||
+    ti.rules?.trim() ||
+    ti.contact?.entry_fee?.trim() ||
+    ti.contact?.reg_deadline?.trim() ||
+    ti.contact?.persons?.length > 0
+  );
 
   const primarySportKey = events[0]?.sport_key;
+  const titleSponsor    = t.sponsors?.find(s => s.tier === "title") ?? null;
 
   if (status === "draft") return (
     <div className="app">
-      <TournamentHero tournament={t} liveCount={0} totalPlayers={0} doneMatches={0} totalMatches={0} sportKey={primarySportKey} darkMode={darkMode} onToggleDark={toggleDark} slug={slug} />
+      <TournamentHero tournament={t} liveCount={0} totalPlayers={0} doneMatches={0} totalMatches={0} sportKey={primarySportKey} darkMode={darkMode} onToggleDark={toggleDark} slug={slug} onRegister={null} />
       <DraftView tournament={t} />
     </div>
   );
 
-  // Build section list
+  // Build section list (register is now a hero button, not a tab)
   const sections = [
-    ...(regOpen ? [{ id:"register",   label:"Register"        }] : []),
-    { id:"fixtures",   label:"Fixtures", count: allMatches.length },
-    ...(hasBoard ? [{ id:"leaderboard", label:"Leaderboard" }] : []),
-    ...(hasKO   ? [{ id:"bracket",     label:"Road to Final" }] : []),
+    { id:"fixtures",    label:"Fixtures",    count: allMatches.length },
+    ...(hasTeams ? [{ id:"teams",       label:"Teams",       count: teamCount }] : []),
+    ...(hasBoard ? [{ id:"leaderboard", label:"Leaderboard"                   }] : []),
+    ...(hasInfo  ? [{ id:"info",        label:"Info"                          }] : []),
   ];
 
-  // Default active on first render
   const effectiveActive = activeId || sections[0]?.id;
 
   return (
-    <div className="app">
+    <div className="app" style={{ paddingBottom: titleSponsor ? 68 : 0 }}>
       <TournamentHero
         tournament={t}
         liveCount={liveMatches.length}
@@ -1384,17 +2155,18 @@ export default function TournamentPublic() {
         darkMode={darkMode}
         onToggleDark={toggleDark}
         slug={slug}
+        onRegister={() => navigate(`/t/${slug}/register`)}
       />
 
       {liveMatches.length > 0 && <LiveStrip liveMatches={liveMatches} />}
 
-      <SectionNav sections={sections} activeId={effectiveActive} onNav={scrollTo} />
+      <SectionNav sections={sections} activeId={effectiveActive} onNav={switchTab} />
 
       <div className="pub-content">
-        {regOpen  && <RegisterSection events={events} tournament={t} />}
-        <FixturesSection events={events} />
-        {hasBoard && <LeaderboardSection events={events} />}
-        {hasKO    && <BracketSection events={events} />}
+        {effectiveActive === "fixtures"               && <FixturesSection events={events} onSelect={setSelectedMatch} titleSponsor={titleSponsor} />}
+        {effectiveActive === "teams"       && hasTeams && <TeamsSection events={events} />}
+        {effectiveActive === "leaderboard" && hasBoard && <LeaderboardSection events={events} />}
+        {effectiveActive === "info"        && hasInfo  && <InfoSection info={t.tournament_info} />}
       </div>
 
       <footer style={{ textAlign:"center", padding:"20px 24px", color:"var(--subtle)", fontSize:12, borderTop:"1px solid var(--border)" }}>
@@ -1402,6 +2174,14 @@ export default function TournamentPublic() {
         {liveMatches.length > 0 && " · Auto-refreshing"}
         {lastUpdated && ` · Updated ${lastUpdated.toLocaleTimeString()}`}
       </footer>
+
+      {/* Fixed share FAB — sits above sticky sponsor bar when present */}
+      <div style={{ position:"fixed", bottom: titleSponsor ? 68 + 14 : 20, right:20, zIndex:300, transition:"bottom .2s" }}>
+        <ShareButton type="tournament" slug={slug} title={`${t.name} — Live on TheScoreBoard`} upward />
+      </div>
+
+      {selectedMatch && <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />}
+      {t.sponsors?.length > 0 && status !== "draft" && <SponsorStickyBar sponsors={t.sponsors} />}
     </div>
   );
 }

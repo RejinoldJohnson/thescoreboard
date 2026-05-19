@@ -1,12 +1,35 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
+function getModeIcon(mode) {
+  if (mode === "player") return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+      <circle cx="12" cy="7" r="4"/>
+    </svg>
+  );
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/>
+      <line x1="9" y1="21" x2="9" y2="9"/>
+    </svg>
+  );
+}
+
 export default function OrgHeader({ crumbs = [], right = null, user = null, onLogout = null }) {
   const navigate = useNavigate();
-  
+
+  const [mode, setMode] = useState(() => localStorage.getItem("tsb_mode") || "organiser");
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem("theme") || "light";
   });
+
+  const toggleMode = () => {
+    const next = mode === "organiser" ? "player" : "organiser";
+    setMode(next);
+    localStorage.setItem("tsb_mode", next);
+    navigate(next === "player" ? "/player" : "/organiser", { replace: false });
+  };
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("theme");
@@ -40,7 +63,7 @@ export default function OrgHeader({ crumbs = [], right = null, user = null, onLo
         </span>
 
         {/* Controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           {/* Username — hidden on mobile via CSS */}
           {user?.name && (
             <span className="user-name-desktop" style={{ fontSize: 13, color: "var(--muted)", fontWeight: 600 }}>
@@ -49,6 +72,25 @@ export default function OrgHeader({ crumbs = [], right = null, user = null, onLo
           )}
 
           {right}
+
+          {/* Mode toggle */}
+          <button
+            onClick={toggleMode}
+            title={`Switch to ${mode === "organiser" ? "Player" : "Organiser"} mode`}
+            style={{
+              display:"flex", alignItems:"center", gap:5,
+              padding:"5px 10px", borderRadius:6, cursor:"pointer",
+              border:"1px solid var(--border)",
+              background: mode === "player" ? "rgba(22,163,74,.08)" : "var(--elevated)",
+              color: mode === "player" ? "#16a34a" : "var(--muted)",
+              fontSize:11, fontWeight:700,
+            }}
+          >
+            {getModeIcon(mode === "organiser" ? "player" : "organiser")}
+            <span className="user-name-desktop">
+              {mode === "organiser" ? "Player" : "Organiser"}
+            </span>
+          </button>
 
           <button
             onClick={toggleTheme}

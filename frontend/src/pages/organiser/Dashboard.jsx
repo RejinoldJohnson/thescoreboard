@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  getMe, getMyOrgs, createOrg, deleteOrg,
-  getTournaments, deleteTournament, clearToken,
+  getDashboard, createOrg, deleteOrg,
+  deleteTournament, clearToken,
 } from "../../api/client";
 import OrgHeader from "../../components/shared/OrgHeader";
 import CitySelect, { CITY_STATE_MAP } from "../../components/shared/CitySelect";
@@ -25,10 +25,13 @@ const sportIcons   = (events=[]) => {
 export default function Dashboard() {
   const navigate = useNavigate();
   const [user,        setUser]        = useState(null);
-  const [orgs,        setOrgs]        = useState([]);
+  const [orgs,        setOrgs]        = useState([]);   // [{org_id, name, ...}]
+  const [orgData,     setOrgData]     = useState({});   // org_id → { org, tournaments[] }
   const [activeOrg,   setActiveOrg]   = useState(null);
-  const [tournaments, setTournaments] = useState([]);
   const [msg,         setMsg]         = useState("");
+
+  // Tournaments for the currently-selected org
+  const tournaments = activeOrg ? (orgData[activeOrg.org_id]?.tournaments || []) : [];
 
   const [showOrgModal,       setShowOrgModal]       = useState(false);
   const [showDeleteOrgModal, setShowDeleteOrgModal] = useState(false);
@@ -37,26 +40,23 @@ export default function Dashboard() {
   const [onboarding,         setOnboarding]         = useState(false);
   const [orgForm,    setOrgForm]    = useState({ name:"", city:"", state:"" });
   const [orgLoading, setOrgLoading] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterSport,  setFilterSport]  = useState("all");
 
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(""), 3000); };
 
   useEffect(() => {
-    getMe().then(setUser).catch(() => { clearToken(); navigate("/login"); });
+    getDashboard().then(data => {
+      setUser(data.user);
+      const orgList = data.orgs || [];
+      const map = {};
+      const cleanOrgs = orgList.map(({ tournaments, ...o }) => { map[o.org_id] = { org: o, tournaments: tournaments || [] }; return o; });
+      setOrgs(cleanOrgs);
+      setOrgData(map);
+      if (!cleanOrgs.length) setOnboarding(true);
+      else setActiveOrg(cleanOrgs[0]);
+    }).catch(() => { clearToken(); navigate("/login"); });
   }, []);
-
-  useEffect(() => {
-    getMyOrgs().then(o => {
-      const list = o || [];
-      setOrgs(list);
-      if (!list.length) setOnboarding(true);
-      else setActiveOrg(list[0]);
-    }).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    if (!activeOrg) return;
-    getTournaments(activeOrg.org_id).then(t => setTournaments(t||[])).catch(console.error);
-  }, [activeOrg]);
 
   useEffect(() => {
     const close = () => setShowKebab(null);
@@ -65,12 +65,20 @@ export default function Dashboard() {
   }, []);
 
   const handleLogout    = () => { clearToken(); navigate("/", { replace:true }); };
+  const setOrgTournaments = (orgId, updater) =>
+    setOrgData(prev => ({
+      ...prev,
+      [orgId]: { ...prev[orgId], tournaments: typeof updater === "function" ? updater(prev[orgId]?.tournaments || []) : updater },
+    }));
+
   const handleCreateOrg = async () => {
     if (!orgForm.name.trim()) return flash("Name required.");
     setOrgLoading(true);
     try {
       const org = await createOrg(orgForm);
-      setOrgs(p => [org, ...p]); setActiveOrg(org);
+      setOrgs(p => [org, ...p]);
+      setOrgData(prev => ({ ...prev, [org.org_id]: { org, tournaments: [] } }));
+      setActiveOrg(org);
       setOnboarding(false); setShowOrgModal(false);
       setOrgForm({ name:"", city:"", state:"" }); flash("Organization created!");
     } catch(e) { flash("Error: "+e.message); }
@@ -81,7 +89,9 @@ export default function Dashboard() {
     try {
       await deleteOrg(activeOrg.org_id);
       const rest = orgs.filter(o => o.org_id !== activeOrg.org_id);
-      setOrgs(rest); setActiveOrg(rest[0]||null); setTournaments([]);
+      setOrgs(rest);
+      setOrgData(prev => { const n = {...prev}; delete n[activeOrg.org_id]; return n; });
+      setActiveOrg(rest[0] || null);
       setShowDeleteOrgModal(false); flash("Organization deleted.");
     } catch(e) { flash("Error: "+e.message); }
   };
@@ -89,15 +99,25 @@ export default function Dashboard() {
   const handleDeleteTournament = async () => {
     try {
       await deleteTournament(activeOrg.org_id, showDeleteModal.tournament_id);
-      setTournaments(p => p.filter(t => t.tournament_id !== showDeleteModal.tournament_id));
+      setOrgTournaments(activeOrg.org_id, p => p.filter(t => t.tournament_id !== showDeleteModal.tournament_id));
       setShowDeleteModal(null); flash("Tournament deleted.");
     } catch(e) { flash("Error: "+e.message); }
   };
 
   const ORDER  = { live:0, registration:1, fixtures:2, draft:3, completed:4 };
-  const sorted = [...tournaments].sort((a,b) => (ORDER[a.status]??9)-(ORDER[b.status]??9));
   const liveCount = tournaments.filter(t=>t.status==="live").length;
   const initials  = user?.name?.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()||"?";
+
+  const availableSports = [...new Set(
+    tournaments.flatMap(t => (t.events||[]).map(e => e.sport_key).filter(Boolean))
+  )];
+
+  const SPORT_LABEL = { table_tennis:"Table Tennis", badminton:"Badminton", cricket:"Cricket", football:"Football" };
+
+  const sorted = [...tournaments]
+    .filter(t => filterStatus === "all" || t.status === filterStatus)
+    .filter(t => filterSport  === "all" || (t.events||[]).some(e => e.sport_key === filterSport))
+    .sort((a,b) => (ORDER[a.status]??9)-(ORDER[b.status]??9));
 
   return (
     <div className="app">
@@ -202,7 +222,56 @@ export default function Dashboard() {
             </div>
           )}
 
-          <div className="section-label">Your Tournaments</div>
+          {/* Filters */}
+          {tournaments.length > 0 && (
+            <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:16 }}>
+              {/* Status chips */}
+              {["all","live","registration","fixtures","draft","completed"].map(s => {
+                const label = s === "all" ? "All" : (STATUS_META[s]?.label || s);
+                const active = filterStatus === s;
+                return (
+                  <button key={s} onClick={() => setFilterStatus(s)} style={{
+                    padding:"5px 12px", borderRadius:20, fontSize:11, fontWeight:700,
+                    textTransform:"uppercase", letterSpacing:1,
+                    border:`1.5px solid ${active ? "var(--primary)" : "var(--border)"}`,
+                    background: active ? "var(--primary)" : "var(--surface)",
+                    color: active ? "#fff" : "var(--muted)",
+                    cursor:"pointer", transition:"all .15s",
+                  }}>{label}</button>
+                );
+              })}
+              {/* Sport chips — only show sports present in this org */}
+              {availableSports.length > 0 && (
+                <>
+                  <span style={{ width:1, height:24, background:"var(--border)", alignSelf:"center" }}/>
+                  {availableSports.map(sk => {
+                    const active = filterSport === sk;
+                    return (
+                      <button key={sk} onClick={() => setFilterSport(active ? "all" : sk)} style={{
+                        padding:"5px 12px", borderRadius:20, fontSize:11, fontWeight:700,
+                        textTransform:"uppercase", letterSpacing:1,
+                        border:`1.5px solid ${active ? "var(--primary)" : "var(--border)"}`,
+                        background: active ? "var(--primary)" : "var(--surface)",
+                        color: active ? "#fff" : "var(--muted)",
+                        cursor:"pointer", transition:"all .15s",
+                      }}>{SPORT_EMOJI[sk]||""} {SPORT_LABEL[sk]||sk}</button>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="section-label">
+            Your Tournaments
+            {(filterStatus !== "all" || filterSport !== "all") && (
+              <span style={{ fontSize:11, color:"var(--muted)", fontWeight:400, marginLeft:8 }}>
+                {sorted.length} result{sorted.length!==1?"s":""}
+                {" · "}<span style={{ cursor:"pointer", color:"var(--primary)" }}
+                  onClick={() => { setFilterStatus("all"); setFilterSport("all"); }}>Clear</span>
+              </span>
+            )}
+          </div>
 
           {!activeOrg ? (
             <div className="empty">

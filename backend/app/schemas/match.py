@@ -51,8 +51,12 @@ class MatchCreate(BaseModel):
     group_id: Optional[int] = None
     round: int = 1
     stage: str = "group"
-    player1_id: int
-    player2_id: int
+    # Individual / doubles-player events
+    player1_id: Optional[int] = None
+    player2_id: Optional[int] = None
+    # Team events
+    team1_id: Optional[int] = None
+    team2_id: Optional[int] = None
     table_number: Optional[int] = None
 
 

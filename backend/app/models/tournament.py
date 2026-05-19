@@ -3,7 +3,7 @@ Tournament — the top-level shareable entity.
 Lifecycle: draft → registration → fixtures → live → completed
 """
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text,
+    Column, Integer, String, Boolean, DateTime, Date, ForeignKey, Text, Float, JSON,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -28,6 +28,8 @@ class Tournament(Base):
     # Dates
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
+    registration_start_date = Column(Date, nullable=True)
+    registration_end_date   = Column(Date, nullable=True)
 
     # Branding
     poster_url   = Column(String(500), nullable=True)  # primary visual asset
@@ -39,8 +41,13 @@ class Tournament(Base):
 
     # Location
     venue = Column(String(255), nullable=True)
-    city = Column(String(100), nullable=True)
+    city  = Column(String(100), nullable=True)
     state = Column(String(100), nullable=True)
+    venue_lat = Column(Float, nullable=True)   # coordinates from OpenStreetMap picker
+    venue_lng = Column(Float, nullable=True)
+
+    # Info & Rules sections (JSON dict keyed by section name)
+    tournament_info = Column(JSON, nullable=True)
 
     # Lifecycle: draft → registration → fixtures → live → completed
     status = Column(String(50), default="draft", nullable=False)
@@ -59,11 +66,13 @@ class Tournament(Base):
 class Sponsor(Base):
     __tablename__ = "sponsors"
 
-    sponsor_id = Column(Integer, primary_key=True)
+    sponsor_id    = Column(Integer, primary_key=True)
     tournament_id = Column(Integer, ForeignKey("tournaments.tournament_id", ondelete="CASCADE"), nullable=False)
-    name = Column(String(255), nullable=False)
-    logo_url = Column(String(500), nullable=True)
-    tier = Column(String(50), default="partner")
-    website = Column(String(500), nullable=True)
+    name          = Column(String(255), nullable=False)
+    logo_url      = Column(String(500), nullable=True)
+    tier          = Column(String(50),  default="partner")  # title | gold | silver | bronze | partner
+    website       = Column(String(500), nullable=True)
+    contact_phone = Column(String(50),  nullable=True)
+    description   = Column(Text,        nullable=True)
 
     tournament = relationship("Tournament", back_populates="sponsors")

@@ -1,20 +1,21 @@
 /**
  * CricketScorer — fullscreen Cricket live scorer.
  *
- * Pre-match: toss setup (who bats first, overs, wickets)
+ * Pre-match: toss setup (who bats first, overs)
  * Live: ball-by-ball scoring, wicket types, super over
  *
  * Data model (backend):
  *   Match set N = one innings  →  score_p1=runs, score_p2=wickets
  *   match.live_state = { batting_first, configured_overs, configured_wickets,
- *                        current_innings, runs, wickets, balls, ball_log }
+ *                        current_innings, runs, wickets, balls, ball_log,
+ *                        super_over_batting_first }
  *
  * Props
  * ─────
  *   match    – match data from API
  *   config   – event sport_config (overs, wickets)
  *   onScore  – (runs, wickets, extra) → void
- *   onFinish – (winner_position | null | "super_over") → void
+ *   onFinish – (winner_position | null | "super_over", extraData?) → void
  *   onClose  – () → void
  */
 import { useState, useEffect } from "react";
@@ -79,10 +80,11 @@ function EmptySlot() {
   );
 }
 
-export default function CricketScorer({ match, config, onScore, onFinish, onClose }) {
+export default function CricketScorer({ match, config, onScore, onFinish, onGoLive, onPause, onReset, onClose }) {
   const ls      = match.live_state || {};
   const sets    = (match.sets || []).slice().sort((a, b) => a.set_number - b.set_number);
-  const isDone  = match.status === "done";
+  const isDone    = match.status === "done";
+  const isPreLive = match.status === "scheduled";
   const innings = ls.current_innings || 1;
 
   const p1 = match.player_1 || {};
@@ -94,17 +96,27 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
   const maxWickets   = isSuperOver ? 2 : (ls.configured_wickets ?? config.wickets ?? 10);
   const battingFirst = ls.batting_first ?? null;
 
+  // Super over toss: which team bats first in super over
+  const superOverBattingFirst = ls.super_over_batting_first ?? null;
+
   // Batting team: odd innings = battingFirst, even innings = other
-  const battingTeamPos = !battingFirst ? 1
-    : (innings % 2 === 1 ? battingFirst : (3 - battingFirst));
+  // For super over innings, use superOverBattingFirst if set
+  const effectiveBattingFirst = (isSuperOver && superOverBattingFirst) ? superOverBattingFirst : battingFirst;
+  const battingTeamPos = !effectiveBattingFirst ? 1
+    : (innings % 2 === 1 ? effectiveBattingFirst : (3 - effectiveBattingFirst));
   const battingName = battingTeamPos === 1 ? (p1?.name || "Team 1") : (p2?.name || "Team 2");
   const bowlingName = battingTeamPos === 1 ? (p2?.name || "Team 2") : (p1?.name || "Team 1");
 
   const inn1 = sets.find(s => s.set_number === 1);
   const inn2 = sets.find(s => s.set_number === 2);
+  const inn3 = sets.find(s => s.set_number === 3);
+  const inn4 = sets.find(s => s.set_number === 4);
+  // 1st innings of any super over pair (innings 3, 5, 7…) — no target yet
+  const isSOFirstInnings = isSuperOver && innings % 2 === 1;
   // For current innings, find the previous set for target
   const prevSet = innings >= 2 ? sets.find(s => s.set_number === innings - 1) : null;
-  const target  = prevSet ? prevSet.score_p1 + 1 : null;
+  // Target only exists for 2nd innings of a pair (regular or super over)
+  const target  = (prevSet && !isSOFirstInnings) ? prevSet.score_p1 + 1 : null;
 
   // ── Local state ──────────────────────────────────────────
   const [st, setSt] = useState({
@@ -114,12 +126,17 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
     log:     ls.ball_log ?? [],
   });
 
-  const [showWicket,    setShowWicket]    = useState(false);
-  const [showEndConf,   setShowEndConf]   = useState(false);
-  const [setupDone,     setSetupDone]     = useState(!!battingFirst);
-  const [setupBatFirst, setSetupBatFirst] = useState(1);
-  const [setupOvers,    setSetupOvers]    = useState(config.overs || 20);
-  const [setupWickets,  setSetupWickets]  = useState(config.wickets || 10);
+  const [showWicket,        setShowWicket]        = useState(false);
+  const [showEndConf,       setShowEndConf]        = useState(false);
+  const [showSuperOverToss, setShowSuperOverToss]  = useState(false);
+  const [showDecideWinner,  setShowDecideWinner]   = useState(false);
+  const [showEditOvers,     setShowEditOvers]      = useState(false);
+  const [editOversVal,      setEditOversVal]       = useState(maxOvers);
+  const [soTossChoice,      setSoTossChoice]       = useState(1);
+  const [setupDone,         setSetupDone]          = useState(!!battingFirst);
+  const [setupBatFirst,     setSetupBatFirst]      = useState(1);
+  const [confirmPause,      setConfirmPause]       = useState(false);
+  const [confirmReset,      setConfirmReset]       = useState(false);
 
   useEffect(() => {
     setSt({
@@ -135,6 +152,11 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
     if (ls.batting_first) setSetupDone(true);
   }, [ls.batting_first]);
 
+  // Sync edit overs with current maxOvers when opening the modal
+  useEffect(() => {
+    setEditOversVal(maxOvers);
+  }, [maxOvers]);
+
   // ── Derived ───────────────────────────────────────────────
   const runsNeeded     = target ? Math.max(0, target - st.runs) : null;
   const ballsLeft      = maxOvers * 6 - st.balls;
@@ -148,9 +170,9 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
     : null;
   const isKnockout = !!(match.stage && !["group"].includes(match.stage));
 
-  // Detect tie: innings >= 2, innings ended (not by target), scores equal
+  // Detect tie: 2nd innings of a pair, scores equal (irrelevant in SO 1st innings)
   const prevSetRuns = prevSet?.score_p1 ?? null;
-  const isTied = innings >= 2 && !targetAchieved && prevSetRuns !== null && st.runs === prevSetRuns;
+  const isTied = innings >= 2 && !targetAchieved && !isSOFirstInnings && prevSetRuns !== null && st.runs === prevSetRuns;
 
   const currentOverLog = (() => {
     if (!st.log.length) return [];
@@ -200,10 +222,41 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
     });
   };
 
-  const wicketOut   = (type) => { setShowWicket(false); deliver(`W(${type})`, 0, true, true); };
-  const endInnings  = (superOver = false) => {
+  const wicketOut = (type) => { setShowWicket(false); deliver(`W(${type})`, 0, true, true); };
+
+  // End innings: 1st innings of any pair (regular or SO) goes direct; 2nd innings shows modal
+  const triggerEndInnings = () => {
+    if (innings === 1 || isSOFirstInnings) {
+      onFinish(null);
+    } else {
+      setShowEndConf(true);
+    }
+  };
+
+  const endInnings = () => {
     setShowEndConf(false);
-    onFinish(superOver ? "super_over" : null);
+    onFinish(null);
+  };
+
+  const triggerSuperOver = () => {
+    setShowEndConf(false);
+    setShowSuperOverToss(true);
+    setSoTossChoice(1);
+  };
+
+  const confirmSuperOver = (batFirst) => {
+    setShowSuperOverToss(false);
+    onFinish("super_over", { super_over_batting_first: batFirst });
+  };
+
+  const saveEditedOvers = () => {
+    setShowEditOvers(false);
+    onScore(st.runs, st.wickets, {
+      half:               innings,
+      minute:             st.balls,
+      overs:              fmt(st.balls),
+      cricket_live_state: { configured_overs: editOversVal },
+    });
   };
 
   const confirmSetup = () => {
@@ -212,19 +265,48 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
       half: 1, minute: 0, overs: "0.0",
       cricket_live_state: {
         batting_first:      setupBatFirst,
-        configured_overs:   setupOvers,
-        configured_wickets: setupWickets,
+        configured_overs:   config.overs ?? 20,
+        configured_wickets: maxWickets,
       },
     });
   };
 
-  const inningsLabel = isSuperOver ? `Super Over` : innings === 1 ? "1st Innings" : "2nd Innings";
+  const inningsLabel = isSuperOver
+    ? "Super Over"
+    : innings === 1
+    ? "1st Innings"
+    : "2nd Innings";
 
   const c = {
     bg:"#060f06", surface:"#0a1e0a", surf2:"#0f2810", border:"#173517",
     green:"#16a34a", lime:"#4ade80", gold:"#f59e0b", red:"#ef4444",
     orange:"#f97316", purple:"#a855f7", muted:"#4b7055", ink:"#ecfdf5", badge:"#15803d",
   };
+
+  // ── PRE-LIVE SCREEN ──────────────────────────────────────
+  if (isPreLive) {
+    return (
+      <div style={{ position:"fixed", inset:0, zIndex:9999, background:c.bg, display:"flex", flexDirection:"column", fontFamily:"'Space Grotesk',sans-serif" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 20px", background:c.surface, borderBottom:"2px solid #f59e0b" }}>
+          <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:"#f59e0b", color:"#000", fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
+            <span style={{ width:7, height:7, borderRadius:"50%", background:"#000", animation:"pulse 1.5s infinite", display:"inline-block" }} />
+            Ready
+          </span>
+          <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>
+            ✕ Close
+          </button>
+        </div>
+        <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 20px", gap:16, maxWidth:400, margin:"0 auto", width:"100%" }}>
+          <div style={{ fontSize:12, color:c.muted, textAlign:"center", lineHeight:1.6 }}>
+            Match is ready. Press Go Live to begin the toss and start scoring.
+          </div>
+          <button onClick={onGoLive} style={{ width:"100%", padding:"20px 0", borderRadius:12, fontFamily:"'Unbounded',sans-serif", fontSize:15, fontWeight:900, letterSpacing:1, textTransform:"uppercase", background:c.lime, color:"#000", border:"none", cursor:"pointer", boxShadow:`0 0 32px ${c.lime}44` }}>
+            ▶ GO LIVE
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── SETUP SCREEN ─────────────────────────────────────────
   if (!setupDone) {
@@ -269,31 +351,16 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
               </div>
             </div>
 
-            {/* Overs & Wickets */}
-            <div style={{ background:c.surface, borderRadius:14, border:`1px solid ${c.border}`, padding:"20px", marginBottom:14 }}>
-              <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:900, textTransform:"uppercase", letterSpacing:2, color:c.muted, marginBottom:14 }}>
-                Match Configuration
+            {/* Match config summary (read-only — set at event level) */}
+            <div style={{ background:c.surf2, borderRadius:10, border:`1px solid ${c.border}`, padding:"12px 18px", marginBottom:14, display:"flex", justifyContent:"space-around" }}>
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:c.muted, marginBottom:4 }}>Overs</div>
+                <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:22, fontWeight:900, color:c.lime }}>{config.overs ?? 20}</div>
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
-                {[
-                  { label:"Overs", val:setupOvers,   set:setSetupOvers,   min:1,  max:50 },
-                  { label:"Wickets", val:setupWickets, set:setSetupWickets, min:1, max:10 },
-                ].map(({ label, val, set, min, max }) => (
-                  <div key={label}>
-                    <div style={{ fontSize:10, fontWeight:700, color:c.muted, marginBottom:8, textTransform:"uppercase", letterSpacing:1 }}>{label}</div>
-                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                      <button onClick={() => set(v => Math.max(min, v-1))}
-                        style={{ width:36, height:36, borderRadius:8, background:c.surf2, border:`1px solid ${c.border}`, color:c.muted, fontSize:18, cursor:"pointer", fontFamily:"'Unbounded',sans-serif", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                        −
-                      </button>
-                      <div style={{ flex:1, textAlign:"center", fontFamily:"'Unbounded',sans-serif", fontSize:26, fontWeight:900, color:c.lime }}>{val}</div>
-                      <button onClick={() => set(v => Math.min(max, v+1))}
-                        style={{ width:36, height:36, borderRadius:8, background:c.surf2, border:`1px solid ${c.border}`, color:c.lime, fontSize:18, cursor:"pointer", fontFamily:"'Unbounded',sans-serif", display:"flex", alignItems:"center", justifyContent:"center" }}>
-                        +
-                      </button>
-                    </div>
-                  </div>
-                ))}
+              <div style={{ width:1, background:c.border }} />
+              <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:c.muted, marginBottom:4 }}>Wickets</div>
+                <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:22, fontWeight:900, color:c.lime }}>{maxWickets}</div>
               </div>
             </div>
 
@@ -312,35 +379,60 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
     <div style={{ position:"fixed", inset:0, zIndex:9999, background:c.bg, display:"flex", flexDirection:"column", overflow:"hidden", fontFamily:"'Space Grotesk',sans-serif" }}>
 
       {/* TOP BAR */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 20px", background:c.surface, borderBottom:`2px solid ${c.green}` }}>
-        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-          <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:isSuperOver ? c.gold : c.badge, color:"#fff", fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 16px", background:c.surface, borderBottom:`2px solid ${c.green}`, gap:"8px 12px", flexWrap:"wrap" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, flex:"1 1 auto", minWidth:0 }}>
+          <span style={{ display:"inline-flex", alignItems:"center", gap:6, background:isSuperOver ? c.gold : c.badge, color:"#fff", fontFamily:"'Unbounded',sans-serif", fontSize:10, fontWeight:800, letterSpacing:2, textTransform:"uppercase", padding:"3px 10px", borderRadius:4, whiteSpace:"nowrap" }}>
             <span style={{ width:7, height:7, borderRadius:"50%", background:"#fff", animation:"pulse 1.5s infinite", display:"inline-block" }} />
             {isDone ? "Match Over" : inningsLabel}
           </span>
           {!isDone && (
-            <span style={{ fontSize:12, color:c.muted, fontWeight:600 }}>
+            <span style={{ fontSize:12, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>
               Batting: <strong style={{ color:c.lime }}>{battingName}</strong>
             </span>
           )}
           {isDone && matchWinner && (
-            <span style={{ fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, color:c.gold }}>{matchWinner} Win!</span>
+            <span style={{ fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, color:c.gold, whiteSpace:"nowrap" }}>{matchWinner} Win!</span>
           )}
           {isDone && !matchWinner && (
             <span style={{ fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, color:c.muted }}>Match Tied</span>
           )}
         </div>
-        <div style={{ display:"flex", gap:8 }}>
-          {!isDone && (
-            <button onClick={() => setShowEndConf(true)}
-              style={{ background:`${c.red}20`, color:c.red, border:`1px solid ${c.red}55`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>
-              End Innings
-            </button>
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", justifyContent:"flex-end", flex:"0 0 auto" }}>
+          {confirmPause ? (
+            <>
+              <span style={{ fontSize:11, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>Pause this match?</span>
+              <button onClick={() => setConfirmPause(false)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 10px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Cancel</button>
+              <button onClick={() => { setConfirmPause(false); onPause(); }} style={{ background:"#f59e0b22", color:"#f59e0b", border:"1px solid #f59e0b", borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Pause</button>
+            </>
+          ) : confirmReset ? (
+            <>
+              <span style={{ fontSize:11, color:c.muted, fontWeight:600, whiteSpace:"nowrap" }}>Reset all scores?</span>
+              <button onClick={() => setConfirmReset(false)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 10px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Cancel</button>
+              <button onClick={() => { setConfirmReset(false); onReset(); }} style={{ background:"#ef444422", color:"#ef4444", border:"1px solid #ef4444", borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:11, fontWeight:700, fontFamily:"inherit" }}>Reset</button>
+            </>
+          ) : (
+            <>
+              {!isDone && (
+                <button onClick={() => {
+                  if (innings === 1 || isSOFirstInnings) {
+                    onFinish(null);
+                  } else {
+                    setShowEndConf(true);
+                  }
+                }}
+                  style={{ background:`${c.red}20`, color:c.red, border:`1px solid ${c.red}55`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>
+                  End Innings
+                </button>
+              )}
+              {!isDone && onPause && (
+                <button onClick={() => setConfirmPause(true)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Pause</button>
+              )}
+              {!isDone && onReset && (
+                <button onClick={() => setConfirmReset(true)} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>Reset</button>
+              )}
+              <button onClick={onClose} style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>✕ Close</button>
+            </>
           )}
-          <button onClick={onClose}
-            style={{ background:"transparent", color:c.muted, border:`1px solid ${c.border}`, borderRadius:6, padding:"5px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"inherit" }}>
-            ✕ Close
-          </button>
         </div>
       </div>
 
@@ -353,10 +445,10 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
             <div style={{ background:c.surf2, borderRadius:10, border:`1px solid ${c.border}`, padding:"10px 16px", marginBottom:12, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
                 <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:c.muted, marginBottom:2 }}>
-                  {isSuperOver ? "Super Over — " : "1st Innings · "}
+                  {isSuperOver && !isSOFirstInnings ? "⚡ SO Bat 1st · " : innings === 2 ? "1st Innings · " : innings === 3 ? "2nd Innings · " : `Innings ${innings - 1} · `}
                   {innings % 2 === 0
-                    ? (battingFirst === 1 ? (p1?.name||"Team 1") : (p2?.name||"Team 2"))
-                    : (battingFirst === 1 ? (p2?.name||"Team 2") : (p1?.name||"Team 1"))}
+                    ? (effectiveBattingFirst === 1 ? (p1?.name||"Team 1") : (p2?.name||"Team 2"))
+                    : (effectiveBattingFirst === 1 ? (p2?.name||"Team 2") : (p1?.name||"Team 1"))}
                 </div>
                 <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:22, fontWeight:900, color:c.lime }}>
                   {prevSet.score_p1}<span style={{ color:c.muted, fontSize:14 }}>/{prevSet.score_p2}</span>
@@ -393,7 +485,15 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
 
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
               <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:2, color:c.muted }}>{battingName}</div>
-              <div style={{ fontSize:11, fontWeight:700, color:c.muted }}>Max {maxOvers} ov · {maxWickets} wkts</div>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ fontSize:11, fontWeight:700, color:c.muted }}>Max {maxOvers} ov · {maxWickets} wkts</div>
+                {!isDone && !isSuperOver && (
+                  <button onClick={() => { setEditOversVal(maxOvers); setShowEditOvers(true); }}
+                    style={{ background:"transparent", border:`1px solid ${c.border}`, borderRadius:4, color:c.muted, fontSize:10, fontWeight:700, padding:"2px 6px", cursor:"pointer", fontFamily:"inherit" }}>
+                    Edit
+                  </button>
+                )}
+              </div>
             </div>
 
             <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:6 }}>
@@ -474,18 +574,10 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
           {/* END INNINGS CTA */}
           {!isDone && canEndInnings && (
             <div style={{ marginBottom:8 }}>
-              <div style={{ display:"flex", gap:8, marginBottom:10 }}>
-                {[{ label:"•", runs:0, disp:"0" }, { label:"1", runs:1 }, { label:"2", runs:2 }, { label:"3", runs:3 }].map(b => (
-                  <button key={b.label} onClick={() => deliver(b.label, b.runs, true)}
-                    style={{ flex:1, padding:"14px 0", borderRadius:8, fontFamily:"'Unbounded',sans-serif", fontSize:18, fontWeight:900, background:c.surf2, border:`1px solid ${c.border}`, color:c.ink, cursor:"pointer" }}>
-                    {b.disp || b.label}
-                  </button>
-                ))}
-              </div>
-              <button onClick={() => setShowEndConf(true)}
+              <button onClick={triggerEndInnings}
                 style={{ width:"100%", padding:"16px 0", borderRadius:10, fontFamily:"'Unbounded',sans-serif", fontSize:14, fontWeight:900, textTransform:"uppercase", letterSpacing:1, background: targetAchieved ? `${c.gold}18` : `${c.red}18`, border:`2px solid ${targetAchieved ? c.gold : c.red}`, color: targetAchieved ? c.gold : c.red, cursor:"pointer" }}>
                 {targetAchieved
-                  ? "Target Achieved — End Match"
+                  ? "Target Achieved — End Innings"
                   : allOut
                   ? `All Out (${st.wickets}/${maxWickets}) — End Innings`
                   : `${maxOvers} Overs Up — End Innings`}
@@ -500,7 +592,7 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
           {/* MATCH DONE */}
           {isDone && (
             <div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12 }}>
                 {[
                   { label:"1st Innings", team: battingFirst === 1 ? (p1?.name||"Team 1") : (p2?.name||"Team 2"), set: inn1 },
                   { label:"2nd Innings", team: battingFirst === 1 ? (p2?.name||"Team 2") : (p1?.name||"Team 1"), set: inn2 },
@@ -514,6 +606,26 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
                   </div>
                 ))}
               </div>
+              {/* Super Over result */}
+              {inn3 && (
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1.5, color:c.gold, fontFamily:"'Unbounded',sans-serif", marginBottom:8 }}>⚡ Super Over</div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                    {[
+                      { label:"Bat 1st", team: superOverBattingFirst === 1 ? (p1?.name||"Team 1") : (p2?.name||"Team 2"), set: inn3 },
+                      { label:"Bat 2nd", team: superOverBattingFirst === 1 ? (p2?.name||"Team 2") : (p1?.name||"Team 1"), set: inn4 },
+                    ].map((inns, i) => (
+                      <div key={i} style={{ background:c.surf2, borderRadius:10, border:`1px solid ${c.gold}44`, padding:"12px 14px" }}>
+                        <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1, color:c.muted, marginBottom:4 }}>{inns.label}</div>
+                        <div style={{ fontSize:12, fontWeight:700, color:c.ink, marginBottom:6, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{inns.team}</div>
+                        <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:24, fontWeight:900, color:c.gold }}>
+                          {inns.set?.score_p1 ?? 0}<span style={{ color:c.muted, fontSize:14 }}>/{inns.set?.score_p2 ?? 0}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div style={{ textAlign:"center", padding:"12px 0 4px" }}>
                 <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:20, fontWeight:900, textTransform:"uppercase", letterSpacing:-1, color:c.gold }}>
                   {matchWinner ? `${matchWinner} Win!` : "Match Tied"}
@@ -567,48 +679,164 @@ export default function CricketScorer({ match, config, onScore, onFinish, onClos
         </div>
       )}
 
-      {/* END INNINGS MODAL */}
+      {/* END INNINGS MODAL (innings 2+ only) */}
       {showEndConf && (
         <div style={{ position:"fixed", inset:0, zIndex:10000, background:"rgba(0,0,0,0.88)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
           <div style={{ background:c.surface, border:`1px solid ${c.border}`, borderRadius:14, padding:"24px", width:"100%", maxWidth:360 }}>
             <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.ink, marginBottom:6 }}>
-              {isSuperOver ? "End Super Over?" : innings === 1 ? "End 1st Innings?" : targetAchieved ? "End Match?" : "End 2nd Innings?"}
+              {isSuperOver ? "End Super Over?" : "End 2nd Innings?"}
             </div>
             <div style={{ fontSize:13, color:c.muted, marginBottom:6, lineHeight:1.5 }}>
               {battingName}: <strong style={{ color:c.lime }}>{st.runs}/{st.wickets}</strong> ({fmt(st.balls)} ov)
             </div>
 
-            {innings === 1 && !isSuperOver && (
-              <div style={{ fontSize:12, color:c.muted, marginBottom:16 }}>
-                {bowlingName} will need <strong style={{ color:c.lime }}>{st.runs + 1}</strong> to win.
-              </div>
-            )}
-            {innings >= 2 && !targetAchieved && inn1 && (
+            {innings >= 2 && !targetAchieved && prevSet && (
               <div style={{ fontSize:12, color:c.muted, marginBottom:16 }}>
                 {isTied
                   ? "Scores are tied!"
                   : st.runs < (prevSet?.score_p1 ?? 0)
-                  ? `${battingFirst === 1 ? (p1?.name||"Team 1") : (p2?.name||"Team 2")} wins by ${(prevSet?.score_p1 ?? 0) - st.runs} runs.`
+                  ? `${effectiveBattingFirst === 1 ? (p1?.name||"Team 1") : (p2?.name||"Team 2")} wins by ${(prevSet?.score_p1 ?? 0) - st.runs} runs.`
                   : "Calculating result..."}
               </div>
             )}
 
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              <button onClick={() => endInnings(false)}
-                style={{ padding:"13px 0", borderRadius:10, background:c.green, border:"none", color:"#fff", fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
-                {targetAchieved ? "Confirm Win" : innings === 1 ? "End 1st Innings" : "End Match"}
-              </button>
+              {/* For knockout + tied super over, hide the draw-ending button */}
+              {!(isSuperOver && isTied && isKnockout) && (
+                <button onClick={endInnings}
+                  style={{ padding:"13px 0", borderRadius:10, background:c.green, border:"none", color:"#fff", fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
+                  {targetAchieved ? "Confirm Win" : isSuperOver ? "End Super Over" : "End Innings"}
+                </button>
+              )}
 
-              {/* Super over: tied 2nd innings (or super over) in knockout */}
-              {innings >= 2 && isTied && isKnockout && (
-                <button onClick={() => endInnings(true)}
+              {/* Regular innings tied in knockout → Super Over */}
+              {isTied && isKnockout && !isSuperOver && (
+                <button onClick={triggerSuperOver}
                   style={{ padding:"13px 0", borderRadius:10, background:`${c.gold}18`, border:`2px solid ${c.gold}`, color:c.gold, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
                   ⚡ Super Over (Tied Match)
                 </button>
               )}
 
+              {/* Super over tied in knockout → another SO or decide winner */}
+              {isTied && isKnockout && isSuperOver && (
+                <>
+                  <button onClick={triggerSuperOver}
+                    style={{ padding:"13px 0", borderRadius:10, background:`${c.gold}18`, border:`2px solid ${c.gold}`, color:c.gold, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
+                    ⚡ Another Super Over
+                  </button>
+                  <button onClick={() => { setShowEndConf(false); setShowDecideWinner(true); }}
+                    style={{ padding:"13px 0", borderRadius:10, background:`${c.orange}15`, border:`2px solid ${c.orange}66`, color:c.orange, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
+                    🪙 Decide by Coin Toss
+                  </button>
+                </>
+              )}
+
               <button onClick={() => setShowEndConf(false)}
                 style={{ padding:"11px 0", borderRadius:10, background:"transparent", border:`1px solid ${c.border}`, color:c.muted, fontFamily:"inherit", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUPER OVER TOSS MODAL */}
+      {showSuperOverToss && (
+        <div style={{ position:"fixed", inset:0, zIndex:10000, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:c.surface, border:`2px solid ${c.gold}44`, borderRadius:16, padding:"24px", width:"100%", maxWidth:380 }}>
+            <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.gold, marginBottom:4 }}>⚡ Super Over Toss</div>
+            <div style={{ fontSize:12, color:c.muted, marginBottom:18 }}>Who bats first in the super over?</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+              {[{ pos:1, name: p1?.name||"Team 1" }, { pos:2, name: p2?.name||"Team 2" }].map(({ pos, name }) => (
+                <button key={pos} onClick={() => setSoTossChoice(pos)}
+                  style={{
+                    padding:"18px 10px", borderRadius:12, cursor:"pointer",
+                    fontFamily:"inherit", fontSize:13, fontWeight:800, textAlign:"center",
+                    background: soTossChoice === pos ? `${c.gold}20` : c.surf2,
+                    border: `2px solid ${soTossChoice === pos ? c.gold : c.border}`,
+                    color: soTossChoice === pos ? c.gold : c.muted,
+                  }}>
+                  <div style={{ fontSize:20, marginBottom:6 }}>🏏</div>
+                  {name}
+                  {soTossChoice === pos && (
+                    <div style={{ fontSize:8, fontFamily:"'Unbounded',sans-serif", fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.gold, marginTop:6 }}>
+                      Batting First ✓
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              <button onClick={() => confirmSuperOver(soTossChoice)}
+                style={{ padding:"13px 0", borderRadius:10, background:`${c.gold}18`, border:`2px solid ${c.gold}`, color:c.gold, fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
+                Start Super Over →
+              </button>
+              <button onClick={() => setShowSuperOverToss(false)}
+                style={{ padding:"11px 0", borderRadius:10, background:"transparent", border:`1px solid ${c.border}`, color:c.muted, fontFamily:"inherit", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DECIDE WINNER MODAL (coin toss) */}
+      {showDecideWinner && (
+        <div style={{ position:"fixed", inset:0, zIndex:10000, background:"rgba(0,0,0,0.92)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:c.surface, border:`2px solid ${c.orange}44`, borderRadius:16, padding:"24px", width:"100%", maxWidth:380 }}>
+            <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.orange, marginBottom:4 }}>🪙 Coin Toss — Decide Winner</div>
+            <div style={{ fontSize:12, color:c.muted, marginBottom:18 }}>Super over ended in a tie. Select the winner by coin toss:</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+              {[{ pos:1, name: p1?.name||"Team 1" }, { pos:2, name: p2?.name||"Team 2" }].map(({ pos, name }) => (
+                <button key={pos} onClick={() => { setShowDecideWinner(false); onFinish(pos); }}
+                  style={{
+                    padding:"22px 10px", borderRadius:12, cursor:"pointer",
+                    fontFamily:"inherit", fontSize:13, fontWeight:800, textAlign:"center",
+                    background:`${c.orange}15`, border:`2px solid ${c.orange}55`, color:c.orange,
+                  }}>
+                  <div style={{ fontSize:24, marginBottom:8 }}>🏆</div>
+                  <div>{name}</div>
+                  <div style={{ fontSize:9, fontFamily:"'Unbounded',sans-serif", fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.muted, marginTop:6 }}>
+                    Declare Winner
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => { setShowDecideWinner(false); setShowEndConf(true); }}
+              style={{ width:"100%", padding:"11px 0", borderRadius:10, background:"transparent", border:`1px solid ${c.border}`, color:c.muted, fontFamily:"inherit", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+              Back
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT OVERS MODAL */}
+      {showEditOvers && (
+        <div style={{ position:"fixed", inset:0, zIndex:10000, background:"rgba(0,0,0,0.88)", display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:c.surface, border:`1px solid ${c.border}`, borderRadius:14, padding:"24px", width:"100%", maxWidth:320 }}>
+            <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:13, fontWeight:900, textTransform:"uppercase", letterSpacing:1, color:c.ink, marginBottom:4 }}>Edit Overs</div>
+            <div style={{ fontSize:12, color:c.muted, marginBottom:20 }}>Change the number of overs for this innings.</div>
+            <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20, justifyContent:"center" }}>
+              <button onClick={() => setEditOversVal(v => Math.max(Math.floor(st.balls / 6) + 1, v - 1))}
+                style={{ width:44, height:44, borderRadius:10, background:c.surf2, border:`1px solid ${c.border}`, color:c.muted, fontSize:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                −
+              </button>
+              <div style={{ fontFamily:"'Unbounded',sans-serif", fontSize:40, fontWeight:900, color:c.lime, minWidth:60, textAlign:"center" }}>{editOversVal}</div>
+              <button onClick={() => setEditOversVal(v => Math.min(50, v + 1))}
+                style={{ width:44, height:44, borderRadius:10, background:c.surf2, border:`1px solid ${c.border}`, color:c.lime, fontSize:20, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                +
+              </button>
+            </div>
+            <div style={{ fontSize:11, color:c.muted, marginBottom:16, textAlign:"center" }}>
+              Overs already bowled: {Math.floor(st.balls / 6)} — minimum is {Math.floor(st.balls / 6) + 1}
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={saveEditedOvers}
+                style={{ flex:1, padding:"12px 0", borderRadius:10, background:c.green, border:"none", color:"#fff", fontFamily:"'Unbounded',sans-serif", fontSize:12, fontWeight:900, textTransform:"uppercase", letterSpacing:1, cursor:"pointer" }}>
+                Save
+              </button>
+              <button onClick={() => setShowEditOvers(false)}
+                style={{ flex:1, padding:"12px 0", borderRadius:10, background:"transparent", border:`1px solid ${c.border}`, color:c.muted, fontFamily:"inherit", fontSize:12, fontWeight:700, cursor:"pointer" }}>
                 Cancel
               </button>
             </div>

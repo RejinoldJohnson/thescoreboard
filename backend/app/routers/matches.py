@@ -5,7 +5,7 @@ Supports: table_tennis, badminton (set-based), cricket (innings), football (goal
 """
 from collections import defaultdict
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional, Union
 from pydantic import BaseModel
@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.event import Event
 from app.models.match import Match, MatchParticipant, MatchSet
-from app.models.player import Player
+from app.models.player import Player, Team
 from app.schemas.match import MatchCreate, MatchOut, MatchStatusUpdate
 from app.utils.auth import get_current_user
 from app.sports.registry import get_sport_engine
@@ -45,7 +45,8 @@ class ScoreUpdate(BaseModel):
 
 class FinishMatch(BaseModel):
     """Explicitly finish a match (football full-time, cricket innings complete)."""
-    winner_position: Optional[Union[int, str]] = None  # 1, 2, None for draw, "super_over" for cricket
+    winner_position:          Optional[Union[int, str]] = None  # 1, 2, None for draw, "super_over" for cricket
+    super_over_batting_first: Optional[int]             = None  # 1 or 2 — who bats first in super over
 
 
 # ── Helpers ───────────────────────────────────────────────────
@@ -245,6 +246,42 @@ def _finish_match(match: Match, winner_position: Optional[int], db: Optional[Ses
         _advance_winner(match, winner_position, db)
 
 
+# ── WebSocket push helper ─────────────────────────────────────
+
+def _push_ws_update(event_id: int) -> None:
+    """
+    Background task — called after any score-changing commit.
+    Opens a fresh DB session, builds the tournament payload, and pushes
+    it to all WS clients currently watching that tournament.
+    """
+    from app.database import SessionLocal
+    from app.models.event import Event as _Event
+    from app.ws.manager import manager
+    from app.routers.public import get_tournament_page
+    from sqlalchemy.orm import joinedload as _jl
+
+    db = SessionLocal()
+    try:
+        event = (
+            db.query(_Event)
+            .filter(_Event.event_id == event_id)
+            .options(_jl(_Event.tournament))
+            .first()
+        )
+        if not event or not event.tournament:
+            return
+        slug = event.tournament.slug
+        if not manager.has_watchers(slug):
+            return
+        data = get_tournament_page(slug, db)
+        manager.push(slug, data)
+    except Exception as exc:
+        import logging as _log
+        _log.getLogger(__name__).warning("WS push failed: %s", exc)
+    finally:
+        db.close()
+
+
 # ── Routes ────────────────────────────────────────────────────
 
 @router.get("/events/{event_id}/matches")
@@ -273,11 +310,31 @@ def create_match(
     event = db.query(Event).filter(Event.event_id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    if data.player1_id == data.player2_id:
-        raise HTTPException(status_code=400, detail="A player cannot play themselves")
-    for pid in [data.player1_id, data.player2_id]:
-        if not db.query(Player).filter(Player.player_id == pid).first():
-            raise HTTPException(status_code=404, detail=f"Player {pid} not found")
+
+    engine    = get_sport_engine(event.sport_key)
+    use_teams = event.participant_type in ("team", "doubles_pair")
+
+    # Resolve participant IDs (partial allowed — e.g. bye player in one slot)
+    if use_teams:
+        t1_id, t2_id = data.team1_id, data.team2_id
+        p1_id = p2_id = None
+        if t1_id and t2_id and t1_id == t2_id:
+            raise HTTPException(status_code=400, detail="A team cannot play themselves")
+        for tid in [t for t in [t1_id, t2_id] if t]:
+            if not db.query(Team).filter(Team.team_id == tid).first():
+                raise HTTPException(status_code=404, detail=f"Team {tid} not found")
+    else:
+        p1_id, p2_id = data.player1_id, data.player2_id
+        t1_id = t2_id = None
+        if p1_id and p2_id and p1_id == p2_id:
+            raise HTTPException(status_code=400, detail="A player cannot play themselves")
+        for pid in [p for p in [p1_id, p2_id] if p]:
+            if not db.query(Player).filter(Player.player_id == pid).first():
+                raise HTTPException(status_code=404, detail=f"Player {pid} not found")
+
+    # Initialise live_state with sets_to_win so the scoring endpoint always
+    # finds a configured value (mirrors what generate_fixtures does).
+    default_stw = (event.sport_config or engine.get_default_config()).get("sets_to_win", 2)
 
     match = Match(
         event_id=event_id,
@@ -286,17 +343,27 @@ def create_match(
         stage=data.stage,
         status="scheduled",
         table_number=data.table_number,
+        live_state={"sets_to_win": default_stw},
     )
     db.add(match)
     db.flush()
 
-    db.add_all([
-        MatchParticipant(match_id=match.match_id, player_id=data.player1_id, position=1),
-        MatchParticipant(match_id=match.match_id, player_id=data.player2_id, position=2),
-    ])
+    # Add participants for every non-null slot (supports TBD matches and
+    # half-filled matches where one side is a bye player).
+    if use_teams:
+        if t1_id:
+            db.add(MatchParticipant(match_id=match.match_id, team_id=t1_id, position=1))
+        if t2_id:
+            db.add(MatchParticipant(match_id=match.match_id, team_id=t2_id, position=2))
+    else:
+        if p1_id:
+            db.add(MatchParticipant(match_id=match.match_id, player_id=p1_id, position=1))
+        if p2_id:
+            db.add(MatchParticipant(match_id=match.match_id, player_id=p2_id, position=2))
 
-    engine = get_sport_engine(event.sport_key)
-    if getattr(engine, "has_sets", False):
+    # Create the initial set for set-based sports (TT, Badminton).
+    # Use the same detection as generate_fixtures: check_set_winner presence.
+    if hasattr(engine, "check_set_winner"):
         db.add(MatchSet(match_id=match.match_id, set_number=1))
 
     db.commit()
@@ -307,10 +374,12 @@ def create_match(
 def update_match_status(
     match_id: int,
     data: MatchStatusUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     match = _load_match(match_id, db)
+    event_id = match.event_id
     match.status = data.status
     if data.table_number is not None:
         match.table_number = data.table_number
@@ -323,6 +392,7 @@ def update_match_status(
     elif data.status == "done" and not match.finished_at:
         match.finished_at = datetime.now(timezone.utc)
     db.commit()
+    background_tasks.add_task(_push_ws_update, event_id)
     return _serialize_match(_load_match(match_id, db))
 
 
@@ -330,11 +400,13 @@ def update_match_status(
 def update_score(
     match_id: int,
     data: ScoreUpdate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     match = _load_match(match_id, db)
-    event  = db.query(Event).filter(Event.event_id == match.event_id).first()
+    event_id = match.event_id
+    event  = db.query(Event).filter(Event.event_id == event_id).first()
     engine = get_sport_engine(event.sport_key)
     config = dict(event.sport_config or engine.get_default_config())
     # Per-match sets_to_win overrides event-wide default (set during fixture generation)
@@ -469,6 +541,7 @@ def update_score(
             parts[1].score = data.score_p2
 
     db.commit()
+    background_tasks.add_task(_push_ws_update, event_id)
     return _serialize_match(_load_match(match_id, db))
 
 
@@ -476,6 +549,7 @@ def update_score(
 def finish_match(
     match_id: int,
     data: FinishMatch,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -484,7 +558,8 @@ def finish_match(
     cricket (all out / overs up / innings end).
     """
     match  = _load_match(match_id, db)
-    event  = db.query(Event).filter(Event.event_id == match.event_id).first()
+    event_id = match.event_id
+    event  = db.query(Event).filter(Event.event_id == event_id).first()
     engine = get_sport_engine(event.sport_key)
     config = event.sport_config or engine.get_default_config()
 
@@ -509,13 +584,23 @@ def finish_match(
             ls["wickets"] = 0
             ls["balls"]   = 0
             ls["ball_log"] = []
+            if data.super_over_batting_first:
+                ls["super_over_batting_first"] = data.super_over_batting_first
             match.live_state = ls
             db.commit()
+            background_tasks.add_task(_push_ws_update, event_id)
             return _serialize_match(_load_match(match_id, db))
 
         # Normal innings end
         if current_set:
             current_set.is_complete = True
+
+        # Explicit winner override (e.g. coin-toss decision after tied super over)
+        if isinstance(data.winner_position, int) and data.winner_position in (1, 2):
+            _finish_match(match, data.winner_position, db)
+            db.commit()
+            background_tasks.add_task(_push_ws_update, event_id)
+            return _serialize_match(_load_match(match_id, db))
 
         all_sets  = sorted(match.sets, key=lambda s: s.set_number)
         completed = [s for s in all_sets if s.is_complete]
@@ -571,6 +656,7 @@ def finish_match(
         _finish_match(match, winner, db)
 
     db.commit()
+    background_tasks.add_task(_push_ws_update, event_id)
     return _serialize_match(_load_match(match_id, db))
 
 
@@ -578,6 +664,7 @@ def finish_match(
 def walkover_match(
     match_id: int,
     winner_position: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -592,7 +679,8 @@ def walkover_match(
     if winner_position not in (1, 2):
         raise HTTPException(status_code=400, detail="winner_position must be 1 or 2")
 
-    event  = db.query(Event).filter(Event.event_id == match.event_id).first()
+    event_id = match.event_id
+    event  = db.query(Event).filter(Event.event_id == event_id).first()
     engine = get_sport_engine(event.sport_key)
     config = dict(event.sport_config or engine.get_default_config())
     if match.live_state and "sets_to_win" in match.live_state:
@@ -648,16 +736,19 @@ def walkover_match(
 
     _finish_match(match, winner_position, db)
     db.commit()
+    background_tasks.add_task(_push_ws_update, event_id)
     return _serialize_match(_load_match(match_id, db))
 
 
 @router.post("/matches/{match_id}/undo-set")
 def undo_set(
     match_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     match = _load_match(match_id, db)
+    event_id = match.event_id
     sets  = sorted(match.sets, key=lambda s: s.set_number)
     if not sets:
         raise HTTPException(status_code=400, detail="No sets to undo")
@@ -690,16 +781,19 @@ def undo_set(
         parts[1].score = sets_won[2]
 
     db.commit()
+    background_tasks.add_task(_push_ws_update, event_id)
     return _serialize_match(_load_match(match_id, db))
 
 
 @router.post("/matches/{match_id}/rematch")
 def rematch(
     match_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     match = _load_match(match_id, db)
+    event_id = match.event_id
     preserved_sets = (match.live_state or {}).get("sets_to_win")
     match.status         = "scheduled"
     match.started_at     = None
@@ -713,12 +807,13 @@ def rematch(
         db.delete(s)
     db.flush()
 
-    event  = db.query(Event).filter(Event.event_id == match.event_id).first()
+    event  = db.query(Event).filter(Event.event_id == event_id).first()
     engine = get_sport_engine(event.sport_key)
     if getattr(engine, "has_sets", False):
         db.add(MatchSet(match_id=match.match_id, set_number=1))
 
     db.commit()
+    background_tasks.add_task(_push_ws_update, event_id)
     return _serialize_match(_load_match(match_id, db))
 
 

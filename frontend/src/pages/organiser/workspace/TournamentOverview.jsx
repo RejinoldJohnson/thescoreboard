@@ -2,9 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getWorkspace, transitionTournament, updateTournament, clearToken, getMe } from "../../../api/client";
 import OrgHeader from "../../../components/shared/OrgHeader";
+import PageLoader from "../../../components/shared/PageLoader";
 import SportSetupModal from "../../../components/organiser/SportSetupModal";
 import { ShareButton } from "../../../components/shared/ShareButton";
 import { MediaUpload } from "../../../components/shared/MediaUpload";
+import SponsorsSection from "../../../components/organiser/SponsorsSection";
+import TournamentInfoEditor from "../../../components/organiser/TournamentInfoEditor";
 
 const LIFECYCLE = ["draft", "registration", "fixtures", "live", "completed"];
 const LIFECYCLE_LABELS = {
@@ -57,14 +60,7 @@ export default function TournamentOverview() {
     flash(`${updatedEvent.name} configured!`);
   };
 
-  if (!data) return (
-    <div className="auth-wrap">
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 800,
-        textTransform: "uppercase", letterSpacing: 2, color: "var(--muted)" }}>
-        Loading…
-      </div>
-    </div>
-  );
+  if (!data) return <PageLoader />;
 
   const { tournament: t, events, stats } = data;
   const currentIdx = LIFECYCLE.indexOf(t.status);
@@ -107,7 +103,21 @@ export default function TournamentOverview() {
           </h1>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 13,
             color: "var(--muted)", alignItems: "center" }}>
-            {t.venue && <span>{t.venue}{t.city ? `, ${t.city}` : ""}</span>}
+            {t.venue && (
+              <span style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <span>📍 {[t.venue, t.city, t.state].filter(Boolean).join(", ")}</span>
+                {t.venue_lat && t.venue_lng && (
+                  <a
+                    href={`https://www.google.com/maps?q=${t.venue_lat},${t.venue_lng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ fontSize:11, fontWeight:700, color:"var(--primary)", textDecoration:"none", padding:"2px 7px", borderRadius:5, border:"1px solid var(--primary-dim)", background:"var(--primary-dim)" }}
+                  >
+                    Open in Maps ↗
+                  </a>
+                )}
+              </span>
+            )}
             {t.start_date && <span>{t.start_date}</span>}
             <span className={`pill ${STATUS_PILL[t.status] || "pill-gray"}`}
               style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
@@ -141,20 +151,29 @@ export default function TournamentOverview() {
         )}
 
         {/* ── STATS ── */}
-        <div className="stats-grid" style={{ marginBottom: 20 }}>
-          {[
-            { label: "Events",  value: stats.total_events  },
-            { label: "Players", value: stats.total_players },
+        {(() => {
+          // For team sports show "Teams" instead of "Players"
+          const isTeamSport = events.some(ev => ev.participant_type === "team");
+          const participantLabel = isTeamSport ? "Teams" : "Players";
+          const statCards = [
+            // Hide "Events" for single-sport — it's always 1 and adds no info
+            ...(t.is_multi_sport ? [{ label: "Events", value: stats.total_events }] : []),
+            { label: participantLabel, value: stats.total_players },
             { label: "Matches", value: stats.total_matches },
             { label: "Live",    value: stats.live_matches,
               color: stats.live_matches > 0 ? "var(--primary)" : undefined },
-          ].map(({ label, value, color }) => (
-            <div key={label} className="stat-card">
-              <div className="stat-num" style={color ? { color } : {}}>{value}</div>
-              <div className="stat-label">{label}</div>
+          ];
+          return (
+            <div className="stats-grid" style={{ marginBottom: 20 }}>
+              {statCards.map(({ label, value, color }) => (
+                <div key={label} className="stat-card">
+                  <div className="stat-num" style={color ? { color } : {}}>{value}</div>
+                  <div className="stat-label">{label}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          );
+        })()}
 
         {/* ── PHASE CONTROL ── */}
         <div className="card" style={{ marginBottom: 20 }}>
@@ -218,26 +237,20 @@ export default function TournamentOverview() {
 
         {/* ── SHARE LINK ── */}
         <div className="card share-link-card"
-          style={{ marginBottom: 28 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)", marginBottom: 10 }}>
+          style={{ marginBottom: 28, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--muted)" }}>
             Share Tournament
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, fontFamily: "monospace", fontSize: 12,
-              color: "var(--muted)", wordBreak: "break-all", minWidth: 0 }}>
-              {window.location.origin}/t/{t.slug}
-            </div>
-            <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-              <ShareButton
-                type="tournament"
-                slug={t.slug}
-                title={`${t.name} — Live on TheScoreBoard`}
-              />
-              <button className="btn btn-outline btn-sm"
-                onClick={() => window.open(`/t/${t.slug}`, "_blank")}>
-                View ↗
-              </button>
-            </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <ShareButton
+              type="tournament"
+              slug={t.slug}
+              title={`${t.name} — Live on TheScoreBoard`}
+            />
+            <button className="btn btn-outline btn-sm"
+              onClick={() => window.open(`/t/${t.slug}`, "_blank")}>
+              View ↗
+            </button>
           </div>
         </div>
 
@@ -292,11 +305,31 @@ export default function TournamentOverview() {
           </div>
         </div>
 
-        {/* ── EVENTS ── */}
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 800,
-          letterSpacing: "2.5px", color: "var(--muted)", textTransform: "uppercase", marginBottom: 14 }}>
-          {t.is_multi_sport ? "Sports — Click to Configure or Manage" : "Events — Click to Manage"}
+        {/* ── SPONSORS ── */}
+        <SponsorsSection
+          tournamentId={t.tournament_id}
+          sponsors={t.sponsors || []}
+          onRefresh={loadData}
+          flash={flash}
+        />
+
+        {/* ── INFO & RULES ── */}
+        <div style={{ marginBottom: 28 }}>
+          <TournamentInfoEditor
+            orgId={t.org_id}
+            tournamentId={t.tournament_id}
+            initialInfo={t.tournament_info || {}}
+            onSaved={() => flash("Tournament info saved!")}
+          />
         </div>
+
+        {/* ── EVENTS ── */}
+        {t.is_multi_sport && (
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 800,
+            letterSpacing: "2.5px", color: "var(--muted)", textTransform: "uppercase", marginBottom: 14 }}>
+            Sports
+          </div>
+        )}
 
         {events.length === 0 ? (
           <div className="card" style={{ textAlign: "center", padding: "40px 20px" }}>
