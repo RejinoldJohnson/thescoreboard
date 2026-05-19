@@ -28,7 +28,9 @@ export const getDashboard = () => request("GET", "/dashboard");
 export const register = (d) => request("POST", "/auth/register", d);
 export const login = (d) => request("POST", "/auth/login", d);
 export const googleAuth = (accessToken) => request("POST", "/auth/google", { access_token: accessToken });
-export const getMe = () => request("GET", "/auth/me");
+export const getMe             = ()  => request("GET", "/auth/me");
+export const getPlayerProfile  = ()  => request("GET", "/auth/player-profile");
+export const savePlayerProfile = (d) => request("PUT", "/auth/player-profile", d);
 
 // Orgs
 export const createOrg = (d) => request("POST", "/orgs/", d);

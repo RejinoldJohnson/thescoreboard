@@ -1,5 +1,5 @@
 """
-Auth routes — email/password register & login, plus Google SSO.
+Auth routes — email/password register & login, Google SSO, player profile.
 """
 import logging
 
@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models.user import User
-from app.schemas.auth import RegisterRequest, LoginRequest, GoogleAuthRequest, TokenOut, UserOut
+from app.models.player import Player
+from app.schemas.auth import (
+    RegisterRequest, LoginRequest, GoogleAuthRequest,
+    TokenOut, UserOut, PlayerProfileIn, PlayerProfileOut,
+)
 from app.utils.auth import hash_password, verify_password, create_access_token, get_current_user
 
 logger = logging.getLogger(__name__)
@@ -54,14 +58,9 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/google", response_model=TokenOut)
 def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
-    """
-    Accepts the OAuth2 access_token returned by useGoogleLogin (implicit flow).
-    Verifies it via Google's userinfo endpoint, then creates or updates the user.
-    """
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=503, detail="Google login is not configured on this server")
 
-    # Verify the OAuth2 access token by calling Google's userinfo endpoint
     try:
         import httpx
         resp = httpx.get(
@@ -83,15 +82,11 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
     name       = info.get("name", email.split("@")[0])
     avatar_url = info.get("picture")
 
-    # Look up by google_id first, then fall back to email (handles
-    # existing email/password accounts that now also want to use Google)
     user = db.query(User).filter(User.google_id == google_id).first()
-
     if user is None:
         user = db.query(User).filter(User.email == email).first()
 
     if user is None:
-        # Brand-new user — create account (no password)
         user = User(
             email=email,
             password_hash=None,
@@ -101,7 +96,6 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
         )
         db.add(user)
     else:
-        # Existing user — link their google_id and refresh avatar if changed
         if user.google_id is None:
             user.google_id = google_id
         if avatar_url:
@@ -120,5 +114,48 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
 # ── Current user ──────────────────────────────────────────────────────────────
 
 @router.get("/me", response_model=UserOut)
-def get_me(user: User = Depends(get_current_user)):
-    return user
+def get_me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    profile = db.query(Player).filter(Player.user_id == user.user_id).first()
+    result = UserOut.model_validate(user)
+    if profile:
+        result.player_profile = PlayerProfileOut.model_validate(profile)
+    return result
+
+
+# ── Player profile ────────────────────────────────────────────────────────────
+
+@router.get("/player-profile")
+def get_player_profile(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    profile = db.query(Player).filter(Player.user_id == user.user_id).first()
+    if not profile:
+        return None
+    return PlayerProfileOut.model_validate(profile)
+
+
+@router.put("/player-profile", response_model=PlayerProfileOut)
+def save_player_profile(
+    req: PlayerProfileIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    profile = db.query(Player).filter(Player.user_id == user.user_id).first()
+    if not profile:
+        profile = Player(
+            user_id=user.user_id,
+            name=req.name,
+            phone=req.phone,
+            age=req.age,
+            gender=req.gender or "Male",
+            location=req.location,
+            email=user.email,
+        )
+        db.add(profile)
+    else:
+        profile.name     = req.name
+        profile.phone    = req.phone    or profile.phone
+        profile.age      = req.age      if req.age      is not None else profile.age
+        profile.gender   = req.gender   or profile.gender
+        profile.location = req.location or profile.location
+    db.commit()
+    db.refresh(profile)
+    return PlayerProfileOut.model_validate(profile)

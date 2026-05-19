@@ -1824,38 +1824,15 @@
 }
 .hero-poster-active .hero-stat-chip span { color: #fff !important; }
 
-/* ── Tournament hero — unified layout (no banner on any screen) ─ */
-
-/* Banner section no longer shown on any screen size */
+/* ── Tournament hero — poster banner hero redesign ─ */
+/* Legacy class stubs kept for safety; new hero uses only inline styles */
 .hero-mobile-only   { display: none; }
-/* Sticky nav bar shown on all screens */
-.hero-desktop-only  { display: block; }
-/* Logo + name row shown on all screens */
-.hero-desktop-namerow {
-  display: flex !important;
-  align-items: center;
-  gap: 14px;
-  padding-top: 20px;
-  margin-bottom: 12px;
-}
-/* Mobile name hidden — name is in namerow */
+.hero-desktop-only  { display: none; }
+.hero-desktop-namerow { display: none !important; }
 .hero-mobile-name   { display: none !important; }
-/* Info zone: consistent padding, no offset needed */
-.hero-info-zone     { padding: 0 20px 28px; }
-
-.hero-logo-desktop { display: none; }
-.hero-logo-mobile  { display: block; }
-
-@media (min-width: 768px) {
-  .hero-desktop-namerow {
-    gap: 18px;
-    padding-top: 28px;
-    margin-bottom: 14px;
-  }
-  .hero-info-zone    { padding: 0 32px 32px; }
-  .hero-logo-desktop { display: block; }
-  .hero-logo-mobile  { display: none; }
-}
+.hero-info-zone     { display: none !important; }
+.hero-logo-desktop  { display: none; }
+.hero-logo-mobile   { display: none; }
 
 /* ── Dashboard (organiser) — mobile org bar ──────────────── */
 .mobile-org-bar {

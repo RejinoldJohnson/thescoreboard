@@ -101,6 +101,7 @@ def _serialize_match(m: Match) -> dict:
         "status":         m.status,
         "table_number":   m.table_number,
         "current_server": m.current_server,
+        "live_state":     m.live_state or {},
         "player_1": {
             "name":      _name(p1),
             "score":     p1.score      if p1 else 0,

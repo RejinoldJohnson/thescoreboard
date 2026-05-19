@@ -23,13 +23,34 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
 
 
+class PlayerProfileIn(BaseModel):
+    name: str
+    phone: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    location: Optional[str] = None
+
+
+class PlayerProfileOut(BaseModel):
+    player_id: int
+    name: str
+    phone: Optional[str] = None
+    age: Optional[int] = None
+    gender: Optional[str] = None
+    location: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class UserOut(BaseModel):
     user_id: int
     email: str
     name: str
-    phone: Optional[str]
-    avatar_url: Optional[str]
+    phone: Optional[str] = None
+    avatar_url: Optional[str] = None
     is_superadmin: bool
+    player_profile: Optional[PlayerProfileOut] = None
 
     class Config:
         from_attributes = True
