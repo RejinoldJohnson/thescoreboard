@@ -73,24 +73,44 @@ export default function OrgHeader({ crumbs = [], right = null, user = null, onLo
 
           {right}
 
-          {/* Mode toggle */}
-          <button
-            onClick={toggleMode}
-            title={`Switch to ${mode === "organiser" ? "Player" : "Organiser"} mode`}
-            style={{
-              display:"flex", alignItems:"center", gap:5,
-              padding:"5px 10px", borderRadius:6, cursor:"pointer",
-              border:"1px solid var(--border)",
-              background: mode === "player" ? "rgba(22,163,74,.08)" : "var(--elevated)",
-              color: mode === "player" ? "#16a34a" : "var(--muted)",
-              fontSize:11, fontWeight:700,
-            }}
-          >
-            {getModeIcon(mode === "organiser" ? "player" : "organiser")}
-            <span className="user-name-desktop">
-              {mode === "organiser" ? "Player" : "Organiser"}
-            </span>
-          </button>
+          {/* Superadmin: show only the admin panel link, nothing else */}
+          {user?.is_superadmin ? (
+            <button
+              onClick={() => navigate("/admin")}
+              style={{
+                display:"flex", alignItems:"center", gap:6,
+                padding:"6px 14px", borderRadius:6, cursor:"pointer",
+                border:"1px solid rgba(124,58,237,.4)",
+                background:"rgba(124,58,237,.1)",
+                color:"#7c3aed",
+                fontSize:11, fontWeight:700, letterSpacing:0.5, textTransform:"uppercase",
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              Admin Panel
+            </button>
+          ) : (
+            <>
+              {/* Mode toggle */}
+              <button
+                onClick={toggleMode}
+                title={`Switch to ${mode === "organiser" ? "Player" : "Organiser"} mode`}
+                style={{
+                  display:"flex", alignItems:"center", gap:5,
+                  padding:"5px 10px", borderRadius:6, cursor:"pointer",
+                  border:"1px solid var(--border)",
+                  background: mode === "player" ? "rgba(22,163,74,.08)" : "var(--elevated)",
+                  color: mode === "player" ? "#16a34a" : "var(--muted)",
+                  fontSize:11, fontWeight:700,
+                }}
+              >
+                {getModeIcon(mode === "organiser" ? "player" : "organiser")}
+                <span className="user-name-desktop">
+                  {mode === "organiser" ? "Player" : "Organiser"}
+                </span>
+              </button>
+            </>
+          )}
 
           <button
             onClick={toggleTheme}

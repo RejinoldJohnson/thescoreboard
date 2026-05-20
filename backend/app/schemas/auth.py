@@ -50,6 +50,7 @@ class UserOut(BaseModel):
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
     is_superadmin: bool
+    plan: str = "free"
     player_profile: Optional[PlayerProfileOut] = None
 
     class Config:

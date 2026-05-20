@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Optional, Union
 from pydantic import BaseModel
 
@@ -491,6 +492,7 @@ def update_score(
         if data.cricket_live_state:
             ls.update(data.cricket_live_state)
         match.live_state = ls
+        flag_modified(match, "live_state")
 
         # Update participant aggregate scores based on who batted in each innings
         batting_first = ls.get("batting_first", 1)
@@ -509,15 +511,19 @@ def update_score(
 
     # ── FOOTBALL (goals) ──────────────────────────────────────
     elif sport == "football":
-        current_set = next(
-            (s for s in sorted(match.sets, key=lambda x: x.set_number) if not s.is_complete),
-            None
-        )
+        all_sets = sorted(match.sets, key=lambda x: x.set_number)
+        current_set = next((s for s in all_sets if not s.is_complete), None)
         if not current_set:
-            db.add(MatchSet(match_id=match.match_id, set_number=1))
-            db.flush()
-            match = _load_match(match_id, db)
-            current_set = match.sets[0]
+            if all_sets:
+                # All sets are marked complete (e.g. after finish_match was called).
+                # Reuse the last set so we don't violate the uq_match_set constraint.
+                current_set = all_sets[-1]
+                current_set.is_complete = False
+            else:
+                db.add(MatchSet(match_id=match.match_id, set_number=1))
+                db.flush()
+                match = _load_match(match_id, db)
+                current_set = match.sets[0]
 
         current_set.score_p1 = data.score_p1
         current_set.score_p2 = data.score_p2
@@ -534,6 +540,7 @@ def update_score(
         if data.football_live_state:
             live_state.update(data.football_live_state)
         match.live_state = live_state
+        flag_modified(match, "live_state")
 
         parts = sorted(match.participants, key=lambda p: p.position)
         if len(parts) == 2:

@@ -44,7 +44,7 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=TokenOut)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email, User.is_active == True).first()
+    user = db.query(User).filter(User.email == req.email, User.is_active != False).first()
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not verify_password(req.password, user.password_hash):
@@ -101,7 +101,7 @@ def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
         if avatar_url:
             user.avatar_url = avatar_url
 
-    if not user.is_active:
+    if user.is_active is False:
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
     db.commit()

@@ -14,7 +14,7 @@ from app.models.event import Event
 from app.models.match import Match, MatchParticipant, MatchSet
 from app.models.group import Group, EventParticipant
 from app.schemas.tournament import TournamentCreate, TournamentUpdate, TournamentOut, SponsorCreate, SponsorUpdate, SponsorOut
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, require_pro
 from app.utils.slug import generate_unique_slug
 from app.sports.registry import get_sport_engine
 from app.sports.bracket import build_bracket, assign_players_to_groups
@@ -436,7 +436,7 @@ def create_sponsor(
     tournament_id: int,
     data: SponsorCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_pro),   # Pro plan required
 ):
     t = _check_tournament_access(tournament_id, user, db)
     sponsor = Sponsor(
@@ -460,7 +460,7 @@ def update_sponsor(
     sponsor_id: int,
     data: SponsorUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_pro),   # Pro plan required
 ):
     _check_tournament_access(tournament_id, user, db)
     s = db.query(Sponsor).filter(
@@ -481,7 +481,7 @@ def delete_sponsor(
     tournament_id: int,
     sponsor_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_pro),   # Pro plan required
 ):
     _check_tournament_access(tournament_id, user, db)
     s = db.query(Sponsor).filter(

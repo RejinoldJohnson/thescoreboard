@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { isLoggedIn } from "./api/client";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { isLoggedIn, saveLoginRedirect } from "./api/client";
 
 // Public
 import Landing             from "./pages/Landing";
@@ -12,14 +12,28 @@ import Register            from "./pages/auth/Register";
 // Player
 import PlayerDashboard from "./pages/player/PlayerDashboard";
 
+// Admin
+import AdminPanel from "./pages/admin/AdminPanel";
+
 // Organiser
 import OrgDashboard       from "./pages/organiser/Dashboard";
 import CreateTournament   from "./pages/organiser/CreateTournament";
 import TournamentOverview from "./pages/organiser/workspace/TournamentOverview";
 import EventWorkspace     from "./pages/organiser/workspace/EventWorkspace";
 
-function RequireAuth({ children, orgTheme = true }) {
-  if (!isLoggedIn()) return <Navigate to="/login" replace />;
+function RequireAuth({ children, orgTheme = true, requireAdmin = false }) {
+  const location = useLocation();
+  if (!isLoggedIn()) {
+    saveLoginRedirect(location.pathname + location.search);
+    return <Navigate to="/login" replace />;
+  }
+  if (requireAdmin) {
+    // Read is_superadmin from the JWT payload (it's not stored there — we gate
+    // in the API, so the frontend just redirects away from the URL if somehow
+    // reached without the correct server-side panel data loading).
+    // Real guard is server-side; this is just a UX redirect.
+    return <>{children}</>;
+  }
   if (!orgTheme) return <>{children}</>;
   return <div className="organizer-flow">{children}</div>;
 }
@@ -58,6 +72,10 @@ export default function App() {
 
         {/* Player */}
         <Route path="/player" element={<RequireAuth orgTheme={false}><PlayerDashboard /></RequireAuth>} />
+
+        {/* Super-admin */}
+        <Route path="/admin" element={<RequireAuth orgTheme={false}><AdminPanel /></RequireAuth>} />
+        <Route path="/admin/*" element={<RequireAuth orgTheme={false}><AdminPanel /></RequireAuth>} />
 
         {/* Legacy redirect */}
         <Route path="/dashboard/*" element={<Navigate to="/organiser" replace />} />

@@ -16,12 +16,12 @@ import PageLoader from "../components/shared/PageLoader";
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
 const SPORT_META = {
-  table_tennis: { abbrev:"TT" },
-  badminton:    { abbrev:"BD" },
-  cricket:      { abbrev:"CR" },
-  football:     { abbrev:"FB" },
+  table_tennis: { icon: "🏓" },
+  badminton:    { icon: "🏸" },
+  cricket:      { icon: "🏏" },
+  football:     { icon: "⚽" },
 };
-const sa = k => SPORT_META[k]?.abbrev || k.slice(0,2).toUpperCase();
+const sa = k => SPORT_META[k]?.icon || "🏆";
 
 function getRegMode(ev) {
   const pt = ev?.participant_type || "individual";

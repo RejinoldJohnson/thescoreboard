@@ -84,7 +84,7 @@ const SPORT_SETUP = {
   },
 };
 
-const SPORT_ABBREV = { table_tennis: "TT", badminton: "BD", cricket: "CR", football: "FB" };
+const SPORT_ABBREV = { table_tennis: "🏓", badminton: "🏸", cricket: "🏏", football: "⚽" };
 const SPORT_LABELS = { table_tennis: "Table Tennis", badminton: "Badminton", cricket: "Cricket", football: "Football" };
 
 function buildInitialForm(spec) {

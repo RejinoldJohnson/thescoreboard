@@ -73,10 +73,12 @@ def get_dashboard(
 
     return {
         "user": {
-            "user_id":    user.user_id,
-            "name":       user.name,
-            "email":      user.email,
-            "avatar_url": user.avatar_url,
+            "user_id":      user.user_id,
+            "name":         user.name,
+            "email":        user.email,
+            "avatar_url":   user.avatar_url,
+            "is_superadmin": user.is_superadmin,
+            "plan":         user.plan,
         },
         "orgs": [
             {

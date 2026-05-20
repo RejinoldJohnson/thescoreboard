@@ -1834,7 +1834,7 @@
 .hero-logo-desktop  { display: none; }
 .hero-logo-mobile   { display: none; }
 
-/* ── Dashboard (organiser) — mobile org bar ──────────────── */
+/* ── Dashboard (organiser) — mobile nav ──────────────────── */
 .mobile-org-bar {
   display: none;
   background: var(--elevated);
@@ -1843,6 +1843,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+.mobile-sidebar-drawer { display: none; }
+@media (max-width: 768px) {
+  .mobile-sidebar-drawer { display: block; }
 }
 .mobile-org-bar-name {
   font-family: var(--font-display);

@@ -16,12 +16,12 @@ const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
 // ── Sport meta ────────────────────────────────────────────────
 const SPORT_META = {
-  table_tennis: { abbrev: "TT", label: "Table Tennis", icon: "🏓" },
-  badminton:    { abbrev: "BD", label: "Badminton",    icon: "🏸" },
-  cricket:      { abbrev: "CR", label: "Cricket",      icon: "🏏" },
-  football:     { abbrev: "FB", label: "Football",     icon: "⚽" },
+  table_tennis: { icon: "🏓", label: "Table Tennis" },
+  badminton:    { icon: "🏸", label: "Badminton"    },
+  cricket:      { icon: "🏏", label: "Cricket"      },
+  football:     { icon: "⚽", label: "Football"     },
 };
-const sa = k => SPORT_META[k]?.abbrev || k.slice(0, 2).toUpperCase();
+const sa = k => SPORT_META[k]?.icon || "🏆";
 const sl = k => SPORT_META[k]?.label  || k;
 
 function getRegMode(ev) {

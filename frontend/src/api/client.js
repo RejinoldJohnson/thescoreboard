@@ -2,6 +2,25 @@ const BASE = import.meta.env.VITE_API_URL || "/api";
 function getToken() { return localStorage.getItem("tsb_token"); }
 export function setToken(token) { localStorage.setItem("tsb_token", token); }
 export function clearToken() { localStorage.removeItem("tsb_token"); }
+
+// ── Post-login redirect helpers ─────────────────────────────────────────────
+// Call saveLoginRedirect(path) before sending a user to /login so that after
+// they authenticate they land where they originally intended, not /organiser.
+export function saveLoginRedirect(path) {
+  if (path && path !== "/login" && path !== "/register") {
+    localStorage.setItem("tsb_next", path);
+  }
+}
+export function consumeLoginRedirect(fallback = "/organiser") {
+  const next = localStorage.getItem("tsb_next");
+  if (next) { localStorage.removeItem("tsb_next"); return next; }
+  return fallback;
+}
+
+// ── Admin API ───────────────────────────────────────────────────────────────
+export const adminGetStats   = ()           => request("GET",   "/admin/stats");
+export const adminListUsers  = ()           => request("GET",   "/admin/users");
+export const adminUpdateUser = (userId, d)  => request("PATCH", `/admin/users/${userId}`, d);
 export function isLoggedIn() {
   const token = getToken();
   if (!token) return false;

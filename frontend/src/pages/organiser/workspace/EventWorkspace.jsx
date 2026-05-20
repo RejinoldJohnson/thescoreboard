@@ -17,10 +17,10 @@ import OrgHeader       from "../../../components/shared/OrgHeader";
 import { IndividualTab, DoublesTab, TeamTab } from "../../../components/shared/ParticipantsTab";
 
 const SPORT_META = {
-  table_tennis: { abbrev: "TT", label: "Table Tennis" },
-  badminton:    { abbrev: "BD", label: "Badminton"    },
-  cricket:      { abbrev: "CR", label: "Cricket"      },
-  football:     { abbrev: "FB", label: "Football"     },
+  table_tennis: { abbrev: "🏓", label: "Table Tennis" },
+  badminton:    { abbrev: "🏸", label: "Badminton"    },
+  cricket:      { abbrev: "🏏", label: "Cricket"      },
+  football:     { abbrev: "⚽", label: "Football"     },
 };
 
 const API = import.meta.env.VITE_API_URL || "/api";

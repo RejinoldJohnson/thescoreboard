@@ -50,8 +50,25 @@ def get_current_user(
     payload = decode_token(token)
     user_id = int(payload.get("sub", 0))
 
-    user = db.query(User).filter(User.user_id == user_id, User.is_active == True).first()
+    user = db.query(User).filter(User.user_id == user_id, User.is_active != False).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found or inactive")
 
+    return user
+
+
+def get_superadmin(user: User = Depends(get_current_user)) -> User:
+    """Dependency — only allows through users with is_superadmin=True."""
+    if not user.is_superadmin:
+        raise HTTPException(status_code=403, detail="Superadmin access required")
+    return user
+
+
+def require_pro(user: User = Depends(get_current_user)) -> User:
+    """Dependency — only allows through users on the 'pro' plan.
+    Returns a 403 with detail='pro_required' so the frontend can show
+    a specific upgrade prompt rather than a generic error.
+    """
+    if user.plan != "pro":
+        raise HTTPException(status_code=403, detail="pro_required")
     return user

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getHomepageData, isLoggedIn } from "../api/client";
 import TournamentCard, { SPORT_LABELS } from "../components/shared/TournamentCard";
 
-const SPORT_ABBREV = { table_tennis: "TT", badminton: "BD", cricket: "CR", football: "FB" };
+const SPORT_ABBREV = { table_tennis: "🏓", badminton: "🏸", cricket: "🏏", football: "⚽" };
 
 const SPORTS_CONFIG = [
   { key: "football",     url: "football",     color: "#22c55e" },

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, organizations, tournaments, events, players, matches, public, teams, media, share, ws as ws_router, dashboard
+from app.routers import auth, organizations, tournaments, events, players, matches, public, teams, media, share, ws as ws_router, dashboard, admin
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -83,6 +83,9 @@ app.include_router(public.router,        prefix="/api/public",  tags=["public"])
 
 # ── Media upload (auth required) ──────────────────────────────
 app.include_router(media.router,         prefix="/api/media",   tags=["media"])
+
+# ── Super-admin panel (is_superadmin required) ────────────────
+app.include_router(admin.router,         prefix="/api/admin",   tags=["admin"])
 
 # ── Social share (no auth — crawlers must reach these) ────────
 app.include_router(share.router,         prefix="/api/share",   tags=["share"])
