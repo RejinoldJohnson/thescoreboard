@@ -263,7 +263,7 @@ def homepage_data(
     q: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    tournaments = (
+    query = (
         db.query(Tournament)
         .filter(Tournament.is_active == True)
         .options(
@@ -271,17 +271,18 @@ def homepage_data(
             joinedload(Tournament.organization),
         )
         .order_by(Tournament.created_at.desc())
-        .all()
     )
 
     if q:
-        q_lower = q.lower()
-        tournaments = [
-            t for t in tournaments
-            if q_lower in t.name.lower()
-            or (t.city and q_lower in t.city.lower())
-            or (t.venue and q_lower in t.venue.lower())
-        ]
+        query = query.filter(
+            or_(
+                Tournament.name.ilike(f"%{q}%"),
+                Tournament.city.ilike(f"%{q}%"),
+                Tournament.venue.ilike(f"%{q}%"),
+            )
+        )
+
+    tournaments = query.all()
 
     # Single bulk query for all event stats across all tournaments
     all_event_ids = [e.event_id for t in tournaments for e in t.events if e.is_active]
@@ -357,16 +358,16 @@ def sport_page_data(
     if city:
         query = query.filter(Tournament.city.ilike(f"%{city}%"))
 
-    tournaments = query.order_by(Tournament.created_at.desc()).all()
-
     if q:
-        q_lower = q.lower()
-        tournaments = [
-            t for t in tournaments
-            if q_lower in t.name.lower()
-            or (t.city and q_lower in t.city.lower())
-            or (t.venue and q_lower in t.venue.lower())
-        ]
+        query = query.filter(
+            or_(
+                Tournament.name.ilike(f"%{q}%"),
+                Tournament.city.ilike(f"%{q}%"),
+                Tournament.venue.ilike(f"%{q}%"),
+            )
+        )
+
+    tournaments = query.order_by(Tournament.created_at.desc()).all()
 
     all_event_ids = [e.event_id for t in tournaments for e in t.events if e.is_active]
     stats = _bulk_event_stats(all_event_ids, db)
@@ -411,6 +412,7 @@ def get_tournament_page(slug: str, db: Session = Depends(get_db)):
             db.query(Match).filter(Match.event_id == event.event_id)
             .options(
                 joinedload(Match.participants).joinedload(MatchParticipant.player),
+                joinedload(Match.participants).joinedload(MatchParticipant.team),
                 joinedload(Match.sets))
             .order_by(Match.stage, Match.round, Match.match_id).all()
         )
@@ -490,6 +492,7 @@ def get_tournament_by_sport(
             db.query(Match).filter(Match.event_id == event.event_id)
             .options(
                 joinedload(Match.participants).joinedload(MatchParticipant.player),
+                joinedload(Match.participants).joinedload(MatchParticipant.team),
                 joinedload(Match.sets))
             .order_by(Match.stage, Match.round, Match.match_id).all()
         )

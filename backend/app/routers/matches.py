@@ -3,6 +3,8 @@ Match routes — create, score, and manage matches.
 Scoring is delegated to the sport engine based on event.sport_key.
 Supports: table_tennis, badminton (set-based), cricket (innings), football (goals).
 """
+import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -249,11 +251,20 @@ def _finish_match(match: Match, winner_position: Optional[int], db: Optional[Ses
 
 # ── WebSocket push helper ─────────────────────────────────────
 
+# Debounce state: track the last push timestamp per tournament slug
+# so that rapid score updates (e.g. cricket ball-by-ball) only trigger
+# one full tournament-page rebuild per 500 ms window.
+_ws_last_push: dict = {}
+_ws_push_lock  = threading.Lock()
+_WS_DEBOUNCE_SECS = 0.5
+
+
 def _push_ws_update(event_id: int) -> None:
     """
     Background task — called after any score-changing commit.
     Opens a fresh DB session, builds the tournament payload, and pushes
     it to all WS clients currently watching that tournament.
+    Debounced: skips the rebuild if the same slug was pushed < 500 ms ago.
     """
     from app.database import SessionLocal
     from app.models.event import Event as _Event
@@ -274,6 +285,15 @@ def _push_ws_update(event_id: int) -> None:
         slug = event.tournament.slug
         if not manager.has_watchers(slug):
             return
+
+        # Debounce: skip if last push was less than _WS_DEBOUNCE_SECS ago
+        now = time.monotonic()
+        with _ws_push_lock:
+            last = _ws_last_push.get(slug, 0.0)
+            if now - last < _WS_DEBOUNCE_SECS:
+                return
+            _ws_last_push[slug] = now
+
         data = get_tournament_page(slug, db)
         manager.push(slug, data)
     except Exception as exc:

@@ -227,17 +227,24 @@ def get_workspace(
 
         # Groups
         groups = db.query(Group).filter(Group.event_id == event.event_id).order_by(Group.name).all()
+
+        # Single bulk query for ALL participants in this event — avoids N queries for N groups.
+        all_eps = (
+            db.query(EventParticipant)
+            .filter(EventParticipant.event_id == event.event_id)
+            .options(
+                joinedload(EventParticipant.player),
+                joinedload(EventParticipant.team),
+            )
+            .all()
+        )
+        eps_by_group: dict = {}
+        for ep in all_eps:
+            eps_by_group.setdefault(ep.group_id, []).append(ep)
+
         groups_data = []
         for g in groups:
-            participants = (
-                db.query(EventParticipant)
-                .filter(EventParticipant.event_id == event.event_id, EventParticipant.group_id == g.group_id)
-                .options(
-                    joinedload(EventParticipant.player),
-                    joinedload(EventParticipant.team),
-                )
-                .all()
-            )
+            participants = eps_by_group.get(g.group_id, [])
             groups_data.append({
                 "group_id": g.group_id,
                 "name":     g.name,
@@ -252,16 +259,8 @@ def get_workspace(
                 ],
             })
 
-        # Ungrouped participants
-        ungrouped = (
-            db.query(EventParticipant)
-            .filter(EventParticipant.event_id == event.event_id, EventParticipant.group_id == None)
-            .options(
-                joinedload(EventParticipant.player),
-                joinedload(EventParticipant.team),
-            )
-            .all()
-        )
+        # Ungrouped participants — already loaded above, just filter by group_id=None
+        ungrouped = eps_by_group.get(None, [])
 
         # Matches
         matches = (
@@ -862,7 +861,15 @@ def get_standings(
             row1["losses"]         += 1
 
     # Ensure ALL enrolled participants appear even with 0 played
-    eps = db.query(EventParticipant).filter(EventParticipant.event_id == event_id).all()
+    eps = (
+        db.query(EventParticipant)
+        .filter(EventParticipant.event_id == event_id)
+        .options(
+            joinedload(EventParticipant.player),
+            joinedload(EventParticipant.team),
+        )
+        .all()
+    )
     for ep in eps:
         pid  = ep.team_id if is_team else ep.player_id
         name = ep.team.name if (is_team and ep.team) else (ep.player.name if ep.player else "Unknown")
