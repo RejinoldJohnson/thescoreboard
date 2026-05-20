@@ -24,7 +24,7 @@ class Settings:
     GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
 
     # CORS
-    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173,http://localhost:8081,http://localhost:19006")
 
     # Public base URL — used to build absolute share / OG-image URLs.
     # In production set to: https://api.yourdomain.com
