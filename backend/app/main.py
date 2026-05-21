@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, organizations, tournaments, events, players, matches, public, teams, media, share, ws as ws_router, dashboard
+from app.routers import auth, organizations, tournaments, events, players, matches, public, teams, media, share, ws as ws_router, dashboard, admin
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -67,6 +67,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Public routes (spectators, no auth) ───────────────────────
+# IMPORTANT: must be registered BEFORE any router that uses wildcard path
+# segments at the same /api prefix (e.g. tournaments.router /{org_id}/...).
+# FastAPI matches routes in registration order, so the concrete /api/public/*
+# paths must win over the wildcard /{org_id}/tournaments catch-all.
+app.include_router(public.router,        prefix="/api/public",  tags=["public"])
+
 # ── Authenticated routes (organizers) ─────────────────────────
 app.include_router(dashboard.router,     prefix="/api/dashboard", tags=["dashboard"])
 app.include_router(auth.router,          prefix="/api/auth",    tags=["auth"])
@@ -78,11 +85,11 @@ app.include_router(players.router,       prefix="/api/players", tags=["players"]
 app.include_router(matches.router,       prefix="/api",         tags=["matches"])
 app.include_router(teams.router, prefix="/api", tags=["teams"])
 
-# ── Public routes (spectators, no auth) ───────────────────────
-app.include_router(public.router,        prefix="/api/public",  tags=["public"])
-
 # ── Media upload (auth required) ──────────────────────────────
 app.include_router(media.router,         prefix="/api/media",   tags=["media"])
+
+# ── Super-admin panel (is_superadmin required) ────────────────
+app.include_router(admin.router,         prefix="/api/admin",   tags=["admin"])
 
 # ── Social share (no auth — crawlers must reach these) ────────
 app.include_router(share.router,         prefix="/api/share",   tags=["share"])

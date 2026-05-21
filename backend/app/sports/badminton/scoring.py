@@ -29,6 +29,7 @@ VALID_SETS_TO_WIN = [1, 2, 3]     # BO1, BO3, BO5
 
 class Badminton(BaseSport):
 
+
     def get_default_config(self) -> dict:
         return DEFAULT_CONFIG.copy()
 

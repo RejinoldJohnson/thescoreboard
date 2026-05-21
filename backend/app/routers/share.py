@@ -9,7 +9,7 @@ import io
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session, joinedload
 
@@ -21,6 +21,26 @@ from app.services import storage, og_generator
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _origin(request: Request) -> str:
+    """
+    Return the public-facing scheme+host the request arrived on.
+    Respects X-Forwarded-Proto / X-Forwarded-Host set by reverse proxies
+    (nginx, Render, Vite dev proxy) so the OG image URL is always reachable
+    by WhatsApp / social crawlers.
+    Falls back to APP_URL if headers are absent (e.g. direct local calls).
+    """
+    host   = (request.headers.get("x-forwarded-host")
+              or request.headers.get("host")
+              or "")
+    scheme = (request.headers.get("x-forwarded-proto")
+              or request.url.scheme
+              or "https")
+    if host:
+        return f"{scheme}://{host}"
+    # Last resort: use APP_URL from settings
+    return settings.APP_URL.rstrip("/")
 
 SPORT_LABELS = {
     "cricket":      "Cricket",
@@ -42,21 +62,38 @@ def _og_redirect_html(
     url: str,
 ) -> str:
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" prefix="og: https://ogp.me/ns#">
 <head>
   <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{title}</title>
+
+  <!-- ── Primary meta ───────────────────────────── -->
+  <meta name="description"        content="{description}"/>
+
+  <!-- ── Open Graph (Facebook, Instagram, WhatsApp, LinkedIn) ── -->
+  <meta property="og:site_name"   content="TheScoreBoard"/>
+  <meta property="og:type"        content="website"/>
+  <meta property="og:locale"      content="en_IN"/>
+  <meta property="og:url"         content="{url}"/>
   <meta property="og:title"       content="{title}"/>
   <meta property="og:description" content="{description}"/>
   <meta property="og:image"       content="{image_url}"/>
+  <meta property="og:image:secure_url" content="{image_url}"/>
+  <meta property="og:image:type"  content="image/png"/>
   <meta property="og:image:width" content="1200"/>
   <meta property="og:image:height" content="630"/>
-  <meta property="og:url"         content="{url}"/>
-  <meta property="og:type"        content="website"/>
-  <meta name="twitter:card"       content="summary_large_image"/>
-  <meta name="twitter:title"      content="{title}"/>
+  <meta property="og:image:alt"   content="{title}"/>
+
+  <!-- ── Twitter / X ───────────────────────────── -->
+  <meta name="twitter:card"        content="summary_large_image"/>
+  <meta name="twitter:site"        content="@thescoreboardin"/>
+  <meta name="twitter:title"       content="{title}"/>
   <meta name="twitter:description" content="{description}"/>
-  <meta name="twitter:image"      content="{image_url}"/>
+  <meta name="twitter:image"       content="{image_url}"/>
+  <meta name="twitter:image:alt"   content="{title}"/>
+
+  <!-- ── Redirect users to the app (crawlers stop at meta tags) ── -->
   <script>window.location.replace("{redirect_url}")</script>
 </head>
 <body>
@@ -91,7 +128,7 @@ def _cached_png(cache_key: str, generate_fn) -> bytes:
 # ── Tournament share page ─────────────────────────────────────────────────────
 
 @router.get("/t/{slug}", response_class=HTMLResponse)
-def share_tournament(slug: str, db: Session = Depends(get_db)):
+def share_tournament(request: Request, slug: str, db: Session = Depends(get_db)):
     t = db.query(Tournament).filter(Tournament.slug == slug, Tournament.is_active == True).first()
     if not t:
         raise HTTPException(status_code=404, detail="Tournament not found")
@@ -103,9 +140,11 @@ def share_tournament(slug: str, db: Session = Depends(get_db)):
     desc_parts = [p for p in [sport_label, t.city, t.venue] if p]
     description = " · ".join(desc_parts) if desc_parts else "Live tournament on TheScoreBoard"
 
-    # og:url and redirect both point to the canonical frontend URL.
-    # The OG image itself lives on the backend — that's fine, images can be cross-origin.
-    image_url  = f"{settings.APP_URL}/api/share/og/tournament/{slug}.png"
+    # og:image must be an absolute URL reachable by social crawlers.
+    # We derive the origin from the incoming request so it works across
+    # dev tunnels, staging domains, and production without any extra env vars.
+    origin       = _origin(request)
+    image_url    = f"{origin}/api/share/og/tournament/{slug}.png"
     frontend_url = f"{settings.SITE_URL}/t/{slug}"
 
     return HTMLResponse(_og_redirect_html(title, description, image_url, frontend_url, frontend_url))
@@ -148,7 +187,7 @@ def og_tournament_image(slug: str, db: Session = Depends(get_db)):
 # ── Match share page ──────────────────────────────────────────────────────────
 
 @router.get("/m/{match_id}", response_class=HTMLResponse)
-def share_match(match_id: int, db: Session = Depends(get_db)):
+def share_match(request: Request, match_id: int, db: Session = Depends(get_db)):
     match = (
         db.query(Match)
         .options(
@@ -167,11 +206,14 @@ def share_match(match_id: int, db: Session = Depends(get_db)):
 
     title = f"{t1} vs {t2}"
     event_name = match.event.name if match.event else ""
-    description = f"{event_name} · Live on TheScoreBoard" if event_name else "Live on TheScoreBoard"
+    t_name = match.event.tournament.name if (match.event and match.event.tournament) else ""
+    parts  = [p for p in [t_name, event_name, "Live on TheScoreBoard"] if p]
+    description = " · ".join(parts)
 
     tournament_slug = match.event.tournament.slug if (match.event and match.event.tournament) else "tournament"
 
-    image_url    = f"{settings.APP_URL}/api/share/og/match/{match_id}.png"
+    origin       = _origin(request)
+    image_url    = f"{origin}/api/share/og/match/{match_id}.png"
     frontend_url = f"{settings.SITE_URL}/t/{tournament_slug}"
 
     return HTMLResponse(_og_redirect_html(title, description, image_url, frontend_url, frontend_url))

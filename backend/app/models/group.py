@@ -15,7 +15,7 @@ class Group(Base):
     __tablename__ = "groups"
 
     group_id = Column(Integer, primary_key=True)
-    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="CASCADE"), nullable=False, index=True)
     name = Column(String(100), nullable=False)  # "Group A", "Pool 1", etc.
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -33,13 +33,13 @@ class EventParticipant(Base):
     __tablename__ = "event_participants"
 
     ep_id = Column(Integer, primary_key=True)
-    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="CASCADE"), nullable=False, index=True)
 
     # One of these is set depending on participant_type
     player_id = Column(Integer, ForeignKey("players.player_id", ondelete="CASCADE"), nullable=True)
     team_id = Column(Integer, ForeignKey("teams.team_id", ondelete="CASCADE"), nullable=True)
 
-    group_id = Column(Integer, ForeignKey("groups.group_id", ondelete="SET NULL"), nullable=True)
+    group_id = Column(Integer, ForeignKey("groups.group_id", ondelete="SET NULL"), nullable=True, index=True)
     seed = Column(Integer, nullable=True)
     status = Column(String(50), default="active")  # active | eliminated | withdrawn
 

@@ -3,7 +3,7 @@ Table Tennis configuration defaults.
 """
 
 DEFAULT_CONFIG = {
-    "sets_to_win": 3,        # best of 5 → need 3 to win
+    "sets_to_win": 2,        # best of 3 → need 2 to win (default; organisers can change per-match)
     "points_per_set": 11,    # first to 11
     "win_margin": 2,         # must win by 2 at deuce
     "deuce_starts_at": 10,   # deuce kicks in when both reach 10

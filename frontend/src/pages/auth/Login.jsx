@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { login, setToken } from "../../api/client";
+import { login, setToken, consumeLoginRedirect } from "../../api/client";
 import GoogleSignInButton from "../../components/auth/GoogleButton";
 
 export default function Login() {
@@ -15,7 +15,7 @@ export default function Login() {
     try {
       const data = await login(form);
       setToken(data.access_token);
-      navigate("/organiser", { replace: true });
+      navigate(consumeLoginRedirect("/organiser"), { replace: true });
     } catch (e) { setError(e.message || "Login failed."); }
     finally { setLoading(false); }
   };
@@ -46,7 +46,7 @@ export default function Login() {
 
         {/* Google SSO */}
         <GoogleSignInButton
-          onSuccess={() => navigate("/organiser", { replace: true })}
+          onSuccess={() => navigate(consumeLoginRedirect("/organiser"), { replace: true })}
           onError={(msg) => setError(msg)}
         />
 

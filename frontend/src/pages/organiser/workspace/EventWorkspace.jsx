@@ -17,10 +17,10 @@ import OrgHeader       from "../../../components/shared/OrgHeader";
 import { IndividualTab, DoublesTab, TeamTab } from "../../../components/shared/ParticipantsTab";
 
 const SPORT_META = {
-  table_tennis: { abbrev: "TT", label: "Table Tennis" },
-  badminton:    { abbrev: "BD", label: "Badminton"    },
-  cricket:      { abbrev: "CR", label: "Cricket"      },
-  football:     { abbrev: "FB", label: "Football"     },
+  table_tennis: { abbrev: "🏓", label: "Table Tennis" },
+  badminton:    { abbrev: "🏸", label: "Badminton"    },
+  cricket:      { abbrev: "🏏", label: "Cricket"      },
+  football:     { abbrev: "⚽", label: "Football"     },
 };
 
 const API = import.meta.env.VITE_API_URL || "/api";
@@ -67,6 +67,24 @@ export default function EventWorkspace() {
     try { setData(await getWorkspace(tournamentId)); }
     catch (e) { console.error(e); }
   }, [tournamentId]);
+
+  // Surgically update one match in local state — avoids a full workspace reload
+  // on every score tap. Falls back to loadData() is called by the caller when needed.
+  const patchMatchInData = useCallback((updatedMatch) => {
+    if (!updatedMatch) return;
+    setData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        events: prev.events.map(ev => ({
+          ...ev,
+          matches: (ev.matches || []).map(m =>
+            m.match_id === updatedMatch.match_id ? updatedMatch : m
+          ),
+        })),
+      };
+    });
+  }, []);
 
   const loadTeams = useCallback(async () => {
     try { setEventTeams(await getEventTeams(eventId) || []); }
@@ -361,8 +379,14 @@ export default function EventWorkspace() {
   };
 
   const handleScore = async (matchId, s1, s2, server) => {
-    await updateScore(matchId, { score_p1: s1, score_p2: s2, current_server: server });
-    loadData();
+    const updated = await updateScore(matchId, { score_p1: s1, score_p2: s2, current_server: server });
+    // If match finished, reload to advance bracket TBD slots; otherwise patch locally (no round-trip)
+    if (updated?.status === "done") {
+      loadData();
+      if (showStandings) loadStandings();
+    } else {
+      patchMatchInData(updated);
+    }
   };
 
   const handleFinishMatch = async (matchId, winPos, extraData = {}) => {
@@ -781,7 +805,7 @@ export default function EventWorkspace() {
                 participantType={currentEvent.participant_type}
                 participants={
                   (isTeam || isDoubles)
-                    ? eventTeams.map(t => ({ id: t.team_id, name: t.name }))
+                    ? eventTeams.map(ep => { const t = ep.team || ep; return { id: t.team_id, name: t.name }; })
                     : [
                         ...(currentEvent.groups || []).flatMap(g => (g.players || []).map(p => ({ id: p.player_id, name: p.name }))),
                         ...(currentEvent.ungrouped_players || []).map(p => ({ id: p.player_id, name: p.name })),
@@ -795,7 +819,7 @@ export default function EventWorkspace() {
             ) : (
               (() => {
                 const allParticipants = isTeam || isDoubles
-                  ? eventTeams.map(t => ({ id: t.team_id, name: t.name }))
+                  ? eventTeams.map(ep => { const t = ep.team || ep; return { id: t.team_id, name: t.name }; })
                   : [
                       ...(currentEvent.groups || []).flatMap(g => (g.players || []).map(p => ({ id: p.player_id, name: p.name }))),
                       ...(currentEvent.ungrouped_players || []).map(p => ({ id: p.player_id, name: p.name })),
@@ -964,7 +988,7 @@ export default function EventWorkspace() {
       )}
       {activeMatch && activeMatchData && currentEvent.sport_key === "cricket" && (
         <CricketScorer match={activeMatchData} config={currentEvent.sport_config || {}}
-          onScore={(s1, s2, extra) => updateScore(activeMatch, { score_p1: s1, score_p2: s2, ...extra }).then(loadData)}
+          onScore={(s1, s2, extra) => updateScore(activeMatch, { score_p1: s1, score_p2: s2, ...extra }).then(u => u?.status === "done" ? loadData() : patchMatchInData(u))}
           onFinish={(wp, extra) => handleFinishMatch(activeMatch, wp, extra)}
           onGoLive={() => handleMatchAction(activeMatch, "go_live")}
           onPause={() => handleMatchAction(activeMatch, "pause")}
@@ -973,7 +997,7 @@ export default function EventWorkspace() {
       )}
       {activeMatch && activeMatchData && currentEvent.sport_key === "football" && (
         <FootballScorer match={activeMatchData} config={currentEvent.sport_config || {}}
-          onScore={(s1, s2, extra) => updateScore(activeMatch, { score_p1: s1, score_p2: s2, ...extra }).then(loadData)}
+          onScore={(s1, s2, extra) => updateScore(activeMatch, { score_p1: s1, score_p2: s2, ...extra }).then(u => u?.status === "done" ? loadData() : patchMatchInData(u))}
           onFinish={(wp) => handleFinishMatch(activeMatch, wp)}
           onWalkover={(winPos) => handleWalkover(activeMatch, winPos)}
           onGoLive={() => handleMatchAction(activeMatch, "go_live")}

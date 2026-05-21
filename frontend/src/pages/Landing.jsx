@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { getHomepageData, isLoggedIn } from "../api/client";
 import TournamentCard, { SPORT_LABELS } from "../components/shared/TournamentCard";
 
-const SPORT_ABBREV = { table_tennis: "TT", badminton: "BD", cricket: "CR", football: "FB" };
 
 const SPORTS_CONFIG = [
   { key: "football",     url: "football",     color: "#22c55e" },
@@ -213,7 +212,7 @@ export default function Landing() {
               </div>
             </div>
             <button
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/tournaments")}
               style={{
                 background: "none", border: "1px solid var(--border)",
                 color: "var(--muted)", borderRadius: 6, padding: "7px 16px",
@@ -284,53 +283,90 @@ export default function Landing() {
       {/* ── SPORTS GRID ── */}
       <section style={{ padding: "48px 24px", background: "var(--bg)" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 24, flexWrap: "wrap", gap: 8 }}>
             <div style={{
-              fontFamily: "var(--font-display)", fontSize: "clamp(22px,3vw,30px)",
+              fontFamily: "var(--font-display)", fontSize: "clamp(20px,3vw,28px)",
               fontWeight: 900, color: "var(--ink)", letterSpacing: -1,
             }}>Browse by Sport</div>
-            <div style={{ color: "var(--muted)", fontSize: 14, marginTop: 6 }}>
-              Pick your game and find tournaments nearby
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>
+              {SPORTS_CONFIG.reduce((a, s) => a + (sportStats[s.key]?.tournament_count || 0), 0)} tournaments across 4 sports
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
             {SPORTS_CONFIG.map(sport => {
               const stats      = sportStats[sport.key];
               const tournCount = stats?.tournament_count || 0;
               const liveCount  = stats?.live_count || 0;
               return (
-                <div key={sport.key} onClick={() => navigate(`/${sport.url}`)}
+                <div
+                  key={sport.key}
+                  onClick={() => navigate(`/${sport.url}`)}
                   style={{
-                    background: "var(--surface)", border: "2px solid var(--border)",
-                    borderTop: `3px solid ${sport.color}`,
-                    borderRadius: 12, padding: "28px 20px",
-                    textAlign: "center", cursor: "pointer",
-                    transition: "all 0.25s", position: "relative", overflow: "hidden",
+                    display: "flex", alignItems: "center", gap: 0,
+                    borderRadius: 12, overflow: "hidden",
+                    border: `1.5px solid ${sport.color}28`,
+                    background: `${sport.color}08`,
+                    cursor: "pointer", transition: "all 0.2s",
+                    minHeight: 88,
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = "0 8px 28px rgba(0,0,0,0.1)"; e.currentTarget.style.borderColor = sport.color; }}
-                  onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.borderColor = "var(--border)"; }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = `${sport.color}14`;
+                    e.currentTarget.style.borderColor = `${sport.color}55`;
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                    e.currentTarget.style.boxShadow = `0 6px 24px ${sport.color}20`;
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = `${sport.color}08`;
+                    e.currentTarget.style.borderColor = `${sport.color}28`;
+                    e.currentTarget.style.transform = "none";
+                    e.currentTarget.style.boxShadow = "none";
+                  }}
                 >
-                  <div style={{
-                    width: 48, height: 48, borderRadius: 10,
-                    background: sport.color, color: "#fff",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900,
-                    margin: "0 auto 10px", letterSpacing: -0.5,
-                  }}>
-                    {SPORT_ABBREV[sport.key] || sport.key.slice(0,2).toUpperCase()}
-                  </div>
-                  <div style={{ fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--ink)", marginBottom: 6 }}>
-                    {SPORT_LABELS[sport.key]}
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                    {tournCount > 0 ? `${tournCount} tournament${tournCount !== 1 ? "s" : ""}` : "Coming soon"}
-                  </div>
-                  {liveCount > 0 && (
-                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, fontSize: 10, fontWeight: 800, color: "var(--primary)", textTransform: "uppercase", letterSpacing: 1 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--primary)", animation: "pulse 1.5s infinite", display: "inline-block" }}/>
-                      {liveCount} live
+                  {/* Left accent bar */}
+                  <div style={{ width: 5, alignSelf: "stretch", background: sport.color, flexShrink: 0 }} />
+
+                  {/* Content */}
+                  <div style={{ flex: 1, padding: "18px 18px" }}>
+                    <div style={{
+                      fontFamily: "var(--font-display)", fontSize: "clamp(15px,2vw,19px)",
+                      fontWeight: 900, textTransform: "uppercase", letterSpacing: -0.5,
+                      color: "var(--ink)", lineHeight: 1,
+                    }}>
+                      {SPORT_LABELS[sport.key]}
                     </div>
-                  )}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, color: "var(--muted)",
+                        background: "var(--elevated)", borderRadius: 4,
+                        padding: "2px 8px",
+                      }}>
+                        {tournCount > 0 ? `${tournCount} tournament${tournCount !== 1 ? "s" : ""}` : "Coming soon"}
+                      </span>
+                      {liveCount > 0 && (
+                        <span style={{
+                          display: "flex", alignItems: "center", gap: 4,
+                          fontSize: 10, fontWeight: 800, color: sport.color,
+                          textTransform: "uppercase", letterSpacing: 1,
+                        }}>
+                          <span style={{
+                            width: 6, height: 6, borderRadius: "50%",
+                            background: sport.color,
+                            animation: "pulse 1.5s infinite",
+                            display: "inline-block",
+                          }}/>
+                          {liveCount} live
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Arrow */}
+                  <div style={{
+                    paddingRight: 18, color: sport.color,
+                    fontSize: 18, fontWeight: 900, opacity: 0.7,
+                    flexShrink: 0,
+                  }}>→</div>
                 </div>
               );
             })}
@@ -363,9 +399,9 @@ export default function Landing() {
             {
               title: "For Players",
               links: [
-                { label: "Find Tournaments", action: () => {} },
-                { label: "Register to Play", action: () => {} },
-                { label: "Live Scores",      action: () => {} },
+                { label: "Find Tournaments", action: () => navigate("/tournaments") },
+                { label: "Register to Play", action: () => navigate("/tournaments?status=upcoming") },
+                { label: "Live Scores",      action: () => navigate("/tournaments?status=live") },
               ],
             },
             {

@@ -38,6 +38,7 @@ export default function Dashboard() {
   const [showDeleteModal,    setShowDeleteModal]    = useState(null);
   const [showKebab,          setShowKebab]          = useState(null);
   const [onboarding,         setOnboarding]         = useState(false);
+  const [mobileMenuOpen,     setMobileMenuOpen]     = useState(false);
   const [orgForm,    setOrgForm]    = useState({ name:"", city:"", state:"" });
   const [orgLoading, setOrgLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
@@ -46,20 +47,40 @@ export default function Dashboard() {
   const flash = (t) => { setMsg(t); setTimeout(() => setMsg(""), 3000); };
 
   useEffect(() => {
-    getDashboard().then(data => {
+    getDashboard().then(async data => {
+      // Superadmin has no business here — send straight to the admin panel
+      if (data.user?.is_superadmin) {
+        navigate("/admin", { replace: true });
+        return;
+      }
+
       setUser(data.user);
       const orgList = data.orgs || [];
       const map = {};
-      const cleanOrgs = orgList.map(({ tournaments, ...o }) => { map[o.org_id] = { org: o, tournaments: tournaments || [] }; return o; });
+      let cleanOrgs = orgList.map(({ tournaments, ...o }) => { map[o.org_id] = { org: o, tournaments: tournaments || [] }; return o; });
+
+      // Auto-create a personal org for first-time organisers — no onboarding gate
+      if (!cleanOrgs.length && data.user) {
+        try {
+          const autoName = data.user.name ? `${data.user.name}'s Club` : "My Club";
+          const org = await createOrg({ name: autoName, city: "", state: "" });
+          map[org.org_id] = { org, tournaments: [] };
+          cleanOrgs = [org];
+          flash(`Welcome! We created "${org.name}" for you — rename it anytime.`);
+        } catch {
+          // If auto-create fails, fall back to onboarding modal
+          setOnboarding(true);
+        }
+      }
+
       setOrgs(cleanOrgs);
       setOrgData(map);
-      if (!cleanOrgs.length) setOnboarding(true);
-      else setActiveOrg(cleanOrgs[0]);
+      if (cleanOrgs.length) setActiveOrg(cleanOrgs[0]);
     }).catch(() => { clearToken(); navigate("/login"); });
   }, []);
 
   useEffect(() => {
-    const close = () => setShowKebab(null);
+    const close = () => { setShowKebab(null); setMobileMenuOpen(false); };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, []);
@@ -106,7 +127,6 @@ export default function Dashboard() {
 
   const ORDER  = { live:0, registration:1, fixtures:2, draft:3, completed:4 };
   const liveCount = tournaments.filter(t=>t.status==="live").length;
-  const initials  = user?.name?.split(" ").map(n=>n[0]).join("").slice(0,2).toUpperCase()||"?";
 
   const availableSports = [...new Set(
     tournaments.flatMap(t => (t.events||[]).map(e => e.sport_key).filter(Boolean))
@@ -129,11 +149,69 @@ export default function Dashboard() {
 
       {msg && <div className="flash success">{msg}</div>}
 
-      {/* ── MOBILE ORG BAR (shown only on small screens) ── */}
-      {activeOrg && (
-        <div className="mobile-org-bar">
-          <span className="mobile-org-bar-name">{activeOrg.name}</span>
-          <span className="mobile-org-bar-link" onClick={() => navigate("/")}>← Public Site</span>
+      {/* ── MOBILE NAV BAR + DRAWER (small screens only) ── */}
+      <div className="mobile-org-bar" style={{ justifyContent:"space-between" }} onClick={e => e.stopPropagation()}>
+        <span className="mobile-org-bar-name">{activeOrg?.name || "Dashboard"}</span>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <span className="mobile-org-bar-link" onClick={() => navigate("/")}>Public Site</span>
+          <button
+            onClick={() => setMobileMenuOpen(o => !o)}
+            style={{ background:"none", border:"1px solid var(--border)", borderRadius:6, width:30, height:30, cursor:"pointer", color:"var(--ink)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}
+          >
+            {mobileMenuOpen
+              ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            }
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile slide-down menu */}
+      {mobileMenuOpen && (
+        <div style={{ background:"var(--surface)", borderBottom:"2px solid var(--border)", padding:"8px 0 12px" }} className="mobile-sidebar-drawer" onClick={e => e.stopPropagation()}>
+          {/* Section: Menu */}
+          <div style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:2, color:"var(--subtle)", padding:"6px 20px 4px" }}>Menu</div>
+          <div className="sidebar-item active" style={{ padding:"10px 20px", margin:"1px 8px", borderRadius:8 }}
+            onClick={() => setMobileMenuOpen(false)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            Overview
+          </div>
+          <div className="sidebar-item" style={{ padding:"10px 20px", margin:"1px 8px", borderRadius:8 }}
+            onClick={() => { navigate("/"); setMobileMenuOpen(false); }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            Public Site
+          </div>
+
+          {/* Section: Orgs */}
+          {orgs.length > 0 && <>
+            <div style={{ fontSize:9, fontWeight:700, textTransform:"uppercase", letterSpacing:2, color:"var(--subtle)", padding:"10px 20px 4px" }}>Organizations</div>
+            {orgs.map(o => (
+              <div key={o.org_id}
+                className={`sidebar-item${activeOrg?.org_id === o.org_id ? " active" : ""}`}
+                style={{ padding:"10px 20px", margin:"1px 8px", borderRadius:8 }}
+                onClick={() => { setActiveOrg(o); setMobileMenuOpen(false); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                {o.name}
+              </div>
+            ))}
+          </>}
+
+          <div className="sidebar-item" style={{ padding:"10px 20px", margin:"1px 8px", borderRadius:8 }}
+            onClick={() => { setMobileMenuOpen(false); setShowOrgModal(true); }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 4v16m8-8H4"/></svg>
+            New Org
+          </div>
+
+          {/* Danger: Delete org */}
+          {activeOrg && (
+            <div style={{ margin:"8px 8px 0", paddingTop:8, borderTop:"1px solid var(--border)" }}>
+              <div className="sidebar-item danger" style={{ padding:"10px 20px", borderRadius:8 }}
+                onClick={() => { setMobileMenuOpen(false); setShowDeleteOrgModal(true); }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                Delete Org
+              </div>
+            </div>
+          )}
         </div>
       )}
 

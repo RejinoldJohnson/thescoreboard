@@ -1,200 +1,147 @@
 /**
- * RoadToFinal — visual bracket for knockout tournaments.
+ * RoadToFinal — symmetric knockout bracket.
  *
- * Stage names from backend:
- *   preliminary | round_of_32 | round_of_16 | quarter | semi | final | third_place
+ * Desktop:
+ *   5 columns  (QF data present): leftQF | leftSF | Final | rightSF | rightQF
+ *   3 columns  (SF only):         leftSF | Final | rightSF
+ *   1 column   (Final only):      Final
  *
- * Desktop: horizontal columns (left→right, earliest→latest round).
- * Mobile:  vertical stack (same order, top→bottom).
+ * Each column uses absolute positioning inside a fixed-width container.
+ * SVG paths draw the connector lines between rounds.
  *
- * Filtering: a stage column is only rendered if at least one match in it
- * has at least one real (non-"TBD") player name.
+ * Mobile: vertical stack, same BracketCard design, no SVG lines.
+ *
+ * Stage names from backend: quarter | semi | final | third_place
  */
 import { useState, useEffect } from "react";
 
 // ── Layout constants ──────────────────────────────────────────
-const CARD_H    = 112; // approximate MatchCard height (header 26px + 2×player 42px + border 2px)
-const CARD_G    = 12;  // gap between cards in the first-stage column
-const BASE_UNIT = CARD_H + CARD_G; // vertical space one card claims in stage-0 column
-const HEADER_H  = 58;  // fixed header height — same for every column to keep rows aligned
-const COL_W     = 260; // column width
-
-// ── Stage metadata ────────────────────────────────────────────
-const STAGE_ORDER = ["preliminary", "round_of_32", "round_of_16", "quarter", "semi", "final"];
-
-const STAGE_LABEL = {
-  preliminary: "Qualifying",
-  round_of_32: "Round of 32",
-  round_of_16: "Round of 16",
-  quarter:     "Quarter Finals",
-  semi:        "Semi Finals",
-  final:       "Final",
-};
+const CW = 192;  // card width  (px)
+const CH = 96;   // card height (px)
+const QG = 28;   // gap between the two QF cards in the same column
+const CG = 50;   // horizontal gap between columns
+const LH = 60;   // header height above the first card row
 
 // ── Helpers ───────────────────────────────────────────────────
-const hasRealPlayer = m =>
-  (m.player_1?.name && m.player_1.name !== "TBD") ||
-  (m.player_2?.name && m.player_2.name !== "TBD");
+const isTBD = n => !n || n === "TBD";
+const tbdMatch = id => ({
+  match_id: `placeholder_${id}`,
+  status:   "scheduled",
+  player_1: { name: "TBD", score: 0 },
+  player_2: { name: "TBD", score: 0 },
+});
 
-// ── Match Card ────────────────────────────────────────────────
-function MatchCard({ match: m, isFinal }) {
-  const isDone = m.status === "done";
-  const isLive = m.status === "live";
+// ── Bracket Card ──────────────────────────────────────────────
+function BracketCard({ match: m, fullWidth }) {
+  const done = m.status === "done";
+  const live = m.status === "live";
 
-  const hdrBg    = isDone ? "#059669" : isLive ? "#FF6B35" : "var(--elevated)";
-  const hdrColor = isDone || isLive ? "#fff" : "var(--muted)";
-  const hdrLabel = isDone ? "DONE" : isLive ? "LIVE" : "SCHEDULED";
-  const hdrIcon  = isDone ? "✓"   : isLive ? "●"    : null;
+  const hBg  = done ? "#1b3d1e" : live ? "#7c1d0c" : "var(--elevated)";
+  const hTxt = done ? "#6ee07a" : live ? "#fca5a5" : "var(--muted)";
+  const bBg  = done ? "#243824" : live ? "#3d1008" : "var(--surface)";
+  const bdr  = done ? "#2a5030" : live ? "#7c1d0c" : "var(--border)";
 
-  const PlayerRow = ({ player, bottom }) => {
-    const isTBD    = !player?.name || player.name === "TBD";
-    const isWinner = isDone && player?.is_winner;
-    const isLoser  = isDone && !player?.is_winner && !isTBD;
-
-    return (
-      <div style={{
-        display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"9px 14px", minHeight:42,
-        borderTop: bottom ? "1px solid var(--border)" : "none",
-        background: isWinner ? "var(--green-dim)" : "transparent",
-      }}>
-        <div style={{ display:"flex", alignItems:"center", flex:1, minWidth:0, gap:8 }}>
-          {/* 20px-wide slot keeps text aligned whether winner icon present or not */}
-          <span style={{ width:18, flexShrink:0, textAlign:"center", fontSize:13 }}>
-            {isWinner ? "🥇" : ""}
-          </span>
-          <span style={{
-            fontSize:13,
-            fontWeight: isWinner ? 700 : 500,
-            color: isTBD ? "var(--muted)" : isLoser ? "var(--muted)" : "var(--ink)",
-            textDecoration: isLoser ? "line-through" : "none",
-            fontStyle: isTBD ? "italic" : "normal",
-            overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap",
-          }}>
-            {player?.name || "TBD"}
-          </span>
-        </div>
-        {!isTBD && (isDone || isLive) && (
-          <span style={{
-            fontFamily:"var(--font-display)",
-            fontSize:16, fontWeight:900,
-            color: isWinner ? "var(--green)" : "var(--muted)",
-            flexShrink:0, marginLeft:12, minWidth:20, textAlign:"right",
-          }}>
-            {player?.score ?? 0}
-          </span>
-        )}
-      </div>
-    );
-  };
+  const rows = [
+    { n: m.player_1?.name || "TBD", s: m.player_1?.score, won: done && !!m.player_1?.is_winner },
+    { n: m.player_2?.name || "TBD", s: m.player_2?.score, won: done && !!m.player_2?.is_winner },
+  ];
 
   return (
     <div style={{
-      background:"var(--surface)",
-      border:`1.5px solid ${isFinal ? "rgba(234,179,8,0.45)" : "var(--border)"}`,
-      borderRadius:10,
-      overflow:"hidden",
-      boxShadow: isFinal
-        ? "0 4px 16px rgba(234,179,8,0.12)"
-        : isLive
-        ? "0 0 0 2px rgba(255,107,53,0.18)"
-        : "0 1px 4px rgba(0,0,0,0.05)",
+      width:      fullWidth ? "100%" : CW,
+      border:     `1.5px solid ${bdr}`,
+      borderRadius: 9,
+      overflow:   "hidden",
+      boxShadow:  "0 2px 10px rgba(0,0,0,.16)",
+      flexShrink: 0,
     }}>
-      {/* Status header bar */}
+      {/* Status header */}
       <div style={{
-        display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"5px 10px", background:hdrBg, minHeight:26,
+        background: hBg, height: 26,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0 10px",
       }}>
         <span style={{
-          display:"flex", alignItems:"center", gap:5,
-          fontFamily:"var(--font-display)", fontSize:9, fontWeight:800,
-          color:hdrColor, textTransform:"uppercase", letterSpacing:1.5,
+          fontFamily: "var(--font-display)", fontSize: 7.5, fontWeight: 800,
+          letterSpacing: 1.2, color: hTxt,
         }}>
-          {hdrIcon && (
-            <span style={{
-              fontSize: isLive ? 7 : 10,
-              display:"inline-block",
-              ...(isLive ? { animation:"pulse 1.5s infinite" } : {}),
-            }}>
-              {hdrIcon}
-            </span>
-          )}
-          {hdrLabel}
+          {done ? "✓  DONE" : live ? "●  LIVE" : "SCHEDULED"}
         </span>
         {m.table_number != null && (
           <span style={{
-            background:"rgba(255,255,255,0.22)", borderRadius:4, padding:"2px 7px",
-            fontFamily:"var(--font-display)", fontSize:9, fontWeight:800,
-            color:hdrColor, letterSpacing:1,
+            fontFamily: "var(--font-display)", fontSize: 7.5, fontWeight: 700,
+            color: hTxt, opacity: 0.7,
           }}>
             T{m.table_number}
           </span>
         )}
       </div>
-      <PlayerRow player={m.player_1} bottom={false} />
-      <PlayerRow player={m.player_2} bottom={true}  />
+
+      {/* Player rows */}
+      {rows.map((p, i) => (
+        <div key={i} style={{
+          height:      35,
+          display:     "flex", alignItems: "center", justifyContent: "space-between",
+          padding:     "0 10px",
+          background:  bBg,
+          borderTop:   i > 0
+            ? `1px solid ${done ? "rgba(255,255,255,.07)" : "var(--border)"}`
+            : "none",
+          overflow: "hidden",
+        }}>
+          <span style={{
+            flex:           1,
+            fontSize:       12,
+            fontWeight:     done && p.won ? 700 : 500,
+            color:          done
+              ? (p.won ? "#fff" : "rgba(255,255,255,.3)")
+              : (isTBD(p.n) ? "var(--muted)" : "var(--ink)"),
+            textDecoration: done && !p.won && !isTBD(p.n) ? "line-through" : "none",
+            fontStyle:      isTBD(p.n) ? "italic" : "normal",
+            overflow:       "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            display:        "flex", alignItems: "center", gap: 5,
+          }}>
+            {done && p.won && (
+              <span style={{ fontSize: 11, flexShrink: 0 }}>🏆</span>
+            )}
+            {p.n}
+          </span>
+
+          {(done || live) && !isTBD(p.n) && p.s != null && (
+            <span style={{
+              fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 900,
+              flexShrink: 0, marginLeft: 8,
+              color: done
+                ? (p.won ? "#6ee07a" : "rgba(255,255,255,.28)")
+                : "var(--primary, #FF6B35)",
+            }}>
+              {p.s}
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
 
-// ── Round Column (desktop) ────────────────────────────────────
-// stageIndex=0 → first/earliest visible stage (most matches)
-// stageIndex=N-1 → final stage (1 match)
-// Each match card is centred in a slot of height 2^stageIndex × BASE_UNIT.
-// All columns share the same fixed-height header so match rows stay aligned.
-function RoundColumn({ stage, matches, isFinalStage, thirdPlaceMatches, stageIndex }) {
-  const label    = STAGE_LABEL[stage] || stage.replace(/_/g, " ");
-  const slotSize = Math.pow(2, stageIndex) * BASE_UNIT;
-
+// ── Column Label ──────────────────────────────────────────────
+function ColLbl({ text, x, width, gold, bronze }) {
   return (
-    <div style={{ width:COL_W, flexShrink:0 }}>
-      {/* Fixed-height header — same height on every column */}
-      <div style={{ height:HEADER_H, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", paddingBottom:10 }}>
-        {isFinalStage && <div style={{ fontSize:20, lineHeight:1, marginBottom:5 }}>🏆</div>}
-        <span style={{
-          display:"inline-block",
-          fontFamily:"var(--font-display)",
-          fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:2,
-          padding:"4px 12px", borderRadius:6,
-          color:      isFinalStage ? "#92700A"             : "var(--muted)",
-          background: isFinalStage ? "rgba(234,179,8,0.1)" : "var(--elevated)",
-          border:`1px solid ${isFinalStage ? "rgba(234,179,8,0.3)" : "var(--border)"}`,
-        }}>
-          {label}
-        </span>
+    <div style={{
+      position:  "absolute", left: x, top: 0,
+      width:     width || CW, textAlign: "center",
+    }}>
+      {gold   && <div style={{ fontSize: 22, lineHeight: 1, marginBottom: 3 }}>🏆</div>}
+      {bronze && <div style={{ fontSize: 16, lineHeight: 1, marginBottom: 2 }}>🥉</div>}
+      <div style={{
+        fontFamily:     "var(--font-display)",
+        fontSize:       8.5, fontWeight: 900,
+        letterSpacing:  2, textTransform: "uppercase",
+        color:          gold ? "#d97706" : bronze ? "#b45309" : "var(--muted)",
+        whiteSpace:     "nowrap",
+      }}>
+        {text}
       </div>
-
-      {/* Match slots — each card centred vertically in its proportional slot */}
-      <div style={{ display:"flex", flexDirection:"column" }}>
-        {matches.map(m => (
-          <div key={m.match_id} style={{ height:slotSize, display:"flex", alignItems:"center" }}>
-            <div style={{ width:"100%" }}>
-              <MatchCard match={m} isFinal={isFinalStage} />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* 3rd place — rendered below the Final column only */}
-      {isFinalStage && thirdPlaceMatches?.length > 0 && (
-        <div style={{ marginTop:24 }}>
-          <div style={{ textAlign:"center", marginBottom:12 }}>
-            <span style={{
-              display:"inline-block",
-              fontFamily:"var(--font-display)",
-              fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:2,
-              padding:"5px 12px", borderRadius:6,
-              color:"#92400e", background:"rgba(180,83,9,0.08)",
-              border:"1px solid rgba(180,83,9,0.22)",
-            }}>
-              🥉 3rd Place
-            </span>
-          </div>
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            {thirdPlaceMatches.map(m => <MatchCard key={m.match_id} match={m} isFinal={false} />)}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -203,19 +150,25 @@ function RoundColumn({ stage, matches, isFinalStage, thirdPlaceMatches, stageInd
 function BracketLegend() {
   return (
     <div style={{
-      display:"flex", alignItems:"center", justifyContent:"center",
-      gap:20, marginTop:16, paddingTop:14,
-      borderTop:"1px solid var(--border)",
-      flexWrap:"wrap",
+      display: "flex", gap: 24, justifyContent: "center",
+      marginTop: 28, paddingTop: 16,
+      borderTop: "1px solid var(--border)",
+      flexWrap: "wrap",
     }}>
       {[
-        { bg:"var(--elevated)", border:"var(--border)", color:"var(--muted)", label:"Scheduled" },
-        { bg:"#FF6B35",         border:"transparent",   color:"#fff",         label:"Live"      },
-        { bg:"#059669",         border:"transparent",   color:"#fff",         label:"Completed" },
-      ].map(item => (
-        <div key={item.label} style={{ display:"flex", alignItems:"center", gap:6 }}>
-          <div style={{ width:12, height:12, borderRadius:3, background:item.bg, border:`1px solid ${item.border}`, flexShrink:0 }}/>
-          <span style={{ fontSize:11, color:"var(--muted)", fontWeight:600 }}>{item.label}</span>
+        { bg: "var(--elevated)", bd: "var(--border)", label: "Scheduled" },
+        { bg: "#7c1d0c",         bd: "#7c1d0c",        label: "Live"      },
+        { bg: "#1b3d1e",         bd: "#2a5030",         label: "Completed" },
+      ].map(s => (
+        <div key={s.label} style={{
+          display: "flex", alignItems: "center", gap: 7,
+          fontSize: 12, color: "var(--muted)",
+        }}>
+          <div style={{
+            width: 14, height: 14, borderRadius: 3,
+            background: s.bg, border: `1.5px solid ${s.bd}`, flexShrink: 0,
+          }} />
+          {s.label}
         </div>
       ))}
     </div>
@@ -225,15 +178,16 @@ function BracketLegend() {
 // ── Empty state ───────────────────────────────────────────────
 function EmptyBracket({ format }) {
   return (
-    <div style={{ textAlign:"center", padding:"40px 20px" }}>
-      <div style={{ fontSize:44, marginBottom:14 }}>🏆</div>
+    <div style={{ textAlign: "center", padding: "40px 20px" }}>
+      <div style={{ fontSize: 44, marginBottom: 14 }}>🏆</div>
       <div style={{
-        fontFamily:"var(--font-display)", fontSize:14, fontWeight:900,
-        textTransform:"uppercase", letterSpacing:1, color:"var(--muted)", marginBottom:10,
+        fontFamily: "var(--font-display)", fontSize: 14, fontWeight: 900,
+        textTransform: "uppercase", letterSpacing: 1,
+        color: "var(--muted)", marginBottom: 10,
       }}>
         Bracket Pending
       </div>
-      <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.7, maxWidth:340, margin:"0 auto" }}>
+      <p style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.7, maxWidth: 340, margin: "0 auto" }}>
         {format === "group_knockout"
           ? "The knockout draw will be generated once the group stage is complete."
           : "The bracket will appear once the tournament draw is published."}
@@ -242,100 +196,351 @@ function EmptyBracket({ format }) {
   );
 }
 
-// ── Per-event bracket ─────────────────────────────────────────
-function EventBracket({ event, isMobile }) {
-  const matches = event.all_matches || [];
+// ── Mobile vertical stack ─────────────────────────────────────
+function MobileBracket({ leftQF, rightQF, leftSF, rightSF, theFinal, thirdPlace, showQF }) {
+  const stages = [
+    ...(showQF ? [{
+      label: "Quarter Finals", emoji: null,
+      matches: [...leftQF, ...rightQF],
+      color: "var(--muted)",
+    }] : []),
+    {
+      label: "Semi Finals", emoji: null,
+      matches: [leftSF, rightSF],
+      color: "var(--muted)",
+    },
+    {
+      label: "Final", emoji: "🏆",
+      matches: [theFinal],
+      color: "#d97706",
+    },
+    ...(thirdPlace ? [{
+      label: "3rd Place", emoji: "🥉",
+      matches: [thirdPlace],
+      color: "#b45309",
+    }] : []),
+  ];
 
-  const thirdPlaceAll = matches.filter(m => m.stage === "third_place");
-  const thirdPlaceVisible = thirdPlaceAll.filter(hasRealPlayer);
-
-  // Knockout stages exclude group and third_place
-  const koMatches = matches.filter(m => m.stage !== "group" && m.stage !== "third_place");
-
-  // Group by stage
-  const byStage = {};
-  for (const m of koMatches) {
-    const s = m.stage;
-    if (!s) continue;
-    if (!byStage[s]) byStage[s] = [];
-    byStage[s].push(m);
-  }
-
-  // Only render stages that have at least one real player
-  const visibleStages = STAGE_ORDER.filter(s => byStage[s]?.some(hasRealPlayer));
-
-  if (!visibleStages.length && !thirdPlaceVisible.length) {
-    return <EmptyBracket format={event.format} />;
-  }
-
-  const finalStage = visibleStages.length ? visibleStages[visibleStages.length - 1] : null;
-
-  // ── Mobile layout ─────────────────────────────────────────
-  if (isMobile) {
-    return (
-      <div>
-        {visibleStages.map(s => {
-          const isFinal = s === finalStage;
-          return (
-            <div key={s} style={{ marginBottom:24 }}>
-              {/* Stage header */}
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12, paddingBottom:8, borderBottom:"1px solid var(--border)" }}>
-                {isFinal && <span style={{ fontSize:16 }}>🏆</span>}
-                <span style={{
-                  fontFamily:"var(--font-display)", fontSize:10, fontWeight:800,
-                  textTransform:"uppercase", letterSpacing:2,
-                  color: isFinal ? "#92700A" : "var(--muted)",
-                }}>
-                  {STAGE_LABEL[s] || s.replace(/_/g, " ")}
-                </span>
-              </div>
-
-              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                {byStage[s].map(m => <MatchCard key={m.match_id} match={m} isFinal={isFinal} />)}
-              </div>
-
-              {/* 3rd place shown after Final on mobile */}
-              {isFinal && thirdPlaceVisible.length > 0 && (
-                <div style={{ marginTop:20 }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10, paddingBottom:8, borderBottom:"1px solid var(--border)" }}>
-                    <span style={{ fontSize:16 }}>🥉</span>
-                    <span style={{ fontFamily:"var(--font-display)", fontSize:10, fontWeight:800, textTransform:"uppercase", letterSpacing:2, color:"#92400e" }}>
-                      3rd Place
-                    </span>
-                  </div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                    {thirdPlaceVisible.map(m => <MatchCard key={m.match_id} match={m} isFinal={false} />)}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-        <BracketLegend />
-      </div>
-    );
-  }
-
-  // ── Desktop layout ────────────────────────────────────────
   return (
     <div>
-      <div style={{ overflowX:"auto", paddingBottom:8 }}>
-        <div style={{ display:"flex", gap:32, minWidth:"max-content", padding:"4px 2px 12px", alignItems:"flex-start" }}>
-          {visibleStages.map((s, si) => (
-            <RoundColumn
-              key={s}
-              stage={s}
-              matches={byStage[s]}
-              isFinalStage={s === finalStage}
-              thirdPlaceMatches={s === finalStage ? thirdPlaceVisible : null}
-              stageIndex={si}
-            />
-          ))}
+      {stages.map(({ label, emoji, matches, color }) => (
+        <div key={label} style={{ marginBottom: 24 }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            marginBottom: 12, paddingBottom: 8,
+            borderBottom: "1px solid var(--border)",
+          }}>
+            {emoji && <span style={{ fontSize: 16 }}>{emoji}</span>}
+            <span style={{
+              fontFamily: "var(--font-display)", fontSize: 10, fontWeight: 800,
+              textTransform: "uppercase", letterSpacing: 2, color,
+            }}>
+              {label}
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {matches.map(m => (
+              <BracketCard key={m.match_id} match={m} fullWidth />
+            ))}
+          </div>
+        </div>
+      ))}
+      <BracketLegend />
+    </div>
+  );
+}
+
+// ── Desktop 5-column bracket ──────────────────────────────────
+function DesktopBracket5({ leftQF, rightQF, leftSF, rightSF, theFinal, thirdPlace }) {
+  const cols = {
+    lqf: 0,
+    lsf: CW + CG,           // 242
+    fin: 2 * (CW + CG),     // 484
+    rsf: 3 * (CW + CG),     // 726
+    rqf: 4 * (CW + CG),     // 968
+  };
+  const W = cols.rqf + CW;  // 1160
+
+  const qfH = CH * 2 + QG;             // 220 — total height of a QF pair
+  const row = {
+    qf1: LH,
+    qf2: LH + CH + QG,                 // 188
+    sf:  LH + (qfH - CH) / 2,          // 122 — centred between QF pair
+    fin: LH + (qfH - CH) / 2,          // 122
+    tp:  LH + (qfH - CH) / 2 + CH + 56, // 274 — 3rd place below final
+  };
+
+  const mid = {
+    qf1: row.qf1 + CH / 2,   // 108
+    qf2: row.qf2 + CH / 2,   // 236
+    sf:  row.sf  + CH / 2,   // 170
+    fin: row.fin + CH / 2,   // 170
+  };
+
+  const jl = cols.lsf - CG / 2;  // 217 — left  junction
+  const jr = cols.rqf - CG / 2;  // 943 — right junction
+
+  const H = thirdPlace ? row.tp + CH + 24 : row.fin + CH + 24;
+
+  const paths = [
+    // Left QF → Left SF
+    `M ${cols.lqf + CW} ${mid.qf1} H ${jl}`,
+    `M ${cols.lqf + CW} ${mid.qf2} H ${jl}`,
+    `M ${jl} ${mid.qf1} V ${mid.qf2}`,
+    `M ${jl} ${mid.sf}  H ${cols.lsf}`,
+    // Left SF → Final
+    `M ${cols.lsf + CW} ${mid.sf}  H ${cols.fin}`,
+    // Final → Right SF
+    `M ${cols.fin + CW} ${mid.fin} H ${cols.rsf}`,
+    // Right SF → Right QF
+    `M ${cols.rsf + CW} ${mid.sf}  H ${jr}`,
+    `M ${jr} ${mid.qf1} V ${mid.qf2}`,
+    `M ${jr} ${mid.qf1} H ${cols.rqf}`,
+    `M ${jr} ${mid.qf2} H ${cols.rqf}`,
+  ];
+
+  const abs = (l, t) => ({ position: "absolute", left: l, top: t, zIndex: 2 });
+
+  return (
+    <div>
+      <div style={{ overflowX: "auto", paddingBottom: 8 }}>
+        <div style={{ position: "relative", width: W, height: H, margin: "0 auto" }}>
+
+          {/* SVG connector lines */}
+          <svg style={{
+            position: "absolute", inset: 0,
+            width: "100%", height: "100%",
+            overflow: "visible", pointerEvents: "none", zIndex: 1,
+          }} viewBox={`0 0 ${W} ${H}`}>
+            {paths.map((d, i) => (
+              <path key={i} d={d} fill="none"
+                stroke="var(--muted)" strokeOpacity=".35"
+                strokeWidth="1.5" strokeLinecap="round" />
+            ))}
+          </svg>
+
+          {/* Column labels */}
+          <ColLbl text="Quarter Finals" x={cols.lqf} />
+          <ColLbl text="Semi Finals"   x={cols.lsf} />
+          <ColLbl text="Final"         x={cols.fin} gold />
+          <ColLbl text="Semi Finals"   x={cols.rsf} />
+          <ColLbl text="Quarter Finals" x={cols.rqf} />
+
+          {/* 3rd place label */}
+          {thirdPlace && (
+            <div style={{
+              position: "absolute", left: cols.fin, top: row.tp - 34,
+              width: CW, textAlign: "center", zIndex: 2,
+            }}>
+              <div style={{ fontSize: 14, lineHeight: 1, marginBottom: 2 }}>🥉</div>
+              <div style={{
+                fontFamily: "var(--font-display)", fontSize: 8, fontWeight: 900,
+                letterSpacing: 2, color: "#b45309", textTransform: "uppercase",
+              }}>3RD PLACE</div>
+            </div>
+          )}
+
+          {/* Match cards */}
+          <div style={abs(cols.lqf, row.qf1)}><BracketCard match={leftQF[0]}  /></div>
+          <div style={abs(cols.lqf, row.qf2)}><BracketCard match={leftQF[1]}  /></div>
+          <div style={abs(cols.lsf, row.sf)} ><BracketCard match={leftSF}     /></div>
+          <div style={abs(cols.fin, row.fin)} ><BracketCard match={theFinal}   /></div>
+          <div style={abs(cols.rsf, row.sf)} ><BracketCard match={rightSF}    /></div>
+          <div style={abs(cols.rqf, row.qf1)}><BracketCard match={rightQF[0]} /></div>
+          <div style={abs(cols.rqf, row.qf2)}><BracketCard match={rightQF[1]} /></div>
+          {thirdPlace && (
+            <div style={abs(cols.fin, row.tp)}><BracketCard match={thirdPlace} /></div>
+          )}
         </div>
       </div>
       <BracketLegend />
     </div>
   );
+}
+
+// ── Desktop 3-column bracket (SF only) ───────────────────────
+function DesktopBracket3({ leftSF, rightSF, theFinal, thirdPlace }) {
+  const cols = {
+    lsf: 0,
+    fin: CW + CG,        // 242
+    rsf: 2 * (CW + CG), // 484
+  };
+  const W = cols.rsf + CW; // 676
+
+  const row = {
+    sf:  LH,
+    fin: LH,
+    tp:  LH + CH + 56,
+  };
+
+  const mid = {
+    sf:  row.sf  + CH / 2,
+    fin: row.fin + CH / 2,
+  };
+
+  const H = thirdPlace ? row.tp + CH + 24 : row.fin + CH + 24;
+
+  const paths = [
+    `M ${cols.lsf + CW} ${mid.sf}  H ${cols.fin}`,
+    `M ${cols.fin + CW} ${mid.fin} H ${cols.rsf}`,
+  ];
+
+  const abs = (l, t) => ({ position: "absolute", left: l, top: t, zIndex: 2 });
+
+  return (
+    <div>
+      <div style={{ overflowX: "auto", paddingBottom: 8 }}>
+        <div style={{ position: "relative", width: W, height: H, margin: "0 auto" }}>
+
+          {/* SVG connector lines */}
+          <svg style={{
+            position: "absolute", inset: 0,
+            width: "100%", height: "100%",
+            overflow: "visible", pointerEvents: "none", zIndex: 1,
+          }} viewBox={`0 0 ${W} ${H}`}>
+            {paths.map((d, i) => (
+              <path key={i} d={d} fill="none"
+                stroke="var(--muted)" strokeOpacity=".35"
+                strokeWidth="1.5" strokeLinecap="round" />
+            ))}
+          </svg>
+
+          {/* Column labels */}
+          <ColLbl text="Semi Finals" x={cols.lsf} />
+          <ColLbl text="Final"       x={cols.fin} gold />
+          <ColLbl text="Semi Finals" x={cols.rsf} />
+
+          {/* 3rd place label */}
+          {thirdPlace && (
+            <div style={{
+              position: "absolute", left: cols.fin, top: row.tp - 34,
+              width: CW, textAlign: "center", zIndex: 2,
+            }}>
+              <div style={{ fontSize: 14, lineHeight: 1, marginBottom: 2 }}>🥉</div>
+              <div style={{
+                fontFamily: "var(--font-display)", fontSize: 8, fontWeight: 900,
+                letterSpacing: 2, color: "#b45309", textTransform: "uppercase",
+              }}>3RD PLACE</div>
+            </div>
+          )}
+
+          {/* Match cards */}
+          <div style={abs(cols.lsf, row.sf)} ><BracketCard match={leftSF}   /></div>
+          <div style={abs(cols.fin, row.fin)} ><BracketCard match={theFinal} /></div>
+          <div style={abs(cols.rsf, row.sf)} ><BracketCard match={rightSF}  /></div>
+          {thirdPlace && (
+            <div style={abs(cols.fin, row.tp)}><BracketCard match={thirdPlace} /></div>
+          )}
+        </div>
+      </div>
+      <BracketLegend />
+    </div>
+  );
+}
+
+// ── Desktop 1-column (Final only) ────────────────────────────
+function DesktopBracket1({ theFinal, thirdPlace }) {
+  return (
+    <div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+        <div style={{ textAlign: "center", marginBottom: 4 }}>
+          <div style={{ fontSize: 22, lineHeight: 1, marginBottom: 3 }}>🏆</div>
+          <div style={{
+            fontFamily: "var(--font-display)", fontSize: 8.5, fontWeight: 900,
+            letterSpacing: 2, color: "#d97706", textTransform: "uppercase",
+          }}>Final</div>
+        </div>
+        <BracketCard match={theFinal} />
+        {thirdPlace && (
+          <>
+            <div style={{ textAlign: "center", marginTop: 20 }}>
+              <div style={{ fontSize: 16, lineHeight: 1, marginBottom: 2 }}>🥉</div>
+              <div style={{
+                fontFamily: "var(--font-display)", fontSize: 8, fontWeight: 900,
+                letterSpacing: 2, color: "#b45309", textTransform: "uppercase",
+              }}>3rd Place</div>
+            </div>
+            <BracketCard match={thirdPlace} />
+          </>
+        )}
+      </div>
+      <BracketLegend />
+    </div>
+  );
+}
+
+// ── Per-event bracket ─────────────────────────────────────────
+function EventBracket({ event, isMobile }) {
+  const matches = event.all_matches || [];
+
+  // Separate third_place from knockout matches
+  const thirdPlaceAll = matches.filter(m => m.stage === "third_place");
+  const koMatches     = matches.filter(m => m.stage !== "group" && m.stage !== "third_place");
+
+  // Group by stage
+  const byStage = {};
+  for (const m of koMatches) {
+    if (!m.stage) continue;
+    (byStage[m.stage] = byStage[m.stage] || []).push(m);
+  }
+
+  const qfAll  = byStage["quarter"] || [];
+  const sfAll  = byStage["semi"]    || [];
+  const finAll = byStage["final"]   || [];
+
+  const hasAny = qfAll.length || sfAll.length || finAll.length || thirdPlaceAll.length;
+  if (!hasAny) return <EmptyBracket format={event.format} />;
+
+  // Determine bracket depth
+  const showQF = qfAll.length > 0;
+  const showSF = sfAll.length > 0 || showQF;
+
+  // Assign matches to bracket slots
+  // QF: first two → left side, next two → right side
+  const leftQFRaw  = qfAll.slice(0, 2);
+  const rightQFRaw = qfAll.slice(2, 4);
+  const leftQF  = [...leftQFRaw];
+  const rightQF = [...rightQFRaw];
+  while (leftQF.length  < 2) leftQF.push(tbdMatch(`lqf_${leftQF.length}`));
+  while (rightQF.length < 2) rightQF.push(tbdMatch(`rqf_${rightQF.length}`));
+
+  // SF: first → left, second → right
+  const leftSF   = sfAll[0]  || tbdMatch("lsf");
+  const rightSF  = sfAll[1]  || tbdMatch("rsf");
+  const theFinal = finAll[0] || tbdMatch("fin");
+  const thirdPlace = thirdPlaceAll[0] || null;
+
+  // ── Mobile ────────────────────────────────────────────────
+  if (isMobile) {
+    return (
+      <MobileBracket
+        leftQF={leftQF} rightQF={rightQF}
+        leftSF={leftSF} rightSF={rightSF}
+        theFinal={theFinal} thirdPlace={thirdPlace}
+        showQF={showQF}
+      />
+    );
+  }
+
+  // ── Desktop ───────────────────────────────────────────────
+  if (showQF) {
+    return (
+      <DesktopBracket5
+        leftQF={leftQF} rightQF={rightQF}
+        leftSF={leftSF} rightSF={rightSF}
+        theFinal={theFinal} thirdPlace={thirdPlace}
+      />
+    );
+  }
+  if (showSF) {
+    return (
+      <DesktopBracket3
+        leftSF={leftSF} rightSF={rightSF}
+        theFinal={theFinal} thirdPlace={thirdPlace}
+      />
+    );
+  }
+  return <DesktopBracket1 theFinal={theFinal} thirdPlace={thirdPlace} />;
 }
 
 // ── Main export ───────────────────────────────────────────────
@@ -345,12 +550,12 @@ export default function RoadToFinal({ events }) {
   );
 
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", handler, { passive: true });
-    return () => window.removeEventListener("resize", handler);
+    const h = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", h, { passive: true });
+    return () => window.removeEventListener("resize", h);
   }, []);
 
-  const relevant = events.filter(ev =>
+  const relevant = (events || []).filter(ev =>
     ev.format === "direct_knockout" || ev.format === "group_knockout"
   );
   if (!relevant.length) return null;
@@ -361,9 +566,9 @@ export default function RoadToFinal({ events }) {
         <div key={ev.event_id} style={{ marginBottom: i < relevant.length - 1 ? 36 : 0 }}>
           {relevant.length > 1 && (
             <div style={{
-              fontFamily:"var(--font-display)", fontSize:11, fontWeight:800,
-              textTransform:"uppercase", letterSpacing:1,
-              color:"var(--muted)", marginBottom:12,
+              fontFamily: "var(--font-display)", fontSize: 11, fontWeight: 800,
+              textTransform: "uppercase", letterSpacing: 1,
+              color: "var(--muted)", marginBottom: 12,
             }}>
               {ev.name}
             </div>

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from typing import Optional
 
 from app.models.user import User
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, require_pro
 from app.services import storage
 
 router = APIRouter()
@@ -22,7 +22,7 @@ async def upload_media(
     file: UploadFile = File(...),
     bucket: str = Form(...),
     path: Optional[str] = Form(None),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_pro),   # Pro plan required
 ):
     """
     Upload an image file to Supabase Storage.

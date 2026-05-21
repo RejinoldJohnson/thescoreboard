@@ -1,5 +1,6 @@
+from datetime import datetime
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import List, Optional
 
 
 class RegisterRequest(BaseModel):
@@ -50,7 +51,10 @@ class UserOut(BaseModel):
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
     is_superadmin: bool
+    plan: str = "free"
+    created_at: Optional[datetime] = None
     player_profile: Optional[PlayerProfileOut] = None
+    roles: List[str] = []
 
     class Config:
         from_attributes = True

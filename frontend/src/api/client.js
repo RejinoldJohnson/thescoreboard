@@ -2,6 +2,25 @@ const BASE = import.meta.env.VITE_API_URL || "/api";
 function getToken() { return localStorage.getItem("tsb_token"); }
 export function setToken(token) { localStorage.setItem("tsb_token", token); }
 export function clearToken() { localStorage.removeItem("tsb_token"); }
+
+// ── Post-login redirect helpers ─────────────────────────────────────────────
+// Call saveLoginRedirect(path) before sending a user to /login so that after
+// they authenticate they land where they originally intended, not /organiser.
+export function saveLoginRedirect(path) {
+  if (path && path !== "/login" && path !== "/register") {
+    localStorage.setItem("tsb_next", path);
+  }
+}
+export function consumeLoginRedirect(fallback = "/organiser") {
+  const next = localStorage.getItem("tsb_next");
+  if (next) { localStorage.removeItem("tsb_next"); return next; }
+  return fallback;
+}
+
+// ── Admin API ───────────────────────────────────────────────────────────────
+export const adminGetStats   = ()           => request("GET",   "/admin/stats");
+export const adminListUsers  = ()           => request("GET",   "/admin/users");
+export const adminUpdateUser = (userId, d)  => request("PATCH", `/admin/users/${userId}`, d);
 export function isLoggedIn() {
   const token = getToken();
   if (!token) return false;
@@ -30,7 +49,9 @@ export const login = (d) => request("POST", "/auth/login", d);
 export const googleAuth = (accessToken) => request("POST", "/auth/google", { access_token: accessToken });
 export const getMe             = ()  => request("GET", "/auth/me");
 export const getPlayerProfile  = ()  => request("GET", "/auth/player-profile");
-export const savePlayerProfile = (d) => request("PUT", "/auth/player-profile", d);
+export const savePlayerProfile  = (d) => request("PUT",  "/auth/player-profile", d);
+export const getMyTournaments   = ()  => request("GET",  "/auth/my-tournaments");
+export const getMyStats         = ()  => request("GET",  "/auth/my-stats");
 
 // Orgs
 export const createOrg = (d) => request("POST", "/orgs/", d);
@@ -91,6 +112,15 @@ export const deleteMatch = (mId) => request("DELETE", `/matches/${mId}`);
 
 // Public
 export const getHomepageData = (q) => request("GET", `/public/home${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+export const getAllTournaments = ({ q, sport, status, city } = {}) => {
+  const qs = new URLSearchParams();
+  if (q)      qs.set("q",      q);
+  if (sport)  qs.set("sport",  sport);
+  if (status) qs.set("status", status);
+  if (city)   qs.set("city",   city);
+  const str = qs.toString();
+  return request("GET", `/public/tournaments${str ? `?${str}` : ""}`);
+};
 export const getSportPageData = (u, city, q) => {
   let qs = []; if (city) qs.push(`city=${encodeURIComponent(city)}`); if (q) qs.push(`q=${encodeURIComponent(q)}`);
   return request("GET", `/public/sport/${u}${qs.length ? "?" + qs.join("&") : ""}`);

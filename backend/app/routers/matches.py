@@ -3,10 +3,13 @@ Match routes — create, score, and manage matches.
 Scoring is delegated to the sport engine based on event.sport_key.
 Supports: table_tennis, badminton (set-based), cricket (innings), football (goals).
 """
+import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Optional, Union
 from pydantic import BaseModel
 
@@ -16,7 +19,7 @@ from app.models.event import Event
 from app.models.match import Match, MatchParticipant, MatchSet
 from app.models.player import Player, Team
 from app.schemas.match import MatchCreate, MatchOut, MatchStatusUpdate
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, get_current_user_id
 from app.sports.registry import get_sport_engine
 
 router = APIRouter()
@@ -52,10 +55,16 @@ class FinishMatch(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────
 
 def _load_match(match_id: int, db: Session) -> Match:
+    """
+    Load a match with all related data in a single query.
+    Eagerly loads Event so callers can access match.event without a second
+    round-trip to the database (eliminates the separate db.query(Event) call).
+    """
     match = (
         db.query(Match)
         .filter(Match.match_id == match_id)
         .options(
+            joinedload(Match.event),                                        # ← no separate Event query needed
             joinedload(Match.participants).joinedload(MatchParticipant.player),
             joinedload(Match.participants).joinedload(MatchParticipant.team),
             joinedload(Match.sets),
@@ -158,7 +167,11 @@ def _advance_winner(match: Match, winner_position: Optional[int], db: Session) -
     if not winner_position or match.stage in ("third_place", "final", "group"):
         return
 
-    event = db.query(Event).filter(Event.event_id == match.event_id).first()
+    # Use the already-loaded event relationship (set via joinedload in _load_match).
+    # Fall back to a DB query only if the relationship wasn't eager-loaded.
+    event = match.event if match.event is not None else (
+        db.query(Event).filter(Event.event_id == match.event_id).first()
+    )
     if not event or event.format not in ("direct_knockout", "group_knockout"):
         return
 
@@ -170,9 +183,9 @@ def _advance_winner(match: Match, winner_position: Optional[int], db: Session) -
     winner_id = winner_mp.player_id or winner_mp.team_id
     is_team   = winner_mp.team_id is not None
 
-    # Scope bracket to the same context:
-    #   group bracket match  (group_id set) → only look within that group
-    #   final bracket match  (group_id None) → only look at ungrouped matches
+    # Use indexed columns only — filter on event_id (indexed) first,
+    # then stage. The event relationship is already loaded on match so no
+    # extra Event query needed here.
     q = db.query(Match).filter(
         Match.event_id == match.event_id,
         Match.stage.notin_(["third_place", "group"]),
@@ -248,11 +261,20 @@ def _finish_match(match: Match, winner_position: Optional[int], db: Optional[Ses
 
 # ── WebSocket push helper ─────────────────────────────────────
 
+# Debounce state: track the last push timestamp per tournament slug
+# so that rapid score updates (e.g. cricket ball-by-ball) only trigger
+# one full tournament-page rebuild per 500 ms window.
+_ws_last_push: dict = {}
+_ws_push_lock  = threading.Lock()
+_WS_DEBOUNCE_SECS = 0.5
+
+
 def _push_ws_update(event_id: int) -> None:
     """
     Background task — called after any score-changing commit.
     Opens a fresh DB session, builds the tournament payload, and pushes
     it to all WS clients currently watching that tournament.
+    Debounced: skips the rebuild if the same slug was pushed < 500 ms ago.
     """
     from app.database import SessionLocal
     from app.models.event import Event as _Event
@@ -273,6 +295,15 @@ def _push_ws_update(event_id: int) -> None:
         slug = event.tournament.slug
         if not manager.has_watchers(slug):
             return
+
+        # Debounce: skip if last push was less than _WS_DEBOUNCE_SECS ago
+        now = time.monotonic()
+        with _ws_push_lock:
+            last = _ws_last_push.get(slug, 0.0)
+            if now - last < _WS_DEBOUNCE_SECS:
+                return
+            _ws_last_push[slug] = now
+
         data = get_tournament_page(slug, db)
         manager.push(slug, data)
     except Exception as exc:
@@ -305,7 +336,7 @@ def create_match(
     event_id: int,
     data: MatchCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _uid: int = Depends(get_current_user_id),
 ):
     event = db.query(Event).filter(Event.event_id == event_id).first()
     if not event:
@@ -376,7 +407,7 @@ def update_match_status(
     data: MatchStatusUpdate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _uid: int = Depends(get_current_user_id),
 ):
     match = _load_match(match_id, db)
     event_id = match.event_id
@@ -391,9 +422,12 @@ def update_match_status(
         match.started_at = datetime.now(timezone.utc)
     elif data.status == "done" and not match.finished_at:
         match.finished_at = datetime.now(timezone.utc)
+    # Serialize from the in-memory object (avoids a second SELECT after commit)
+    db.flush()
+    result = _serialize_match(match)
     db.commit()
     background_tasks.add_task(_push_ws_update, event_id)
-    return _serialize_match(_load_match(match_id, db))
+    return result
 
 
 @router.patch("/matches/{match_id}/score")
@@ -402,12 +436,12 @@ def update_score(
     data: ScoreUpdate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _uid: int = Depends(get_current_user_id),
 ):
-    match = _load_match(match_id, db)
+    match    = _load_match(match_id, db)   # includes match.event via joinedload
     event_id = match.event_id
-    event  = db.query(Event).filter(Event.event_id == event_id).first()
-    engine = get_sport_engine(event.sport_key)
+    event    = match.event                 # no extra DB query — already loaded
+    engine   = get_sport_engine(event.sport_key)
     config = dict(event.sport_config or engine.get_default_config())
     # Per-match sets_to_win overrides event-wide default (set during fixture generation)
     if match.live_state and "sets_to_win" in match.live_state:
@@ -425,7 +459,14 @@ def update_score(
             None
         )
         if not current_set:
-            raise HTTPException(status_code=400, detail="No active set — match may be over")
+            if match.status == "done":
+                raise HTTPException(status_code=400, detail="No active set — match may be over")
+            # No active set but match is still live/scheduled — initial set was never created
+            # (e.g. fixture generated before this fix, or rematch edge case). Create it now.
+            next_num = max((s.set_number for s in match.sets), default=0) + 1
+            current_set = MatchSet(match_id=match.match_id, set_number=next_num)
+            db.add(current_set)
+            db.flush()
 
         current_set.score_p1 = data.score_p1
         current_set.score_p2 = data.score_p2
@@ -450,7 +491,10 @@ def update_score(
                 _finish_match(match, match_winner, db)
             else:
                 next_num = max(s.set_number for s in match.sets) + 1
-                db.add(MatchSet(match_id=match.match_id, set_number=next_num))
+                new_set  = MatchSet(match_id=match.match_id, set_number=next_num)
+                db.add(new_set)
+                db.flush()                    # assign set_id
+                match.sets.append(new_set)    # keep in-memory list in sync so _serialize_match sees it
 
         # Update aggregate scores (sets won)
         parts = sorted(match.participants, key=lambda p: p.position)
@@ -491,6 +535,7 @@ def update_score(
         if data.cricket_live_state:
             ls.update(data.cricket_live_state)
         match.live_state = ls
+        flag_modified(match, "live_state")
 
         # Update participant aggregate scores based on who batted in each innings
         batting_first = ls.get("batting_first", 1)
@@ -509,15 +554,19 @@ def update_score(
 
     # ── FOOTBALL (goals) ──────────────────────────────────────
     elif sport == "football":
-        current_set = next(
-            (s for s in sorted(match.sets, key=lambda x: x.set_number) if not s.is_complete),
-            None
-        )
+        all_sets = sorted(match.sets, key=lambda x: x.set_number)
+        current_set = next((s for s in all_sets if not s.is_complete), None)
         if not current_set:
-            db.add(MatchSet(match_id=match.match_id, set_number=1))
-            db.flush()
-            match = _load_match(match_id, db)
-            current_set = match.sets[0]
+            if all_sets:
+                # All sets are marked complete (e.g. after finish_match was called).
+                # Reuse the last set so we don't violate the uq_match_set constraint.
+                current_set = all_sets[-1]
+                current_set.is_complete = False
+            else:
+                new_set = MatchSet(match_id=match.match_id, set_number=1)
+                db.add(new_set)
+                db.flush()           # assigns set_id, no full reload needed
+                current_set = new_set
 
         current_set.score_p1 = data.score_p1
         current_set.score_p2 = data.score_p2
@@ -534,15 +583,20 @@ def update_score(
         if data.football_live_state:
             live_state.update(data.football_live_state)
         match.live_state = live_state
+        flag_modified(match, "live_state")
 
         parts = sorted(match.participants, key=lambda p: p.position)
         if len(parts) == 2:
             parts[0].score = data.score_p1
             parts[1].score = data.score_p2
 
+    # Flush writes to DB but keeps objects live in the session so we can
+    # serialize them without a second SELECT.  Commit happens after serialization.
+    db.flush()
+    result = _serialize_match(match)
     db.commit()
     background_tasks.add_task(_push_ws_update, event_id)
-    return _serialize_match(_load_match(match_id, db))
+    return result
 
 
 @router.post("/matches/{match_id}/finish")
@@ -551,17 +605,17 @@ def finish_match(
     data: FinishMatch,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _uid: int = Depends(get_current_user_id),
 ):
     """
     Explicitly finish a match — used for football (full time) and
     cricket (all out / overs up / innings end).
     """
-    match  = _load_match(match_id, db)
+    match    = _load_match(match_id, db)   # includes match.event via joinedload
     event_id = match.event_id
-    event  = db.query(Event).filter(Event.event_id == event_id).first()
-    engine = get_sport_engine(event.sport_key)
-    config = event.sport_config or engine.get_default_config()
+    event    = match.event                 # no extra DB query
+    engine   = get_sport_engine(event.sport_key)
+    config   = event.sport_config or engine.get_default_config()
 
     current_set = next(
         (s for s in sorted(match.sets, key=lambda x: x.set_number) if not s.is_complete),
@@ -587,9 +641,11 @@ def finish_match(
             if data.super_over_batting_first:
                 ls["super_over_batting_first"] = data.super_over_batting_first
             match.live_state = ls
+            db.flush()
+            result = _serialize_match(match)
             db.commit()
             background_tasks.add_task(_push_ws_update, event_id)
-            return _serialize_match(_load_match(match_id, db))
+            return result
 
         # Normal innings end
         if current_set:
@@ -598,9 +654,11 @@ def finish_match(
         # Explicit winner override (e.g. coin-toss decision after tied super over)
         if isinstance(data.winner_position, int) and data.winner_position in (1, 2):
             _finish_match(match, data.winner_position, db)
+            db.flush()
+            result = _serialize_match(match)
             db.commit()
             background_tasks.add_task(_push_ws_update, event_id)
-            return _serialize_match(_load_match(match_id, db))
+            return result
 
         all_sets  = sorted(match.sets, key=lambda s: s.set_number)
         completed = [s for s in all_sets if s.is_complete]
@@ -655,9 +713,11 @@ def finish_match(
             winner = None
         _finish_match(match, winner, db)
 
+    db.flush()
+    result = _serialize_match(match)
     db.commit()
     background_tasks.add_task(_push_ws_update, event_id)
-    return _serialize_match(_load_match(match_id, db))
+    return result
 
 
 @router.post("/matches/{match_id}/walkover")
@@ -666,7 +726,7 @@ def walkover_match(
     winner_position: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _uid: int = Depends(get_current_user_id),
 ):
     """
     Record a walkover / no-show.
@@ -696,7 +756,7 @@ def walkover_match(
 
     parts = sorted(match.participants, key=lambda p: p.position)
 
-    if engine.has_sets:
+    if hasattr(engine, "check_set_winner"):
         # Set-based sports (TT, Badminton): create N walkover sets, winner gets pts-0 each
         for i in range(1, sets_to_win + 1):
             db.add(MatchSet(
@@ -735,9 +795,11 @@ def walkover_match(
     match.live_state = ls
 
     _finish_match(match, winner_position, db)
+    db.flush()
+    result = _serialize_match(match)
     db.commit()
     background_tasks.add_task(_push_ws_update, event_id)
-    return _serialize_match(_load_match(match_id, db))
+    return result
 
 
 @router.post("/matches/{match_id}/undo-set")
@@ -745,7 +807,7 @@ def undo_set(
     match_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _uid: int = Depends(get_current_user_id),
 ):
     match = _load_match(match_id, db)
     event_id = match.event_id
@@ -780,9 +842,11 @@ def undo_set(
         parts[0].score = sets_won[1]
         parts[1].score = sets_won[2]
 
+    db.flush()
+    result = _serialize_match(match)
     db.commit()
     background_tasks.add_task(_push_ws_update, event_id)
-    return _serialize_match(_load_match(match_id, db))
+    return result
 
 
 @router.post("/matches/{match_id}/rematch")
@@ -790,10 +854,11 @@ def rematch(
     match_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _uid: int = Depends(get_current_user_id),
 ):
-    match = _load_match(match_id, db)
+    match = _load_match(match_id, db)        # includes match.event via joinedload
     event_id = match.event_id
+    event    = match.event                   # no extra DB query
     preserved_sets = (match.live_state or {}).get("sets_to_win")
     match.status         = "scheduled"
     match.started_at     = None
@@ -807,21 +872,22 @@ def rematch(
         db.delete(s)
     db.flush()
 
-    event  = db.query(Event).filter(Event.event_id == event_id).first()
     engine = get_sport_engine(event.sport_key)
-    if getattr(engine, "has_sets", False):
+    if hasattr(engine, "check_set_winner"):
         db.add(MatchSet(match_id=match.match_id, set_number=1))
 
+    db.flush()
+    result = _serialize_match(match)
     db.commit()
     background_tasks.add_task(_push_ws_update, event_id)
-    return _serialize_match(_load_match(match_id, db))
+    return result
 
 
 @router.delete("/matches/{match_id}")
 def delete_match(
     match_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    _uid: int = Depends(get_current_user_id),
 ):
     match = db.query(Match).filter(Match.match_id == match_id).first()
     if not match:

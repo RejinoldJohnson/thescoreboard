@@ -170,6 +170,10 @@
      0%   { background-position: -400px 0; }
      100% { background-position: 400px 0; }
    }
+   @keyframes ticker {
+     from { transform: translateX(0); }
+     to   { transform: translateX(-50%); }
+   }
    
    /* ── Typography ───────────────────────────────────────────── */
    .display {
@@ -1834,7 +1838,7 @@
 .hero-logo-desktop  { display: none; }
 .hero-logo-mobile   { display: none; }
 
-/* ── Dashboard (organiser) — mobile org bar ──────────────── */
+/* ── Dashboard (organiser) — mobile nav ──────────────────── */
 .mobile-org-bar {
   display: none;
   background: var(--elevated);
@@ -1843,6 +1847,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+.mobile-sidebar-drawer { display: none; }
+@media (max-width: 768px) {
+  .mobile-sidebar-drawer { display: block; }
 }
 .mobile-org-bar-name {
   font-family: var(--font-display);

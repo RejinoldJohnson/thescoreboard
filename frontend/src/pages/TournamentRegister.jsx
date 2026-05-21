@@ -11,16 +11,17 @@ import {
   getTournamentBySlug,
 } from "../api/client";
 import GoogleSignInButton from "../components/auth/GoogleButton";
+import PageLoader from "../components/shared/PageLoader";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
 
 const SPORT_META = {
-  table_tennis: { abbrev:"TT" },
-  badminton:    { abbrev:"BD" },
-  cricket:      { abbrev:"CR" },
-  football:     { abbrev:"FB" },
+  table_tennis: { icon: "🏓" },
+  badminton:    { icon: "🏸" },
+  cricket:      { icon: "🏏" },
+  football:     { icon: "⚽" },
 };
-const sa = k => SPORT_META[k]?.abbrev || k.slice(0,2).toUpperCase();
+const sa = k => SPORT_META[k]?.icon || "🏆";
 
 function getRegMode(ev) {
   const pt = ev?.participant_type || "individual";
@@ -680,14 +681,7 @@ export default function TournamentRegister() {
   };
 
   // ── Loading ──
-  if (!step && !loadError) return (
-    <>
-      <TournamentBar tournament={tournament} slug={slug} navigate={navigate} />
-      <div style={{ minHeight:"60vh", display:"flex", alignItems:"center", justifyContent:"center" }}>
-        <div style={{ fontFamily:"var(--font-display)", fontSize:11, fontWeight:800, textTransform:"uppercase", letterSpacing:3, color:"var(--muted)" }}>Loading…</div>
-      </div>
-    </>
-  );
+  if (!step && !loadError) return <PageLoader />;
 
   // ── Error ──
   if (loadError) return (

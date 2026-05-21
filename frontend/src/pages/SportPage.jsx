@@ -4,7 +4,7 @@ import { getSportPageData } from "../api/client";
 import Header from "../components/shared/Header";
 import TournamentCard, { SPORT_LABELS, SPORT_ICONS } from "../components/shared/TournamentCard";
 
-const SPORT_ABBREV = { table_tennis: "TT", badminton: "BD", cricket: "CR", football: "FB" };
+const SPORT_ABBREV = { table_tennis: "🏓", badminton: "🏸", cricket: "🏏", football: "⚽" };
 
 const SPORT_URL_TO_KEY = {
   football:       "football",

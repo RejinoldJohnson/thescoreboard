@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { register, setToken } from "../../api/client";
+import { register, setToken, consumeLoginRedirect } from "../../api/client";
 import GoogleSignInButton from "../../components/auth/GoogleButton";
 
 export default function Register() {
@@ -18,7 +18,7 @@ export default function Register() {
     try {
       const data = await register(form);
       setToken(data.access_token);
-      navigate("/organiser", { replace: true });
+      navigate(consumeLoginRedirect("/organiser"), { replace: true });
     } catch (e) { setError(e.message || "Registration failed."); }
     finally { setLoading(false); }
   };
@@ -49,7 +49,7 @@ export default function Register() {
 
         {/* Google SSO — fastest path */}
         <GoogleSignInButton
-          onSuccess={() => navigate("/organiser", { replace: true })}
+          onSuccess={() => navigate(consumeLoginRedirect("/organiser"), { replace: true })}
           onError={(msg) => setError(msg)}
         />
 

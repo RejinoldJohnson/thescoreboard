@@ -14,7 +14,7 @@ from app.models.event import Event
 from app.models.match import Match, MatchParticipant, MatchSet
 from app.models.group import Group, EventParticipant
 from app.schemas.tournament import TournamentCreate, TournamentUpdate, TournamentOut, SponsorCreate, SponsorUpdate, SponsorOut
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, require_pro
 from app.utils.slug import generate_unique_slug
 from app.sports.registry import get_sport_engine
 from app.sports.bracket import build_bracket, assign_players_to_groups
@@ -227,17 +227,24 @@ def get_workspace(
 
         # Groups
         groups = db.query(Group).filter(Group.event_id == event.event_id).order_by(Group.name).all()
+
+        # Single bulk query for ALL participants in this event — avoids N queries for N groups.
+        all_eps = (
+            db.query(EventParticipant)
+            .filter(EventParticipant.event_id == event.event_id)
+            .options(
+                joinedload(EventParticipant.player),
+                joinedload(EventParticipant.team),
+            )
+            .all()
+        )
+        eps_by_group: dict = {}
+        for ep in all_eps:
+            eps_by_group.setdefault(ep.group_id, []).append(ep)
+
         groups_data = []
         for g in groups:
-            participants = (
-                db.query(EventParticipant)
-                .filter(EventParticipant.event_id == event.event_id, EventParticipant.group_id == g.group_id)
-                .options(
-                    joinedload(EventParticipant.player),
-                    joinedload(EventParticipant.team),
-                )
-                .all()
-            )
+            participants = eps_by_group.get(g.group_id, [])
             groups_data.append({
                 "group_id": g.group_id,
                 "name":     g.name,
@@ -252,16 +259,8 @@ def get_workspace(
                 ],
             })
 
-        # Ungrouped participants
-        ungrouped = (
-            db.query(EventParticipant)
-            .filter(EventParticipant.event_id == event.event_id, EventParticipant.group_id == None)
-            .options(
-                joinedload(EventParticipant.player),
-                joinedload(EventParticipant.team),
-            )
-            .all()
-        )
+        # Ungrouped participants — already loaded above, just filter by group_id=None
+        ungrouped = eps_by_group.get(None, [])
 
         # Matches
         matches = (
@@ -275,8 +274,9 @@ def get_workspace(
             .all()
         )
 
-        participant_count = db.query(EventParticipant).filter(
-            EventParticipant.event_id == event.event_id).count()
+        # Derive count from already-loaded data — avoids an extra COUNT(*) query per event
+        grouped_count = sum(len(g["participants"]) for g in groups_data)
+        participant_count = grouped_count + len(ungrouped)
         match_count  = len(matches)
         live_count   = sum(1 for m in matches if m.status == "live")
         done_count   = sum(1 for m in matches if m.status == "done")
@@ -435,7 +435,7 @@ def create_sponsor(
     tournament_id: int,
     data: SponsorCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_pro),   # Pro plan required
 ):
     t = _check_tournament_access(tournament_id, user, db)
     sponsor = Sponsor(
@@ -459,7 +459,7 @@ def update_sponsor(
     sponsor_id: int,
     data: SponsorUpdate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_pro),   # Pro plan required
 ):
     _check_tournament_access(tournament_id, user, db)
     s = db.query(Sponsor).filter(
@@ -480,7 +480,7 @@ def delete_sponsor(
     tournament_id: int,
     sponsor_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_pro),   # Pro plan required
 ):
     _check_tournament_access(tournament_id, user, db)
     s = db.query(Sponsor).filter(
@@ -861,7 +861,15 @@ def get_standings(
             row1["losses"]         += 1
 
     # Ensure ALL enrolled participants appear even with 0 played
-    eps = db.query(EventParticipant).filter(EventParticipant.event_id == event_id).all()
+    eps = (
+        db.query(EventParticipant)
+        .filter(EventParticipant.event_id == event_id)
+        .options(
+            joinedload(EventParticipant.player),
+            joinedload(EventParticipant.team),
+        )
+        .all()
+    )
     for ep in eps:
         pid  = ep.team_id if is_team else ep.player_id
         name = ep.team.name if (is_team and ep.team) else (ep.player.name if ep.player else "Unknown")

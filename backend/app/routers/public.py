@@ -263,7 +263,7 @@ def homepage_data(
     q: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    tournaments = (
+    query = (
         db.query(Tournament)
         .filter(Tournament.is_active == True)
         .options(
@@ -271,17 +271,18 @@ def homepage_data(
             joinedload(Tournament.organization),
         )
         .order_by(Tournament.created_at.desc())
-        .all()
     )
 
     if q:
-        q_lower = q.lower()
-        tournaments = [
-            t for t in tournaments
-            if q_lower in t.name.lower()
-            or (t.city and q_lower in t.city.lower())
-            or (t.venue and q_lower in t.venue.lower())
-        ]
+        query = query.filter(
+            or_(
+                Tournament.name.ilike(f"%{q}%"),
+                Tournament.city.ilike(f"%{q}%"),
+                Tournament.venue.ilike(f"%{q}%"),
+            )
+        )
+
+    tournaments = query.all()
 
     # Single bulk query for all event stats across all tournaments
     all_event_ids = [e.event_id for t in tournaments for e in t.events if e.is_active]
@@ -357,16 +358,16 @@ def sport_page_data(
     if city:
         query = query.filter(Tournament.city.ilike(f"%{city}%"))
 
-    tournaments = query.order_by(Tournament.created_at.desc()).all()
-
     if q:
-        q_lower = q.lower()
-        tournaments = [
-            t for t in tournaments
-            if q_lower in t.name.lower()
-            or (t.city and q_lower in t.city.lower())
-            or (t.venue and q_lower in t.venue.lower())
-        ]
+        query = query.filter(
+            or_(
+                Tournament.name.ilike(f"%{q}%"),
+                Tournament.city.ilike(f"%{q}%"),
+                Tournament.venue.ilike(f"%{q}%"),
+            )
+        )
+
+    tournaments = query.order_by(Tournament.created_at.desc()).all()
 
     all_event_ids = [e.event_id for t in tournaments for e in t.events if e.is_active]
     stats = _bulk_event_stats(all_event_ids, db)
@@ -383,6 +384,76 @@ def sport_page_data(
         "sport_url":  sport_url,
         "tournaments": cards,
         "cities":     cities,
+    }
+
+
+# ── All tournaments browse ────────────────────────────────────
+
+@router.get("/tournaments")
+def browse_tournaments(
+    q:      Optional[str] = None,
+    sport:  Optional[str] = None,  # e.g. "table_tennis"
+    status: Optional[str] = None,  # live | upcoming | completed
+    city:   Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Browse / explore all public tournaments with optional filtering.
+    Used by the /tournaments page on the web frontend.
+    """
+    query = (
+        db.query(Tournament)
+        .filter(Tournament.is_active == True)
+        .options(joinedload(Tournament.events), joinedload(Tournament.organization))
+        .order_by(Tournament.created_at.desc())
+    )
+
+    # If sport filter requested, scope to tournaments that have that sport
+    if sport:
+        sport_key = SPORT_URL_MAP.get(sport, sport)  # accept both url-slug and key
+        t_ids = (
+            db.query(distinct(Event.tournament_id))
+            .filter(Event.sport_key == sport_key, Event.is_active == True)
+            .all()
+        )
+        t_id_list = [tid[0] for tid in t_ids]
+        query = query.filter(Tournament.tournament_id.in_(t_id_list))
+
+    if city:
+        query = query.filter(Tournament.city.ilike(f"%{city}%"))
+
+    if q:
+        query = query.filter(
+            or_(
+                Tournament.name.ilike(f"%{q}%"),
+                Tournament.city.ilike(f"%{q}%"),
+                Tournament.venue.ilike(f"%{q}%"),
+            )
+        )
+
+    tournaments = query.all()
+
+    all_event_ids = [e.event_id for t in tournaments for e in t.events if e.is_active]
+    stats = _bulk_event_stats(all_event_ids, db)
+
+    sport_filter_key = SPORT_URL_MAP.get(sport, sport) if sport else None
+    cards = [_build_tournament_card(t, stats, sport_filter=sport_filter_key) for t in tournaments]
+    cards = [c for c in cards if c["events"]]
+
+    # Client-side status filter applied here (same pattern as sport page)
+    if status:
+        cards = [c for c in cards if c["status"] == status]
+
+    order = {"live": 0, "upcoming": 1, "completed": 2}
+    cards.sort(key=lambda c: (order.get(c["status"], 1), -c["total_matches"]))
+
+    # Unique cities across all (unfiltered) result set for filter dropdown
+    cities = sorted(set(t.city for t in tournaments if t.city))
+
+    return {
+        "tournaments": cards,
+        "total":       len(cards),
+        "cities":      cities,
     }
 
 
@@ -411,6 +482,7 @@ def get_tournament_page(slug: str, db: Session = Depends(get_db)):
             db.query(Match).filter(Match.event_id == event.event_id)
             .options(
                 joinedload(Match.participants).joinedload(MatchParticipant.player),
+                joinedload(Match.participants).joinedload(MatchParticipant.team),
                 joinedload(Match.sets))
             .order_by(Match.stage, Match.round, Match.match_id).all()
         )
@@ -423,6 +495,8 @@ def get_tournament_page(slug: str, db: Session = Depends(get_db)):
             "is_configured":     event.is_configured,
             "status":            event.status,
             "sport_config":      event.sport_config,
+            "team_size":         event.team_size,    # football: players on field
+            "squad_size":        event.squad_size,   # cricket: roster size
             "total_matches":     len(matches),
             "completed_matches": sum(1 for m in matches if m.status == "done"),
             "live_matches":      [_serialize_match(m) for m in matches if m.status == "live"],
@@ -490,6 +564,7 @@ def get_tournament_by_sport(
             db.query(Match).filter(Match.event_id == event.event_id)
             .options(
                 joinedload(Match.participants).joinedload(MatchParticipant.player),
+                joinedload(Match.participants).joinedload(MatchParticipant.team),
                 joinedload(Match.sets))
             .order_by(Match.stage, Match.round, Match.match_id).all()
         )
@@ -502,6 +577,8 @@ def get_tournament_by_sport(
             "is_configured":     event.is_configured,
             "status":            event.status,
             "sport_config":      event.sport_config,
+            "team_size":         event.team_size,    # football: players on field
+            "squad_size":        event.squad_size,   # cricket: roster size
             "total_matches":     len(matches),
             "completed_matches": sum(1 for m in matches if m.status == "done"),
             "live_matches":      [_serialize_match(m) for m in matches if m.status == "live"],

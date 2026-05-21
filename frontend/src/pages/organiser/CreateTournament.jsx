@@ -7,10 +7,10 @@ import VenuePicker from "../../components/shared/VenuePicker";
 
 // ── Sport definitions ─────────────────────────────────────────
 const SPORTS = [
-  { key: "table_tennis", label: "Table Tennis", abbrev: "TT" },
-  { key: "badminton",    label: "Badminton",    abbrev: "BD" },
-  { key: "cricket",      label: "Cricket",      abbrev: "CR" },
-  { key: "football",     label: "Football",     abbrev: "FB" },
+  { key: "table_tennis", label: "Table Tennis", abbrev: "🏓" },
+  { key: "badminton",    label: "Badminton",    abbrev: "🏸" },
+  { key: "cricket",      label: "Cricket",      abbrev: "🏏" },
+  { key: "football",     label: "Football",     abbrev: "⚽" },
 ];
 
 const SPORT_SUBFORMATS = {

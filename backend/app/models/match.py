@@ -16,12 +16,12 @@ class Match(Base):
     __tablename__ = "matches"
 
     match_id = Column(Integer, primary_key=True)
-    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.event_id", ondelete="CASCADE"), nullable=False, index=True)
     group_id = Column(Integer, ForeignKey("groups.group_id", ondelete="SET NULL"), nullable=True)
 
     round = Column(Integer, nullable=False, default=1)
     stage = Column(String(50), default="group")  # group | quarter | semi | third_place | final
-    status = Column(String(50), default="scheduled")  # scheduled | live | done
+    status = Column(String(50), default="scheduled", index=True)  # scheduled | live | done
     table_number = Column(Integer, nullable=True)
     court_number = Column(Integer, nullable=True)  # for badminton/tennis
 
@@ -63,7 +63,7 @@ class MatchParticipant(Base):
     __tablename__ = "match_participants"
 
     mp_id = Column(Integer, primary_key=True)
-    match_id = Column(Integer, ForeignKey("matches.match_id", ondelete="CASCADE"), nullable=False)
+    match_id = Column(Integer, ForeignKey("matches.match_id", ondelete="CASCADE"), nullable=False, index=True)
 
     # One of these is set
     player_id = Column(Integer, ForeignKey("players.player_id", ondelete="CASCADE"), nullable=True)
@@ -91,7 +91,7 @@ class MatchSet(Base):
     __tablename__ = "match_sets"
 
     set_id = Column(Integer, primary_key=True)
-    match_id = Column(Integer, ForeignKey("matches.match_id", ondelete="CASCADE"), nullable=False)
+    match_id = Column(Integer, ForeignKey("matches.match_id", ondelete="CASCADE"), nullable=False, index=True)
     set_number = Column(Integer, nullable=False)  # 1, 2, 3, ...
     score_p1 = Column(Integer, default=0)
     score_p2 = Column(Integer, default=0)

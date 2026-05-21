@@ -6,10 +6,10 @@ export const SPORT_LABELS = {
 };
 
 export const SPORT_ICONS = {
-  table_tennis: "TT",
-  badminton:    "BD",
-  cricket:      "CR",
-  football:     "FB",
+  table_tennis: "🏓",
+  badminton:    "🏸",
+  cricket:      "🏏",
+  football:     "⚽",
 };
 
 // Sport accent colors for top-strip

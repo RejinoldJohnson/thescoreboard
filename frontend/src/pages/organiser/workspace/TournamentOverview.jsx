@@ -15,10 +15,10 @@ const LIFECYCLE_LABELS = {
 };
 
 const SPORT_META = {
-  table_tennis: { abbrev: "TT", label: "Table Tennis", type: "individual" },
-  badminton:    { abbrev: "BD", label: "Badminton",    type: "individual" },
-  cricket:      { abbrev: "CR", label: "Cricket",      type: "team"       },
-  football:     { abbrev: "FB", label: "Football",     type: "team"       },
+  table_tennis: { abbrev: "🏓", label: "Table Tennis", type: "individual" },
+  badminton:    { abbrev: "🏸", label: "Badminton",    type: "individual" },
+  cricket:      { abbrev: "🏏", label: "Cricket",      type: "team"       },
+  football:     { abbrev: "⚽", label: "Football",     type: "team"       },
 };
 
 const STATUS_PILL = {
@@ -255,7 +255,28 @@ export default function TournamentOverview() {
         </div>
 
         {/* ── BRANDING ── */}
-        <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card" style={{ marginBottom: 20, position: "relative" }}>
+          {user?.plan !== "pro" && (
+            <div style={{
+              position: "absolute", inset: 0, zIndex: 10, borderRadius: "inherit",
+              background: "var(--surface)", opacity: 0.92,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8,
+            }}>
+              <span style={{ fontSize: 22 }}>🔒</span>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1, color: "var(--ink)" }}>Pro Feature</div>
+              <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", maxWidth: 220 }}>
+                Custom banners &amp; logos require a Pro account.
+              </div>
+              <a href="mailto:hi@thescoreboard.in?subject=Upgrade to Pro" style={{
+                marginTop: 4, padding: "7px 18px", borderRadius: 8,
+                background: "#f59e0b", color: "#fff", fontFamily: "var(--font-display)",
+                fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1,
+                textDecoration: "none",
+              }}>
+                Upgrade →
+              </a>
+            </div>
+          )}
           <div className="card-title" style={{ marginBottom: 2 }}>Branding</div>
           <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 16 }}>
             Images are automatically cropped to the correct size before upload.
@@ -306,12 +327,36 @@ export default function TournamentOverview() {
         </div>
 
         {/* ── SPONSORS ── */}
-        <SponsorsSection
-          tournamentId={t.tournament_id}
-          sponsors={t.sponsors || []}
-          onRefresh={loadData}
-          flash={flash}
-        />
+        <div style={{ position: "relative", marginBottom: user?.plan !== "pro" ? 20 : 0 }}>
+          {user?.plan !== "pro" && (
+            <div style={{
+              position: "absolute", inset: 0, zIndex: 10, borderRadius: 12,
+              background: "var(--surface)", opacity: 0.92,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8,
+              border: "1px solid var(--border)",
+            }}>
+              <span style={{ fontSize: 22 }}>🔒</span>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1, color: "var(--ink)" }}>Pro Feature</div>
+              <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", maxWidth: 220 }}>
+                Sponsors require a Pro account.
+              </div>
+              <a href="mailto:hi@thescoreboard.in?subject=Upgrade to Pro" style={{
+                marginTop: 4, padding: "7px 18px", borderRadius: 8,
+                background: "#f59e0b", color: "#fff", fontFamily: "var(--font-display)",
+                fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: 1,
+                textDecoration: "none",
+              }}>
+                Upgrade →
+              </a>
+            </div>
+          )}
+          <SponsorsSection
+            tournamentId={t.tournament_id}
+            sponsors={t.sponsors || []}
+            onRefresh={loadData}
+            flash={flash}
+          />
+        </div>
 
         {/* ── INFO & RULES ── */}
         <div style={{ marginBottom: 28 }}>
