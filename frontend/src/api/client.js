@@ -110,6 +110,15 @@ export const deleteMatch = (mId) => request("DELETE", `/matches/${mId}`);
 
 // Public
 export const getHomepageData = (q) => request("GET", `/public/home${q ? `?q=${encodeURIComponent(q)}` : ""}`);
+export const getAllTournaments = ({ q, sport, status, city } = {}) => {
+  const qs = new URLSearchParams();
+  if (q)      qs.set("q",      q);
+  if (sport)  qs.set("sport",  sport);
+  if (status) qs.set("status", status);
+  if (city)   qs.set("city",   city);
+  const str = qs.toString();
+  return request("GET", `/public/tournaments${str ? `?${str}` : ""}`);
+};
 export const getSportPageData = (u, city, q) => {
   let qs = []; if (city) qs.push(`city=${encodeURIComponent(city)}`); if (q) qs.push(`q=${encodeURIComponent(q)}`);
   return request("GET", `/public/sport/${u}${qs.length ? "?" + qs.join("&") : ""}`);

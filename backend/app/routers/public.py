@@ -387,6 +387,76 @@ def sport_page_data(
     }
 
 
+# ── All tournaments browse ────────────────────────────────────
+
+@router.get("/tournaments")
+def browse_tournaments(
+    q:      Optional[str] = None,
+    sport:  Optional[str] = None,  # e.g. "table_tennis"
+    status: Optional[str] = None,  # live | upcoming | completed
+    city:   Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Browse / explore all public tournaments with optional filtering.
+    Used by the /tournaments page on the web frontend.
+    """
+    query = (
+        db.query(Tournament)
+        .filter(Tournament.is_active == True)
+        .options(joinedload(Tournament.events), joinedload(Tournament.organization))
+        .order_by(Tournament.created_at.desc())
+    )
+
+    # If sport filter requested, scope to tournaments that have that sport
+    if sport:
+        sport_key = SPORT_URL_MAP.get(sport, sport)  # accept both url-slug and key
+        t_ids = (
+            db.query(distinct(Event.tournament_id))
+            .filter(Event.sport_key == sport_key, Event.is_active == True)
+            .all()
+        )
+        t_id_list = [tid[0] for tid in t_ids]
+        query = query.filter(Tournament.tournament_id.in_(t_id_list))
+
+    if city:
+        query = query.filter(Tournament.city.ilike(f"%{city}%"))
+
+    if q:
+        query = query.filter(
+            or_(
+                Tournament.name.ilike(f"%{q}%"),
+                Tournament.city.ilike(f"%{q}%"),
+                Tournament.venue.ilike(f"%{q}%"),
+            )
+        )
+
+    tournaments = query.all()
+
+    all_event_ids = [e.event_id for t in tournaments for e in t.events if e.is_active]
+    stats = _bulk_event_stats(all_event_ids, db)
+
+    sport_filter_key = SPORT_URL_MAP.get(sport, sport) if sport else None
+    cards = [_build_tournament_card(t, stats, sport_filter=sport_filter_key) for t in tournaments]
+    cards = [c for c in cards if c["events"]]
+
+    # Client-side status filter applied here (same pattern as sport page)
+    if status:
+        cards = [c for c in cards if c["status"] == status]
+
+    order = {"live": 0, "upcoming": 1, "completed": 2}
+    cards.sort(key=lambda c: (order.get(c["status"], 1), -c["total_matches"]))
+
+    # Unique cities across all (unfiltered) result set for filter dropdown
+    cities = sorted(set(t.city for t in tournaments if t.city))
+
+    return {
+        "tournaments": cards,
+        "total":       len(cards),
+        "cities":      cities,
+    }
+
+
 # ── Tournament detail (all sports) ───────────────────────────
 
 @router.get("/t/{slug}")

@@ -170,6 +170,10 @@
      0%   { background-position: -400px 0; }
      100% { background-position: 400px 0; }
    }
+   @keyframes ticker {
+     from { transform: translateX(0); }
+     to   { transform: translateX(-50%); }
+   }
    
    /* ── Typography ───────────────────────────────────────────── */
    .display {

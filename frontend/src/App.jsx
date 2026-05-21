@@ -4,6 +4,7 @@ import { isLoggedIn, saveLoginRedirect } from "./api/client";
 // Public
 import Landing             from "./pages/Landing";
 import SportPage           from "./pages/SportPage";
+import Tournaments         from "./pages/Tournaments";
 import TournamentPublic    from "./pages/TournamentPublic";
 import TournamentRegister  from "./pages/TournamentRegister";
 import Login               from "./pages/auth/Login";
@@ -44,6 +45,7 @@ export default function App() {
       <Routes>
         {/* Public */}
         <Route path="/"                              element={<Landing />} />
+        <Route path="/tournaments"                   element={<Tournaments />} />
         <Route path="/football"                      element={<SportPage />} />
         <Route path="/cricket"                       element={<SportPage />} />
         <Route path="/table-tennis"                  element={<SportPage />} />
