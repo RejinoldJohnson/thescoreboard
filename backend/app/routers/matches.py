@@ -459,7 +459,14 @@ def update_score(
             None
         )
         if not current_set:
-            raise HTTPException(status_code=400, detail="No active set — match may be over")
+            if match.status == "done":
+                raise HTTPException(status_code=400, detail="No active set — match may be over")
+            # No active set but match is still live/scheduled — initial set was never created
+            # (e.g. fixture generated before this fix, or rematch edge case). Create it now.
+            next_num = max((s.set_number for s in match.sets), default=0) + 1
+            current_set = MatchSet(match_id=match.match_id, set_number=next_num)
+            db.add(current_set)
+            db.flush()
 
         current_set.score_p1 = data.score_p1
         current_set.score_p2 = data.score_p2
@@ -484,7 +491,10 @@ def update_score(
                 _finish_match(match, match_winner, db)
             else:
                 next_num = max(s.set_number for s in match.sets) + 1
-                db.add(MatchSet(match_id=match.match_id, set_number=next_num))
+                new_set  = MatchSet(match_id=match.match_id, set_number=next_num)
+                db.add(new_set)
+                db.flush()                    # assign set_id
+                match.sets.append(new_set)    # keep in-memory list in sync so _serialize_match sees it
 
         # Update aggregate scores (sets won)
         parts = sorted(match.participants, key=lambda p: p.position)
@@ -746,7 +756,7 @@ def walkover_match(
 
     parts = sorted(match.participants, key=lambda p: p.position)
 
-    if engine.has_sets:
+    if hasattr(engine, "check_set_winner"):
         # Set-based sports (TT, Badminton): create N walkover sets, winner gets pts-0 each
         for i in range(1, sets_to_win + 1):
             db.add(MatchSet(
@@ -863,7 +873,7 @@ def rematch(
     db.flush()
 
     engine = get_sport_engine(event.sport_key)
-    if getattr(engine, "has_sets", False):
+    if hasattr(engine, "check_set_winner"):
         db.add(MatchSet(match_id=match.match_id, set_number=1))
 
     db.flush()

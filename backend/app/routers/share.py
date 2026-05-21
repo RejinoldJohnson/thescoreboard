@@ -62,21 +62,38 @@ def _og_redirect_html(
     url: str,
 ) -> str:
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" prefix="og: https://ogp.me/ns#">
 <head>
   <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{title}</title>
+
+  <!-- ── Primary meta ───────────────────────────── -->
+  <meta name="description"        content="{description}"/>
+
+  <!-- ── Open Graph (Facebook, Instagram, WhatsApp, LinkedIn) ── -->
+  <meta property="og:site_name"   content="TheScoreBoard"/>
+  <meta property="og:type"        content="website"/>
+  <meta property="og:locale"      content="en_IN"/>
+  <meta property="og:url"         content="{url}"/>
   <meta property="og:title"       content="{title}"/>
   <meta property="og:description" content="{description}"/>
   <meta property="og:image"       content="{image_url}"/>
+  <meta property="og:image:secure_url" content="{image_url}"/>
+  <meta property="og:image:type"  content="image/png"/>
   <meta property="og:image:width" content="1200"/>
   <meta property="og:image:height" content="630"/>
-  <meta property="og:url"         content="{url}"/>
-  <meta property="og:type"        content="website"/>
-  <meta name="twitter:card"       content="summary_large_image"/>
-  <meta name="twitter:title"      content="{title}"/>
+  <meta property="og:image:alt"   content="{title}"/>
+
+  <!-- ── Twitter / X ───────────────────────────── -->
+  <meta name="twitter:card"        content="summary_large_image"/>
+  <meta name="twitter:site"        content="@thescoreboardin"/>
+  <meta name="twitter:title"       content="{title}"/>
   <meta name="twitter:description" content="{description}"/>
-  <meta name="twitter:image"      content="{image_url}"/>
+  <meta name="twitter:image"       content="{image_url}"/>
+  <meta name="twitter:image:alt"   content="{title}"/>
+
+  <!-- ── Redirect users to the app (crawlers stop at meta tags) ── -->
   <script>window.location.replace("{redirect_url}")</script>
 </head>
 <body>
@@ -189,7 +206,9 @@ def share_match(request: Request, match_id: int, db: Session = Depends(get_db)):
 
     title = f"{t1} vs {t2}"
     event_name = match.event.name if match.event else ""
-    description = f"{event_name} · Live on TheScoreBoard" if event_name else "Live on TheScoreBoard"
+    t_name = match.event.tournament.name if (match.event and match.event.tournament) else ""
+    parts  = [p for p in [t_name, event_name, "Live on TheScoreBoard"] if p]
+    description = " · ".join(parts)
 
     tournament_slug = match.event.tournament.slug if (match.event and match.event.tournament) else "tournament"
 

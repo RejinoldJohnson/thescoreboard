@@ -495,6 +495,8 @@ def get_tournament_page(slug: str, db: Session = Depends(get_db)):
             "is_configured":     event.is_configured,
             "status":            event.status,
             "sport_config":      event.sport_config,
+            "team_size":         event.team_size,    # football: players on field
+            "squad_size":        event.squad_size,   # cricket: roster size
             "total_matches":     len(matches),
             "completed_matches": sum(1 for m in matches if m.status == "done"),
             "live_matches":      [_serialize_match(m) for m in matches if m.status == "live"],
@@ -575,6 +577,8 @@ def get_tournament_by_sport(
             "is_configured":     event.is_configured,
             "status":            event.status,
             "sport_config":      event.sport_config,
+            "team_size":         event.team_size,    # football: players on field
+            "squad_size":        event.squad_size,   # cricket: roster size
             "total_matches":     len(matches),
             "completed_matches": sum(1 for m in matches if m.status == "done"),
             "live_matches":      [_serialize_match(m) for m in matches if m.status == "live"],

@@ -49,7 +49,9 @@ export const login = (d) => request("POST", "/auth/login", d);
 export const googleAuth = (accessToken) => request("POST", "/auth/google", { access_token: accessToken });
 export const getMe             = ()  => request("GET", "/auth/me");
 export const getPlayerProfile  = ()  => request("GET", "/auth/player-profile");
-export const savePlayerProfile = (d) => request("PUT", "/auth/player-profile", d);
+export const savePlayerProfile  = (d) => request("PUT",  "/auth/player-profile", d);
+export const getMyTournaments   = ()  => request("GET",  "/auth/my-tournaments");
+export const getMyStats         = ()  => request("GET",  "/auth/my-stats");
 
 // Orgs
 export const createOrg = (d) => request("POST", "/orgs/", d);
